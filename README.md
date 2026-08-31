@@ -1,81 +1,179 @@
-# Cuti Video Agent Harness
+# Video Agent Harness
 
 English | [中文](README.zh.md)
 
-Cuti Video Agent Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It combines DeepSeek's conversation and tool-selection runtime with Cuti's video project, timeline, media workflow, and artifact runtime.
+Video Agent Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). DeepSeek owns the conversation, agent loop, and high-level tool selection. Cuti's Video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
 
-It uses DeepSeek Harness's Cordis plugin architecture and adds an incremental media build model: a change invalidates only affected artifacts, retains reusable outputs, validates continuity, and commits one immutable project version.
+The primary product UI is Video Studio. Its `/create/:threadId` workspace keeps the DeepSeek chat on the left and generated scripts, images, clips, audio, build progress, and final video on the right.
 
-## Video architecture
+## Architecture
 
-DeepSeek Harness owns sessions, prompts, the agent loop, and high-level tool selection. The Python Video Runtime is the authoritative store for projects, artifact dependencies, builds, timelines, validation results, and project versions. Video Studio remains the video-native frontend.
-
-The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without changing the DeepSeek `agent-loop`. See the [Video Agent Harness reference](docs/video-agent-harness.md).
-
-## Local video stack
-
-Start Postgres, the incremental Video Runtime, the isolated Sandbox Worker, and Video Studio:
-
-```sh
-docker compose -f compose.video.yml up --build
+```text
+Video Studio (:3000)
+  |-- /chat-v1 and /api/video
+  v
+Video Runtime + compatibility BFF (:8001)
+  |-- projects, Skills, artifacts, builds, versions
+  |-- media service and sandbox worker
+  v
+DeepSeek Harness (:3080)
+  |-- LLM conversation and video_* tool selection
+  v
+Provider / Workflow / Validator / Media plugins
 ```
 
-Video Studio is available at `http://127.0.0.1:3000/video`, and the Video Runtime is available at `http://127.0.0.1:8001`. Start DeepSeek Web from the checkout with the video bundle when conversational control is required:
-
-```sh
-pnpm install
-pnpm run build
-VIDEO_RUNTIME_URL=http://127.0.0.1:8001 VIDEO_RUNTIME_SERVICE_TOKEN=video-harness-runtime-local pnpm dsh web --patch packages/bundle/video-agent/cordis.patch.yml
-```
-
-## Developer preview
-
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Video Agent Harness reference](docs/video-agent-harness.md) for the architecture in detail.
 
 ## Run
 
-### Run from `npm`
-
-Install `Node.js`, then run:
-
-```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
-
 ### Run from source
 
-To run from a repository checkout:
+#### Prerequisites
+
+- Git.
+- Docker Desktop or Docker Engine with Docker Compose v2. Use Linux containers on Windows.
+- Node.js `22.19+` (or `24+`) and Corepack.
+- At least one OpenAI API key for conversation and planning.
+
+For a real default video build, also configure either `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by workflows that generate music. Other provider keys are optional.
+
+#### 1. Clone and configure
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
-pnpm dsh web
+git clone https://github.com/blackzipper-hub/Video-agent-harness.git
+cd Video-agent-harness
+cp .env.example .env
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Open `.env` and fill in your keys. Never commit that file.
 
-## Community and support
+Minimum useful configuration:
 
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+```dotenv
+OPENAI_API_KEY=your-openai-key
+WAVESPEED_API_KEY=your-wavespeed-key
+```
 
-## Contributing
+The UI and local APIs can start without paid-provider keys, but chat or media generation will fail only when the corresponding capability is invoked.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+#### 2. Start the video services
 
-## Development
+```sh
+docker compose --env-file .env -f compose.video.yml up --build -d
+docker compose -f compose.video.yml ps
+```
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+This starts Postgres, applies database migrations, and starts Video Runtime, Media Service, Sandbox Worker, and Video Studio. Wait until `video-runtime`, `media-service`, and `sandbox-worker` are healthy.
 
-For agents, follow [AGENTS.md](AGENTS.md).
+Verify the Runtime:
+
+```sh
+curl http://127.0.0.1:8001/health
+```
+
+The expected response is `{"status":"healthy"}`.
+
+#### 3. Build and start DeepSeek Harness
+
+Run this once after cloning:
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+The DeepSeek process must receive the OpenAI key from the shell. On macOS or Linux:
+
+```sh
+export OPENAI_API_KEY="your-openai-key"
+export VIDEO_AGENT_MODEL="gpt-5.6-terra"
+export VIDEO_RUNTIME_URL="http://127.0.0.1:8001"
+export VIDEO_RUNTIME_SERVICE_TOKEN="video-harness-runtime-local"
+pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OPENAI_API_KEY = "your-openai-key"
+$env:VIDEO_AGENT_MODEL = "gpt-5.6-terra"
+$env:VIDEO_RUNTIME_URL = "http://127.0.0.1:8001"
+$env:VIDEO_RUNTIME_SERVICE_TOKEN = "video-harness-runtime-local"
+pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
+```
+
+Keep this terminal running. DeepSeek Harness listens at `http://127.0.0.1:3080` by default.
+
+#### 4. Open the product
+
+Open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create).
+
+Video Studio at port `3000` is the main video creation and editing UI. Port `3080` exposes the generic DeepSeek Harness UI, and port `8001` exposes the Runtime API.
+
+Try a low-cost first prompt such as:
+
+> Create a 10-second, two-shot cinematic video of a robot watering one flower at sunrise. Use the same robot in both shots, no narration, and export the final MP4.
+
+## Development mode
+
+To run Video Studio with Vite hot reload, keep the Docker services and DeepSeek Harness running, then use a third terminal:
+
+```sh
+cd apps/video-studio
+cp .env.example .env.local
+```
+
+Set these values in `apps/video-studio/.env.local`:
+
+```dotenv
+VITE_VIDEO_RUNTIME_URL=http://127.0.0.1:8001
+VITE_VIDEOCHAT_URL=http://127.0.0.1:8001
+VITE_CUTI_BACKEND_URL=http://127.0.0.1:8001
+VITE_BACKEND_URL=http://127.0.0.1:8001
+```
+
+Return to the repository root and start Vite:
+
+```sh
+pnpm --filter @cuti-ai/video-studio run dev
+```
+
+Open [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create).
+
+## Common problems
+
+| Symptom | Check |
+| --- | --- |
+| The UI opens but sending a prompt has no response | Confirm DeepSeek Harness is still running on port `3080` and `OPENAI_API_KEY` is set in that terminal. |
+| `401`, `NO_AUTH`, or model authentication error | The `.env` file is used by Docker, but is not automatically loaded into the DeepSeek terminal. Export `OPENAI_API_KEY` there. |
+| Video or image generation fails | Configure the provider key required by the selected workflow; the default Seedance path needs `WAVESPEED_API_KEY` or `ARK_API_KEY`. |
+| Build remains queued or the Runtime is unavailable | Run `docker compose -f compose.video.yml ps` and inspect `docker compose -f compose.video.yml logs video-runtime`. |
+| Port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, or `18080`. Keep URLs and proxy settings consistent. |
+| Sandbox Worker is unhealthy on Windows | Ensure Docker Desktop is using Linux containers and allows access to the Docker socket. |
+| Node model calls time out behind a proxy | Set `HTTP_PROXY`, `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` in the DeepSeek terminal. |
+
+Stop the Docker stack with:
+
+```sh
+docker compose -f compose.video.yml down
+```
+
+Add `-v` only when you intentionally want to delete the local Postgres and generated-media volumes.
+
+## Tests
+
+```sh
+pnpm --filter @cuti-ai/video-studio run build
+python -m unittest discover -s services/video-runtime/tests/video_runtime -v
+```
+
+The repository also retains the broader DeepSeek Harness checks. See [development](docs/development.md) and [contributing](CONTRIBUTING.md).
+
+## Project status
+
+This project is in developer preview and can introduce compatibility-breaking changes. Provider calls may incur real costs. Start with short videos and low-cost test prompts.
 
 ## License
 
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). DeepSeek and imported Cuti provenance is documented in [source provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

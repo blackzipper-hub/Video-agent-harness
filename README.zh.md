@@ -1,102 +1,179 @@
-# Cuti Video Agent Harness
+# Video Agent Harness
 
 [English](README.md) | 中文
 
-Cuti Video Agent Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 构建、面向长期视频项目的开源 video agent harness。它将 DeepSeek 的对话与工具选择运行时和 Cuti 的视频项目、时间线、媒体工作流及产物运行时组合在一起。
+Video Agent Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源、项目型视频 Agent Harness。DeepSeek 负责对话、Agent Loop 和高层工具选择；Cuti Video Runtime 负责持久化项目、Skill、Artifact 依赖、增量构建、时间线、校验和导出。
 
-它沿用 DeepSeek Harness 的 Cordis 插件架构，并增加增量媒体构建模型：一次修改只让受影响的产物失效，同时保留可复用输出、检查连续性，并提交一个不可变作品版本。
+主要产品界面是 Video Studio。它的 `/create/:threadId` 工作区左侧展示 DeepSeek 对话，右侧展示已经生成的剧本、图片、视频片段、音频、构建进度和最终视频。
 
-## 视频架构
+## 架构
 
-DeepSeek Harness 负责 Session、提示词、agent loop 和高层工具选择。Python Video Runtime 是项目、产物依赖、Build、时间线、校验结果与作品版本的唯一事实来源。Video Studio 继续作为视频原生前端。
-
-集成通过 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle` 完成，不修改 DeepSeek `agent-loop`。详见 [Video Agent Harness 参考](docs/video-agent-harness.zh.md)。
-
-## 本地视频服务
-
-启动 Postgres、增量 Video Runtime、隔离 Sandbox Worker 和 Video Studio：
-
-```sh
-docker compose -f compose.video.yml up --build
+```text
+Video Studio (:3000)
+  |-- /chat-v1 and /api/video
+  v
+Video Runtime + compatibility BFF (:8001)
+  |-- projects, Skills, artifacts, builds, versions
+  |-- media service and sandbox worker
+  v
+DeepSeek Harness (:3080)
+  |-- LLM conversation and video_* tool selection
+  v
+Provider / Workflow / Validator / Media plugins
 ```
 
-Video Studio 地址是 `http://127.0.0.1:3000/video`，Video Runtime 地址是 `http://127.0.0.1:8001`。需要对话控制时，从源码目录加载视频 bundle 并启动 DeepSeek Web：
+本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Video Agent Harness 架构说明](docs/video-agent-harness.zh.md)。
+
+## Run
+
+### Run from source
+
+#### 前置条件
+
+- Git。
+- Docker Desktop，或安装了 Docker Compose v2 的 Docker Engine。Windows 需要使用 Linux 容器。
+- Node.js `22.19+`（或 `24+`）以及 Corepack。
+- 至少一个 OpenAI API Key，用于对话和规划。
+
+如果要进行真实的默认视频构建，还需要配置 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`。只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`，其他 Provider Key 均为可选。
+
+#### 1. 克隆并配置
 
 ```sh
-pnpm install
+git clone https://github.com/blackzipper-hub/Video-agent-harness.git
+cd Video-agent-harness
+cp .env.example .env
+```
+
+Windows PowerShell 请用 `Copy-Item .env.example .env` 代替 `cp`。随后打开 `.env` 填写 Key，不要提交该文件。
+
+最小可用配置：
+
+```dotenv
+OPENAI_API_KEY=your-openai-key
+WAVESPEED_API_KEY=your-wavespeed-key
+```
+
+即使没有付费 Provider Key，也可以启动界面和本地 API；只有在调用对应的对话或媒体生成能力时才会失败。
+
+#### 2. 启动视频服务
+
+```sh
+docker compose --env-file .env -f compose.video.yml up --build -d
+docker compose -f compose.video.yml ps
+```
+
+该命令会启动 Postgres、执行数据库迁移，并启动 Video Runtime、Media Service、Sandbox Worker 和 Video Studio。等待 `video-runtime`、`media-service` 和 `sandbox-worker` 进入健康状态。
+
+验证 Runtime：
+
+```sh
+curl http://127.0.0.1:8001/health
+```
+
+预期响应为 `{"status":"healthy"}`。
+
+#### 3. 构建并启动 DeepSeek Harness
+
+首次克隆后执行一次：
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
 pnpm run build
-VIDEO_RUNTIME_URL=http://127.0.0.1:8001 VIDEO_RUNTIME_SERVICE_TOKEN=video-harness-runtime-local pnpm dsh web --patch packages/bundle/video-agent/cordis.patch.yml
 ```
 
-## 开发者预览
-
-DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
-
-<a id="run"></a>
-
-## 运行
-
-### 通过 `npm` 运行
-
-安装 `Node.js`，然后运行：
+DeepSeek 进程必须从启动它的终端读取 OpenAI Key。macOS 或 Linux：
 
 ```sh
-npx @deepseek-ai/dsh web
+export OPENAI_API_KEY="your-openai-key"
+export VIDEO_AGENT_MODEL="gpt-5.6-terra"
+export VIDEO_RUNTIME_URL="http://127.0.0.1:8001"
+export VIDEO_RUNTIME_SERVICE_TOKEN="video-harness-runtime-local"
+pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
 ```
 
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+Windows PowerShell：
 
-<a id="run-from-source"></a>
+```powershell
+$env:OPENAI_API_KEY = "your-openai-key"
+$env:VIDEO_AGENT_MODEL = "gpt-5.6-terra"
+$env:VIDEO_RUNTIME_URL = "http://127.0.0.1:8001"
+$env:VIDEO_RUNTIME_SERVICE_TOKEN = "video-harness-runtime-local"
+pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
+```
 
-### 从源码运行
+保持这个终端运行。DeepSeek Harness 默认监听 `http://127.0.0.1:3080`。
 
-如需从仓库源码运行：
+#### 4. 打开产品
+
+访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。
+
+端口 `3000` 的 Video Studio 是主要视频生成和编辑界面；端口 `3080` 是通用 DeepSeek Harness 界面；端口 `8001` 是 Video Runtime API。
+
+可以先用下面的低成本 Prompt 测试：
+
+> 制作一个 10 秒、两个镜头的电影感视频：日出时，一个机器人给一朵花浇水。两个镜头保持同一个机器人，不要旁白，并导出最终 MP4。
+
+## 开发模式
+
+如果需要使用 Vite 热更新，请保持 Docker 服务和 DeepSeek Harness 运行，然后在第三个终端执行：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
-pnpm dsh web
+cd apps/video-studio
+cp .env.example .env.local
 ```
 
-`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+Windows PowerShell 同样可以使用 `Copy-Item .env.example .env.local`。在 `apps/video-studio/.env.local` 中设置：
 
-## 社区与支持
+```dotenv
+VITE_VIDEO_RUNTIME_URL=http://127.0.0.1:8001
+VITE_VIDEOCHAT_URL=http://127.0.0.1:8001
+VITE_CUTI_BACKEND_URL=http://127.0.0.1:8001
+VITE_BACKEND_URL=http://127.0.0.1:8001
+```
 
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
-- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
+回到仓库根目录启动 Vite：
 
-<table>
-  <thead>
-    <tr>
-      <th align="center">企微小助手</th>
-      <th align="center">入群问卷</th>
-      <th align="center">微信公众号</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
+```sh
+pnpm --filter @cuti-ai/video-studio run dev
+```
 
-## 参与贡献
+访问 [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create)。
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.zh.md)。
+## 常见问题
 
-## 开发
+| 现象 | 检查项 |
+| --- | --- |
+| 页面能打开，但发送 Prompt 后没有响应 | 确认 DeepSeek Harness 仍在端口 `3080` 运行，并且启动它的终端设置了 `OPENAI_API_KEY`。 |
+| 出现 `401`、`NO_AUTH` 或模型认证错误 | `.env` 会交给 Docker，但不会自动加载到 DeepSeek 终端；需要在该终端导出 `OPENAI_API_KEY`。 |
+| 图片或视频生成失败 | 配置所选 Workflow 需要的 Provider Key；默认 Seedance 路径需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`。 |
+| Build 一直排队或 Runtime 不可用 | 执行 `docker compose -f compose.video.yml ps`，并查看 `docker compose -f compose.video.yml logs video-runtime`。 |
+| 端口已被占用 | 释放或映射端口 `3000`、`3080`、`8001`、`8090` 或 `18080`，并保持 URL 和代理配置一致。 |
+| Windows 上 Sandbox Worker 不健康 | 确认 Docker Desktop 使用 Linux 容器，并允许访问 Docker Socket。 |
+| 使用代理时 Node 模型请求超时 | 在 DeepSeek 终端设置 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`。 |
 
-请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
+停止 Docker 服务：
 
-面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
+```sh
+docker compose -f compose.video.yml down
+```
+
+只有在确定要删除本地 Postgres 数据和已生成媒体卷时，才增加 `-v`。
+
+## 测试
+
+```sh
+pnpm --filter @cuti-ai/video-studio run build
+python -m unittest discover -s services/video-runtime/tests/video_runtime -v
+```
+
+仓库同时保留 DeepSeek Harness 的完整检查。更多说明见[开发文档](docs/development.zh.md)和[贡献指南](CONTRIBUTING.zh.md)。
+
+## 项目状态
+
+项目目前处于开发者预览阶段，可能出现不兼容变更。Provider 调用可能产生真实费用，请先使用短视频和低成本 Prompt 测试。
 
 ## 许可证
 
-[MIT](LICENSE)
-
-第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[MIT](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录在[源码来源说明](docs/source-provenance.zh.md)中；第三方依赖及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
