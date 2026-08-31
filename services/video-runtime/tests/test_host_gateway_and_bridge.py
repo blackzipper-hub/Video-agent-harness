@@ -1,0 +1,451 @@
+"""Tests for host gateway + provider bridge resolution (no live network)."""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from app.chat.v2.host_gateway import HostGateway, HostGatewayError, host_allowed
+from app.chat.v2.provider_bridge import (
+    ProviderGenerateError,
+    _classify_wavespeed_failure,
+    _model_family,
+    resolve_provider,
+)
+from app.chat.v2.sandbox_client import SandboxClient
+from app.chat.v2.skill_catalog import SkillCatalog
+from app.chat.v2.capability_loader import build_registry
+from app.chat.v2.executors import CapabilityExecutor
+from app.chat.v2.models import ArtifactVersion
+
+
+def test_host_allowed_exact_and_subdomain():
+    assert host_allowed("api.wavespeed.ai", ["api.wavespeed.ai"])
+    assert host_allowed("cdn.api.wavespeed.ai", ["api.wavespeed.ai"]) is False
+    assert host_allowed("evil.com", ["api.wavespeed.ai"]) is False
+    assert host_allowed("localhost", ["api.wavespeed.ai"]) is False
+
+
+@pytest.mark.asyncio
+async def test_http_request_rejects_non_allowlisted_host():
+    gateway = HostGateway()
+    with pytest.raises(HostGatewayError, match="allowlist"):
+        await gateway.dispatch(
+            "http.request",
+            {"url": "https://evil.example/x", "method": "GET"},
+            allowed_capabilities=["http.request"],
+            allowed_domains=["api.wavespeed.ai"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_media_concat_passthrough_single_url():
+    gateway = HostGateway()
+    result = await gateway.media_concat({
+        "video_urls": ["http://localhost:19004/files/a.mp4"],
+    })
+    assert result["assembly_mode"] == "passthrough"
+    assert result["uri"].endswith("/a.mp4")
+
+
+@pytest.mark.asyncio
+async def test_media_concat_forwards_continuation_transition(monkeypatch):
+    calls = {}
+
+    async def _fake_concat(video_urls, run_id, normalize=True, transition_duration=0.0):
+        calls.update({
+            "video_urls": video_urls,
+            "normalize": normalize,
+            "transition_duration": transition_duration,
+        })
+        return {"result_url": "http://localhost/files/out.mp4", "duration": 1.875}
+
+    monkeypatch.setattr("app.utils.media_service_client.video_concat", _fake_concat)
+    result = await HostGateway().media_concat({
+        "video_urls": [
+            "http://localhost/files/a.mp4",
+            "http://localhost/files/b.mp4",
+        ],
+        "transition_duration": 0.125,
+    })
+
+    assert calls["transition_duration"] == 0.125
+    assert result["transition_duration"] == 0.125
+
+
+@pytest.mark.asyncio
+async def test_media_extract_frame_supports_true_last_frame(monkeypatch):
+    async def _fake_extract(video_url, timestamp, run_id, image_format="jpeg", position="timestamp"):
+        assert timestamp is None
+        assert position == "last"
+        return {
+            "result_url": "http://localhost/files/last.png",
+            "timestamp": 15.0,
+            "format": "png",
+        }
+
+    monkeypatch.setattr("app.utils.media_service_client.video_extract_frame", _fake_extract)
+    result = await HostGateway().media_extract_frame({
+        "video_url": "http://localhost/files/a.mp4",
+        "position": "last",
+        "format": "png",
+    })
+
+    assert result["timestamp"] == 15.0
+    assert result["position"] == "last"
+    assert result["title"] == "Frame @ 15.00s"
+
+
+def test_resolve_provider_ark_when_key_present(monkeypatch):
+    monkeypatch.setenv("ARK_API_KEY", "ark")
+    monkeypatch.delenv("WAVESPEED_API_KEY", raising=False)
+    assert resolve_provider("ark") == "ark"
+
+
+def test_resolve_provider_falls_back_to_wavespeed(monkeypatch):
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.setenv("WAVESPEED_API_KEY", "ws")
+    assert resolve_provider("ark") == "wavespeed"
+
+
+def test_resolve_provider_auto_selects_available_wavespeed(monkeypatch):
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.setenv("WAVESPEED_API_KEY", "wavespeed-key")
+
+    assert resolve_provider("auto") == "wavespeed"
+
+
+def test_resolve_provider_maps_legacy_pollo_seedance_to_wavespeed(monkeypatch):
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.setenv("WAVESPEED_API_KEY", "wavespeed-key")
+    assert resolve_provider("pollo_seedance") == "wavespeed"
+    assert resolve_provider("pollo_seedance", fallbacks_json="{}") == "wavespeed"
+
+
+def test_resolve_provider_maps_seedance_shorthand_to_wavespeed(monkeypatch):
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.setenv("WAVESPEED_API_KEY", "w")
+    assert resolve_provider("seedance") == "wavespeed"
+    # A deployment-specific fallback map must not erase this invariant.
+    assert resolve_provider("seedance", fallbacks_json="{}") == "wavespeed"
+
+
+def test_create_time_insufficient_credits_requires_user_action():
+    error = _classify_wavespeed_failure(
+        'Seedance task create failed: 400, {"message":"Insufficient credits"}',
+        provider="wavespeed",
+        model="doubao-seedance-2-0-260128",
+    )
+    assert error.category == "insufficient_credits"
+    assert error.retryable is False
+    assert error.remote_task_id is None
+
+
+def test_resolve_provider_raises_without_keys(monkeypatch):
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.delenv("WAVESPEED_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="no API key"):
+        resolve_provider("ark")
+
+
+def test_model_family_routes_seedance_15_20_and_25():
+    assert _model_family("doubao-seedance-2-0-260128") == "seedance_2"
+    assert _model_family("seedance-2.5") == "seedance_2_5"
+    assert _model_family("bytedance/seedance-2.5/text-to-video") == "seedance_2_5"
+    assert _model_family("doubao-seedance-1-5-pro-251215") == "seedance_1_5"
+    assert _model_family("seedance-v1.5-pro") == "seedance_1_5"
+    assert _model_family("") == "seedance_2"
+    assert _model_family("wavespeed") == "seedance_2"
+
+
+def test_model_family_rejects_unknown_seedance_label():
+    with pytest.raises(ValueError, match="unsupported Seedance model"):
+        _model_family("doubao-seedance-3-0-experimental")
+
+
+def test_classify_pending_timeout_is_retryable():
+    err = _classify_wavespeed_failure(
+        "provider_pending_timeout: Seedance 2.0 T2V still processing "
+        "after poll limit; remote_task_id=8d05ad155d7e4e408908a1259b5bac06; "
+        "retryable=true",
+        provider="wavespeed",
+        model="doubao-seedance-2-0-260128",
+    )
+    assert isinstance(err, ProviderGenerateError)
+    assert err.category == "provider_pending_timeout"
+    assert err.retryable is True
+    assert err.remote_task_id == "8d05ad155d7e4e408908a1259b5bac06"
+
+
+@pytest.mark.asyncio
+async def test_wavespeed_generate_dispatches_seedance_15(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+    from types import SimpleNamespace
+
+    calls = {}
+
+    async def _fake_resolve(urls):
+        return list(urls)
+
+    class _Svc:
+        async def create_seedance_v1_5_video_task(self, *args, **kwargs):
+            calls["v15"] = (args, kwargs)
+            return "t-15"
+
+        async def poll_seedance_video_task_until_complete(self, *args, **kwargs):
+            return SimpleNamespace(
+                video_url="http://cdn/out.mp4",
+                task_id="t-15",
+                model_dump=lambda: {"video_url": "http://cdn/out.mp4"},
+            )
+
+        async def generate_seedance_2_t2v(self, **kwargs):
+            calls["t2v"] = kwargs
+            raise AssertionError("must not call seedance 2 for 1.5 profile")
+
+        async def generate_seedance_2_i2v(self, **kwargs):
+            calls["i2v"] = kwargs
+            raise AssertionError("must not call i2v for 1.5 profile")
+
+    monkeypatch.setattr(bridge, "_resolve_media_urls", _fake_resolve)
+    monkeypatch.setattr(
+        "app.llm.wavespeed_service.get_wavespeed_service",
+        lambda: _Svc(),
+    )
+    out = await bridge._wavespeed_generate({
+        "prompt": "continue from tail frame",
+        "model": "doubao-seedance-1-5-pro-251215",
+        "images": ["http://localhost/files/a.png"],
+        "duration": 8,
+        "resolution": "720p",
+    })
+    assert out["video_url"].endswith("/out.mp4")
+    assert out["model_family"] == "seedance_1_5"
+    assert "v15" in calls
+    assert calls["v15"][0][0].endswith("/a.png")
+
+
+@pytest.mark.asyncio
+async def test_wavespeed_generate_dispatches_seedance_25_multi_reference_t2v(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    calls = {}
+
+    async def _fake_resolve(urls):
+        return list(urls)
+
+    class _Svc:
+        async def create_seedance_2_5_t2v_task(self, **kwargs):
+            calls["create"] = kwargs
+            return "task-25"
+
+        async def create_seedance_2_5_i2v_task(self, **kwargs):
+            raise AssertionError("reference images must not force i2v mode")
+
+        async def poll_seedance_video_task_until_complete(self, *args, **kwargs):
+            calls["poll"] = (args, kwargs)
+            return SimpleNamespace(
+                video_url="http://cdn/seedance-25.mp4",
+                model_dump=lambda: {"video_url": "http://cdn/seedance-25.mp4"},
+            )
+
+    monkeypatch.setattr(bridge, "_resolve_media_urls", _fake_resolve)
+    monkeypatch.setattr(
+        "app.llm.wavespeed_service.get_wavespeed_service", lambda: _Svc(),
+    )
+    out = await bridge._wavespeed_generate({
+        "prompt": "product commercial",
+        "model": "seedance-2.5",
+        "images": ["https://cdn/a.png", "https://cdn/b.png"],
+        "duration": 30,
+        "resolution": "1080p",
+        "generate_audio": True,
+    })
+
+    assert out["model_family"] == "seedance_2_5"
+    assert calls["create"]["duration"] == 30
+    assert calls["create"]["reference_images"] == [
+        "https://cdn/a.png", "https://cdn/b.png",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_wavespeed_generate_uses_explicit_start_frame_for_seedance_25_i2v(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    calls = {}
+
+    async def _fake_resolve(urls):
+        return list(urls)
+
+    class _Svc:
+        async def create_seedance_2_5_i2v_task(self, **kwargs):
+            calls["create"] = kwargs
+            return "task-25-i2v"
+
+        async def create_seedance_2_5_t2v_task(self, **kwargs):
+            raise AssertionError("an explicit start frame must force i2v")
+
+        async def poll_seedance_video_task_until_complete(self, *args, **kwargs):
+            calls["poll"] = (args, kwargs)
+            return SimpleNamespace(
+                video_url="http://cdn/continued.mp4",
+                model_dump=lambda: {"video_url": "http://cdn/continued.mp4"},
+            )
+
+    monkeypatch.setattr(bridge, "_resolve_media_urls", _fake_resolve)
+    monkeypatch.setattr(
+        "app.llm.wavespeed_service.get_wavespeed_service", lambda: _Svc(),
+    )
+    out = await bridge._wavespeed_generate({
+        "prompt": "continue the unresolved action",
+        "model": "seedance-2.5",
+        "start_image_url": "https://cdn/tail.png",
+        "images": [
+            "https://cdn/tail.png",
+            "https://cdn/character-sheet.png",
+            "https://cdn/scene-sheet.png",
+        ],
+        "duration": 15,
+        "resolution": "1080p",
+    })
+
+    assert calls["create"]["image"] == "https://cdn/tail.png"
+    assert calls["create"]["last_image"] is None
+    assert out["generation_mode"] == "i2v"
+    assert out["start_image_url"] == "https://cdn/tail.png"
+    assert out["reference_image_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_wavespeed_generate_only_uses_explicit_end_frame(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    calls = {}
+
+    async def _fake_resolve(urls):
+        return list(urls)
+
+    class _Svc:
+        async def create_seedance_2_5_i2v_task(self, **kwargs):
+            calls["create"] = kwargs
+            return "task-25-frames"
+
+        async def poll_seedance_video_task_until_complete(self, *args, **kwargs):
+            return SimpleNamespace(
+                video_url="http://cdn/frames.mp4",
+                model_dump=lambda: {"video_url": "http://cdn/frames.mp4"},
+            )
+
+    monkeypatch.setattr(bridge, "_resolve_media_urls", _fake_resolve)
+    monkeypatch.setattr(
+        "app.llm.wavespeed_service.get_wavespeed_service", lambda: _Svc(),
+    )
+    await bridge._wavespeed_generate({
+        "prompt": "move between two approved frames",
+        "model": "seedance-2.5",
+        "start_image_url": "https://cdn/start.png",
+        "end_image_url": "https://cdn/end.png",
+        "images": ["https://cdn/character-sheet.png"],
+    })
+
+    assert calls["create"]["image"] == "https://cdn/start.png"
+    assert calls["create"]["last_image"] == "https://cdn/end.png"
+
+
+def test_sandbox_client_exposes_wavespeed_allowlist(monkeypatch):
+    monkeypatch.setenv("ARK_API_KEY", "a")
+    monkeypatch.setenv("WAVESPEED_API_KEY", "w")
+    client = SandboxClient(SimpleNamespace(
+        DEEP_AGENT_V2_SANDBOX_ENABLED=True,
+        DEEP_AGENT_V2_SANDBOX_WORKER_URL="http://worker:8090",
+        DEEP_AGENT_V2_SANDBOX_TOKEN="token",
+        DEEP_AGENT_V2_INTERNAL_EVENT_TOKEN="",
+        CUTI_SERVICE_TOKEN="",
+        DEEP_AGENT_V2_SANDBOX_REQUEST_TIMEOUT_SECONDS=30,
+        DEEP_AGENT_V2_SKILL_ENV_ALLOWLIST="ARK_API_KEY,WAVESPEED_API_KEY",
+        DEEP_AGENT_V2_HOST_GATEWAY_PUBLIC_URL="http://127.0.0.1:19004/chat-v1/service/v2/internal/host/dispatch",
+    ))
+    assert client._skill_environment() == {
+        "ARK_API_KEY": "a",
+        "WAVESPEED_API_KEY": "w",
+    }
+    assert "host/dispatch" in client._host_gateway_url()
+
+
+def test_system_skills_register_provider_and_media_concat():
+    registry = build_registry(include_platform=True)
+    assert registry.get("api.provider.generate").service_target == "api_provider_generate"
+    assert registry.get("media.concat").service_target == "media_concat"
+    assert registry.get("media.audio_trim").service_target == "media_audio_trim"
+    assert registry.get("media.audio_analyze").service_target == "media_audio_analyze"
+    assert registry.get("media.mix_audio").service_target == "media_mix_audio"
+
+
+def test_seedance_mv_skill_is_instruction_only_workflow():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "skills" / "external"
+    catalog = SkillCatalog([root])
+    catalog.discover()
+    skill = catalog.load("seedance-mv")
+    assert skill.contract is None
+    assert "media.audio_analyze" in skill.instructions
+    assert "media.mix_audio" in skill.instructions
+    assert (root / "seedance-mv" / "references" / "mv-beat-sync.md").is_file()
+
+
+def test_collect_artifact_urls_prefers_uri_over_nested_history():
+    selected = [
+        ArtifactVersion(
+            id="a1",
+            artifact_id="art-1",
+            project_id="p",
+            type="video",
+            version=1,
+            produced_by_task_id="t1",
+            title="ch1",
+            summary="",
+            uri="http://localhost/files/final.mp4",
+            metadata={
+                "videos": [
+                    {"video_url": "http://localhost/files/retry1.mp4"},
+                    {"video_url": "http://localhost/files/retry2.mp4"},
+                    {"video_url": "http://localhost/files/final.mp4"},
+                ]
+            },
+        ),
+        ArtifactVersion(
+            id="a2",
+            artifact_id="art-2",
+            project_id="p",
+            type="video",
+            version=1,
+            produced_by_task_id="t2",
+            title="ch2",
+            summary="",
+            uri="http://localhost/files/only.mp4",
+            metadata={},
+        ),
+    ]
+    urls = CapabilityExecutor._collect_artifact_video_urls(selected)
+    assert urls == [
+        "http://localhost/files/final.mp4",
+        "http://localhost/files/only.mp4",
+    ]
+
+
+def test_seedance2_skill_remains_instruction_only_without_sandbox_bundle():
+    from pathlib import Path
+
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "skills"
+        / "external"
+    )
+    catalog = SkillCatalog([root])
+    catalog.discover()
+    skill = catalog.load("seedance2")
+    assert skill.contract is None
+    assert not (root / "seedance2" / "run" / "__main__.py").exists()
+    assert "scripts/seedance.py" in skill.instructions

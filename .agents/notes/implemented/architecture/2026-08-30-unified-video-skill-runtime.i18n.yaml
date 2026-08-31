@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-30-unified-video-skill-runtime.md
+2026-08-30-unified-video-skill-runtime.md: 33a13d29e55ca28c5fd9bc78da3ecc70e0d535f5
+2026-08-30-unified-video-skill-runtime.zh.md: 44f866492c2cb48351d6cfa0d8134318174e030e

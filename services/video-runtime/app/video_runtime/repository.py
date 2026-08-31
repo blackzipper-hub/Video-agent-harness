@@ -1,0 +1,806 @@
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from copy import deepcopy
+
+from .models import (
+    ArtifactDependency,
+    Build,
+    BuildStep,
+    ChangeRequest,
+    ExportRecord,
+    MediaArtifactVersion,
+    Project,
+    ProjectEvent,
+    ProjectSessionBinding,
+    ProjectSkillLock,
+    ProjectVersion,
+    RebuildPlan,
+    ValidationResult,
+    now,
+)
+
+
+class ProjectVersionConflict(RuntimeError):
+    def __init__(self, expected: str, actual: str) -> None:
+        super().__init__(f"project version changed: expected {expected}, current {actual}")
+        self.expected = expected
+        self.actual = actual
+
+
+class InMemoryVideoProjectRepository:
+    """Reference repository with transaction-equivalent lock semantics for tests and local use."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.projects: dict[str, Project] = {}
+        self.versions: dict[str, ProjectVersion] = {}
+        self.project_versions: dict[str, list[str]] = defaultdict(list)
+        self.artifacts: dict[str, dict[str, MediaArtifactVersion]] = defaultdict(dict)
+        self.dependencies: dict[str, list[ArtifactDependency]] = defaultdict(list)
+        self.bindings: dict[tuple[str, str], ProjectSessionBinding] = {}
+        self.skill_locks: dict[str, dict[str, ProjectSkillLock]] = defaultdict(dict)
+        self.changes: dict[str, ChangeRequest] = {}
+        self.plans: dict[str, RebuildPlan] = {}
+        self.builds: dict[str, Build] = {}
+        self.build_steps: dict[str, dict[str, BuildStep]] = defaultdict(dict)
+        self.validations: dict[str, list[ValidationResult]] = defaultdict(list)
+        self.exports: dict[str, ExportRecord] = {}
+        self.events: dict[str, list[ProjectEvent]] = defaultdict(list)
+        self.idempotency: dict[tuple[str, str, str], str] = {}
+        self.project_creation_idempotency: dict[tuple[str, str], str] = {}
+        self.compatibility_runs: dict[tuple[str, str], tuple[str, str]] = {}
+
+    async def create_project(self, project: Project) -> tuple[Project, ProjectVersion]:
+        async with self.lock:
+            if project.id in self.projects:
+                raise ValueError("project already exists")
+            version = ProjectVersion(project_id=project.id)
+            project.current_version_id = version.id
+            self.projects[project.id] = deepcopy(project)
+            self.versions[version.id] = deepcopy(version)
+            self.project_versions[project.id].append(version.id)
+            self._append_event(project.id, "project.created", {"project_version_id": version.id})
+            return deepcopy(project), deepcopy(version)
+
+    async def create_project_idempotently(
+        self, project: Project, idempotency_key: str,
+    ) -> tuple[Project, ProjectVersion]:
+        async with self.lock:
+            existing_id = self.project_creation_idempotency.get(
+                (project.user_id, idempotency_key),
+            )
+            if existing_id is not None:
+                existing = self.projects[existing_id]
+                version = self.versions[existing.current_version_id]
+                return deepcopy(existing), deepcopy(version)
+            version = ProjectVersion(project_id=project.id)
+            project.current_version_id = version.id
+            self.projects[project.id] = deepcopy(project)
+            self.versions[version.id] = deepcopy(version)
+            self.project_versions[project.id].append(version.id)
+            self.project_creation_idempotency[(project.user_id, idempotency_key)] = project.id
+            self._append_event(project.id, "project.created", {"project_version_id": version.id})
+            return deepcopy(project), deepcopy(version)
+
+    async def get_project(self, project_id: str) -> Project:
+        project = self.projects.get(project_id)
+        if project is None:
+            raise LookupError("project not found")
+        return deepcopy(project)
+
+    async def list_projects(self, user_id: str) -> list[Project]:
+        return sorted(
+            (deepcopy(item) for item in self.projects.values() if item.user_id == user_id),
+            key=lambda item: item.updated_at,
+            reverse=True,
+        )
+
+    async def list_all_projects(self) -> list[Project]:
+        return [deepcopy(item) for item in self.projects.values()]
+
+    async def get_project_version(self, version_id: str) -> ProjectVersion:
+        version = self.versions.get(version_id)
+        if version is None:
+            raise LookupError("project version not found")
+        return deepcopy(version)
+
+    async def list_project_versions(self, project_id: str) -> list[ProjectVersion]:
+        return [deepcopy(self.versions[item]) for item in self.project_versions[project_id]]
+
+    async def bind_session(self, binding: ProjectSessionBinding) -> ProjectSessionBinding:
+        project = await self.get_project(binding.project_id)
+        if project.user_id != binding.user_id:
+            raise PermissionError("project does not belong to user")
+        async with self.lock:
+            key = (binding.project_id, binding.session_id)
+            existing = self.bindings.get(key)
+            if existing is not None:
+                return deepcopy(existing)
+            self.bindings[key] = deepcopy(binding)
+            self._append_event(binding.project_id, "project.session_bound", {"session_id": binding.session_id})
+        return deepcopy(binding)
+
+    async def latest_session_binding(
+        self, project_id: str, user_id: str,
+    ) -> ProjectSessionBinding:
+        matches = [
+            item for item in self.bindings.values()
+            if item.project_id == project_id and item.user_id == user_id
+        ]
+        if not matches:
+            raise LookupError("project has no DeepSeek Session binding")
+        return deepcopy(max(matches, key=lambda item: item.created_at))
+
+    async def project_for_session(
+        self, session_id: str, user_id: str,
+    ) -> tuple[Project, ProjectSessionBinding]:
+        matches = [
+            item for item in self.bindings.values()
+            if item.session_id == session_id and item.user_id == user_id
+        ]
+        if not matches:
+            raise LookupError("DeepSeek Session is not bound to a project")
+        binding = max(matches, key=lambda item: item.created_at)
+        return await self.get_project(binding.project_id), deepcopy(binding)
+
+    async def list_project_skill_locks(self, project_id: str) -> list[ProjectSkillLock]:
+        await self.get_project(project_id)
+        return sorted(
+            (deepcopy(item) for item in self.skill_locks[project_id].values()),
+            key=lambda item: item.skill_id,
+        )
+
+    async def upsert_project_skill_lock(
+        self, lock: ProjectSkillLock,
+    ) -> ProjectSkillLock:
+        async with self.lock:
+            self._project(lock.project_id)
+            lock.updated_at = now()
+            self.skill_locks[lock.project_id][lock.skill_id] = deepcopy(lock)
+            self._append_event(lock.project_id, "project.skill_lock.updated", {
+                "skill_id": lock.skill_id,
+                "version": lock.version,
+                "digest": lock.digest,
+                "source": lock.source,
+                "enabled": lock.enabled,
+            })
+            return deepcopy(lock)
+
+    async def get_compatibility_run(
+        self, user_id: str, idempotency_key: str,
+    ) -> tuple[str, str] | None:
+        return self.compatibility_runs.get((user_id, idempotency_key))
+
+    async def remember_compatibility_run(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        project_id: str,
+        session_id: str,
+    ) -> None:
+        async with self.lock:
+            self.compatibility_runs.setdefault(
+                (user_id, idempotency_key), (project_id, session_id),
+            )
+
+    async def get_operation_result(
+        self, project_id: str, operation: str, idempotency_key: str,
+    ) -> str | None:
+        return self.idempotency.get((project_id, operation, idempotency_key))
+
+    async def remember_operation_result(
+        self,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        result_id: str,
+    ) -> None:
+        async with self.lock:
+            self.idempotency.setdefault(
+                (project_id, operation, idempotency_key), result_id,
+            )
+
+    async def add_artifact(
+        self, artifact: MediaArtifactVersion, dependencies: list[ArtifactDependency] | None = None,
+    ) -> MediaArtifactVersion:
+        async with self.lock:
+            project = self._project(artifact.project_id)
+            same = [
+                item.version for item in self.artifacts[artifact.project_id].values()
+                if item.artifact_id == artifact.artifact_id
+            ]
+            artifact.version = max(same, default=0) + 1
+            self.artifacts[artifact.project_id][artifact.id] = deepcopy(artifact)
+            if dependencies:
+                self.dependencies[artifact.project_id].extend(deepcopy(dependencies))
+            current = self.versions[project.current_version_id]
+            selections = {**current.selections, artifact.artifact_id: artifact.id}
+            version = ProjectVersion(
+                project_id=project.id,
+                parent_version_id=current.id,
+                timeline_version_id=(artifact.id if artifact.type == "timeline" else current.timeline_version_id),
+                selections=selections,
+            )
+            self._commit_version(project, version)
+            self._append_event(project.id, "artifact.committed", {
+                "artifact_id": artifact.artifact_id,
+                "artifact_version_id": artifact.id,
+                "project_version_id": version.id,
+            })
+            return deepcopy(artifact)
+
+    async def current_artifacts(self, project_id: str) -> list[MediaArtifactVersion]:
+        project = await self.get_project(project_id)
+        version = self.versions[project.current_version_id]
+        return [
+            deepcopy(self.artifacts[project_id][version_id])
+            for version_id in version.selections.values()
+        ]
+
+    async def list_artifact_versions(self, project_id: str) -> list[MediaArtifactVersion]:
+        await self.get_project(project_id)
+        return sorted(
+            (deepcopy(item) for item in self.artifacts[project_id].values()),
+            key=lambda item: item.created_at,
+        )
+
+    async def current_dependencies(self, project_id: str) -> list[ArtifactDependency]:
+        current_ids = {item.id for item in await self.current_artifacts(project_id)}
+        return deepcopy([
+            edge for edge in self.dependencies[project_id]
+            if edge.source_version_id in current_ids and edge.target_version_id in current_ids
+        ])
+
+    async def save_change_and_plan(
+        self, change: ChangeRequest, plan: RebuildPlan, idempotency_key: str | None = None,
+    ) -> RebuildPlan:
+        async with self.lock:
+            project = self._project(change.project_id)
+            if idempotency_key:
+                existing_id = self.idempotency.get(
+                    (change.project_id, "preview", idempotency_key),
+                )
+                if existing_id is not None:
+                    return deepcopy(self.plans[existing_id])
+            self._assert_version(project, change.base_project_version_id)
+            self.changes[change.id] = deepcopy(change)
+            self.plans[plan.id] = deepcopy(plan)
+            if idempotency_key:
+                self.idempotency[(change.project_id, "preview", idempotency_key)] = plan.id
+            self._append_event(project.id, "rebuild.previewed", {
+                "change_request_id": change.id,
+                "plan_id": plan.id,
+                "base_project_version_id": plan.base_project_version_id,
+            })
+            return deepcopy(plan)
+
+    async def save_plan(
+        self, plan: RebuildPlan, idempotency_key: str,
+    ) -> RebuildPlan:
+        async with self.lock:
+            project = self._project(plan.project_id)
+            key = (plan.project_id, "plan", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                return deepcopy(self.plans[existing_id])
+            self._assert_version(project, plan.base_project_version_id)
+            self.plans[plan.id] = deepcopy(plan)
+            self.idempotency[key] = plan.id
+            self._append_event(project.id, "build.plan_created", {
+                "plan_id": plan.id, "kind": plan.kind,
+                "estimated_cost": plan.estimated_cost,
+            })
+            return deepcopy(plan)
+
+    async def get_plan(self, plan_id: str) -> RebuildPlan:
+        plan = self.plans.get(plan_id)
+        if plan is None:
+            raise LookupError("rebuild plan not found")
+        return deepcopy(plan)
+
+    async def submit_build(
+        self, *, project_id: str, plan_id: str, base_version_id: str,
+        idempotency_key: str, session_id: str | None = None, user_id: str | None = None,
+    ) -> Build:
+        async with self.lock:
+            project = self._project(project_id)
+            key = (project_id, "rebuild", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                return deepcopy(self.builds[existing_id])
+            self._assert_version(project, base_version_id)
+            plan = self.plans.get(plan_id)
+            if plan is None or plan.project_id != project_id:
+                raise LookupError("rebuild plan not found")
+            if plan.base_project_version_id != base_version_id or plan.status != "preview":
+                raise ProjectVersionConflict(plan.base_project_version_id, project.current_version_id)
+            build = Build(
+                project_id=project_id,
+                plan_id=plan_id,
+                base_project_version_id=base_version_id,
+                idempotency_key=idempotency_key,
+                session_id=session_id,
+                user_id=user_id,
+                kind=plan.kind,
+                estimated_cost=plan.estimated_cost,
+            )
+            plan.status = "applied"
+            self.plans[plan.id] = deepcopy(plan)
+            self.builds[build.id] = deepcopy(build)
+            self.build_steps[build.id] = {
+                item.step_id: BuildStep(
+                    build_id=build.id,
+                    project_id=project_id,
+                    plan_step_id=item.step_id,
+                    action=item.action,
+                    capability=item.capability,
+                    resolved_skills=list(item.resolved_skills),
+                    skill_context=item.skill_context,
+                )
+                for item in plan.items
+            }
+            self.idempotency[key] = build.id
+            self._append_event(project_id, "build.queued", {"build_id": build.id, "plan_id": plan.id})
+            return deepcopy(build)
+
+    async def list_build_steps(self, project_id: str, build_id: str) -> list[BuildStep]:
+        await self.get_build(project_id, build_id)
+        return deepcopy(list(self.build_steps[build_id].values()))
+
+    async def list_validation_results(
+        self, project_id: str, build_id: str,
+    ) -> list[ValidationResult]:
+        await self.get_build(project_id, build_id)
+        return deepcopy(self.validations[build_id])
+
+    async def update_build_step(self, step: BuildStep) -> BuildStep:
+        async with self.lock:
+            build = self.builds.get(step.build_id)
+            if build is None or build.project_id != step.project_id:
+                raise LookupError("build not found")
+            if step.plan_step_id not in self.build_steps[step.build_id]:
+                raise LookupError("build step not found")
+            step.updated_at = now()
+            self.build_steps[step.build_id][step.plan_step_id] = deepcopy(step)
+            self._append_event(step.project_id, "build.step_status", {
+                "build_id": step.build_id,
+                "step_id": step.plan_step_id,
+                "status": step.status,
+                "attempt": step.attempt,
+                "artifact_version_id": step.result_artifact_version_id,
+            })
+            return deepcopy(step)
+
+    async def stage_artifact(self, artifact: MediaArtifactVersion) -> MediaArtifactVersion:
+        """Persist a draft without changing the active ProjectVersion."""
+        async with self.lock:
+            self._project(artifact.project_id)
+            existing = self.artifacts[artifact.project_id].get(artifact.id)
+            if existing is not None:
+                return deepcopy(existing)
+            same = [
+                item.version for item in self.artifacts[artifact.project_id].values()
+                if item.artifact_id == artifact.artifact_id
+            ]
+            artifact.version = max(same, default=0) + 1
+            artifact.status = "draft"
+            self.artifacts[artifact.project_id][artifact.id] = deepcopy(artifact)
+            return deepcopy(artifact)
+
+    async def get_artifact(self, project_id: str, version_id: str) -> MediaArtifactVersion:
+        artifact = self.artifacts[project_id].get(version_id)
+        if artifact is None:
+            raise LookupError("artifact version not found")
+        return deepcopy(artifact)
+
+    async def commit_initial_build(
+        self,
+        *,
+        build_id: str,
+        artifacts: list[MediaArtifactVersion],
+        dependencies: list[ArtifactDependency],
+        validation_results: list[ValidationResult],
+    ) -> tuple[Build, ProjectVersion]:
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None:
+                raise LookupError("build not found")
+            if build.status == "completed" and build.project_version_id:
+                return deepcopy(build), deepcopy(self.versions[build.project_version_id])
+            project = self._project(build.project_id)
+            self._assert_version(project, build.base_project_version_id)
+            if any(not item.passed for item in validation_results):
+                raise ValueError("all initial build validations must pass before commit")
+            selections: dict[str, str] = {}
+            timeline_id = None
+            for artifact in artifacts:
+                stored = self.artifacts[project.id].get(artifact.id)
+                if stored is None:
+                    raise LookupError(f"draft artifact not found: {artifact.id}")
+                stored.status = "ready"
+                self.artifacts[project.id][stored.id] = deepcopy(stored)
+                selections[stored.artifact_id] = stored.id
+                if stored.type == "timeline":
+                    timeline_id = stored.id
+            self.dependencies[project.id].extend(deepcopy(dependencies))
+            version = ProjectVersion(
+                project_id=project.id,
+                parent_version_id=project.current_version_id,
+                timeline_version_id=timeline_id,
+                selections=selections,
+            )
+            self._commit_version(project, version)
+            self.validations[build.id] = deepcopy(validation_results)
+            build.status = "completed"
+            build.progress = 1.0
+            build.message = "Initial video build committed"
+            build.project_version_id = version.id
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(project.id, "project.version_committed", {
+                "build_id": build.id,
+                "kind": "initial",
+                "project_version_id": version.id,
+                "parent_version_id": version.parent_version_id,
+            })
+            return deepcopy(build), deepcopy(version)
+
+    async def get_build(self, project_id: str, build_id: str) -> Build:
+        build = self.builds.get(build_id)
+        if build is None or build.project_id != project_id:
+            raise LookupError("build not found")
+        return deepcopy(build)
+
+    async def update_build(self, build: Build) -> Build:
+        async with self.lock:
+            current = self.builds.get(build.id)
+            if current is None or current.project_id != build.project_id:
+                raise LookupError("build not found")
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(build.project_id, "build.status", {
+                "build_id": build.id,
+                "status": build.status,
+                "progress": build.progress,
+                "message": build.message,
+            })
+            return deepcopy(build)
+
+    async def requeue_failed_build(self, project_id: str, build_id: str) -> Build:
+        """Retry only failed work while preserving completed draft artifacts."""
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None or build.project_id != project_id:
+                raise LookupError("build not found")
+            if build.status != "failed":
+                raise ValueError("only failed builds can be retried")
+            for step in self.build_steps[build_id].values():
+                if step.status != "failed":
+                    continue
+                step.status = "pending"
+                step.attempt = 0
+                step.error = None
+                step.started_at = None
+                step.completed_at = None
+                step.updated_at = now()
+            build.status = "queued"
+            build.message = "Retry queued"
+            build.error = None
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(project_id, "build.retry_queued", {"build_id": build.id})
+            return deepcopy(build)
+
+    async def cancel_build(self, project_id: str, build_id: str) -> Build:
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None or build.project_id != project_id:
+                raise LookupError("build not found")
+            if build.status not in {"completed", "failed", "cancelled"}:
+                build.status = "cancelled"
+                build.message = "Cancellation requested"
+                build.updated_at = now()
+                self.builds[build.id] = deepcopy(build)
+                self._append_event(project_id, "build.cancelled", {"build_id": build.id})
+            return deepcopy(build)
+
+    async def commit_build(
+        self,
+        *,
+        build_id: str,
+        replacements: dict[str, MediaArtifactVersion],
+        validation_results: list[ValidationResult],
+        created_artifacts: dict[str, MediaArtifactVersion] | None = None,
+    ) -> tuple[Build, ProjectVersion]:
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None:
+                raise LookupError("build not found")
+            if build.status == "completed" and build.project_version_id:
+                return deepcopy(build), deepcopy(self.versions[build.project_version_id])
+            if build.status in {"failed", "cancelled"}:
+                raise ValueError(f"cannot commit {build.status} build")
+            project = self._project(build.project_id)
+            self._assert_version(project, build.base_project_version_id)
+            plan = self.plans[build.plan_id]
+            rebuild_ids = {item for item in plan.ids_for("rebuild") if item}
+            if set(replacements) != rebuild_ids:
+                raise ValueError("build replacements must cover every rebuild plan item exactly")
+            created_artifacts = created_artifacts or {}
+            create_steps = {item.step_id for item in plan.items if item.action == "create"}
+            if set(created_artifacts) != create_steps:
+                raise ValueError("created artifacts must cover every create plan item exactly")
+            validate_ids = {item for item in plan.ids_for("validate") if item}
+            passed_ids = {
+                item.artifact_version_id for item in validation_results
+                if item.passed and item.artifact_version_id is not None
+            }
+            if not validate_ids <= passed_ids:
+                raise ValueError("all validation plan items must pass before commit")
+
+            current = self.versions[project.current_version_id]
+            replacement_ids: dict[str, str] = {}
+            next_selections = dict(current.selections)
+            for old_version_id, replacement in replacements.items():
+                old = self.artifacts[project.id].get(old_version_id)
+                if old is None:
+                    raise LookupError(f"artifact version not found: {old_version_id}")
+                replacement.project_id = project.id
+                replacement.artifact_id = old.artifact_id
+                staged = self.artifacts[project.id].get(replacement.id)
+                if staged is not None:
+                    replacement.version = staged.version
+                else:
+                    versions = [
+                        item.version for item in self.artifacts[project.id].values()
+                        if item.artifact_id == old.artifact_id
+                    ]
+                    replacement.version = max(versions, default=0) + 1
+                replacement.status = "ready"
+                self.artifacts[project.id][replacement.id] = deepcopy(replacement)
+                replacement_ids[old_version_id] = replacement.id
+                next_selections[old.artifact_id] = replacement.id
+
+            created_ids: dict[str, str] = {}
+            for step_id, artifact in created_artifacts.items():
+                artifact.project_id = project.id
+                staged = self.artifacts[project.id].get(artifact.id)
+                if staged is not None:
+                    artifact.version = staged.version
+                else:
+                    versions = [
+                        item.version for item in self.artifacts[project.id].values()
+                        if item.artifact_id == artifact.artifact_id
+                    ]
+                    artifact.version = max(versions, default=0) + 1
+                artifact.status = "ready"
+                self.artifacts[project.id][artifact.id] = deepcopy(artifact)
+                next_selections[artifact.artifact_id] = artifact.id
+                created_ids[step_id] = artifact.id
+
+            old_edges = list(self.dependencies[project.id])
+            for edge in old_edges:
+                source = replacement_ids.get(edge.source_version_id, edge.source_version_id)
+                target = replacement_ids.get(edge.target_version_id, edge.target_version_id)
+                if source == edge.source_version_id and target == edge.target_version_id:
+                    continue
+                self.dependencies[project.id].append(ArtifactDependency(
+                    project_id=project.id,
+                    source_version_id=source,
+                    target_version_id=target,
+                    relation=edge.relation,
+                    invalidation_policy=edge.invalidation_policy,
+                ))
+
+            output_by_step: dict[str, str] = {}
+            for item in plan.items:
+                if item.action == "create":
+                    output_id = created_ids.get(item.step_id)
+                elif item.artifact_version_id:
+                    output_id = replacement_ids.get(
+                        item.artifact_version_id, item.artifact_version_id,
+                    )
+                else:
+                    output_id = None
+                if output_id:
+                    output_by_step[item.step_id] = output_id
+            existing_edges = {
+                (item.source_version_id, item.target_version_id)
+                for item in self.dependencies[project.id]
+            }
+            for item in plan.items:
+                target = output_by_step.get(item.step_id)
+                if target is None:
+                    continue
+                for dependency in item.depends_on:
+                    source = output_by_step.get(dependency)
+                    if source is None or (source, target) in existing_edges:
+                        continue
+                    self.dependencies[project.id].append(ArtifactDependency(
+                        project_id=project.id,
+                        source_version_id=source,
+                        target_version_id=target,
+                        relation="build_step_dependency",
+                    ))
+                    existing_edges.add((source, target))
+
+            timeline_version_id = current.timeline_version_id
+            if timeline_version_id in replacement_ids:
+                timeline_version_id = replacement_ids[timeline_version_id]
+            for artifact in created_artifacts.values():
+                if artifact.type == "timeline":
+                    timeline_version_id = artifact.id
+            version = ProjectVersion(
+                project_id=project.id,
+                parent_version_id=current.id,
+                timeline_version_id=timeline_version_id,
+                selections=next_selections,
+                change_request_id=plan.change_request_id,
+            )
+            self._commit_version(project, version)
+            self.validations[build.id] = deepcopy(validation_results)
+            build.status = "completed"
+            build.progress = 1.0
+            build.message = "Build committed"
+            build.project_version_id = version.id
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(project.id, "project.version_committed", {
+                "build_id": build.id,
+                "project_version_id": version.id,
+                "parent_version_id": version.parent_version_id,
+            })
+            return deepcopy(build), deepcopy(version)
+
+    async def select_artifact(
+        self, *, project_id: str, version_id: str, base_version_id: str, idempotency_key: str,
+    ) -> tuple[MediaArtifactVersion, ProjectVersion]:
+        async with self.lock:
+            project = self._project(project_id)
+            key = (project_id, "select", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                version = self.versions[existing_id]
+                selected_id = next(
+                    item for item in version.selections.values() if item == version_id
+                )
+                return deepcopy(self.artifacts[project_id][selected_id]), deepcopy(version)
+            self._assert_version(project, base_version_id)
+            artifact = self.artifacts[project_id].get(version_id)
+            if artifact is None:
+                raise LookupError("artifact version not found")
+            current = self.versions[project.current_version_id]
+            version = ProjectVersion(
+                project_id=project_id,
+                parent_version_id=current.id,
+                timeline_version_id=(version_id if artifact.type == "timeline" else current.timeline_version_id),
+                selections={**current.selections, artifact.artifact_id: version_id},
+            )
+            self._commit_version(project, version)
+            self.idempotency[key] = version.id
+            self._append_event(project_id, "artifact.selected", {
+                "artifact_id": artifact.artifact_id,
+                "artifact_version_id": artifact.id,
+                "project_version_id": version.id,
+            })
+            return deepcopy(artifact), deepcopy(version)
+
+    async def restore_project_version(
+        self, *, project_id: str, restore_version_id: str,
+        base_version_id: str, idempotency_key: str,
+    ) -> ProjectVersion:
+        async with self.lock:
+            project = self._project(project_id)
+            key = (project_id, "restore", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                return deepcopy(self.versions[existing_id])
+            self._assert_version(project, base_version_id)
+            restored = self.versions.get(restore_version_id)
+            if restored is None or restored.project_id != project_id:
+                raise LookupError("project version not found")
+            current = self.versions[project.current_version_id]
+            version = ProjectVersion(
+                project_id=project_id,
+                parent_version_id=current.id,
+                timeline_version_id=restored.timeline_version_id,
+                selections=dict(restored.selections),
+            )
+            self._commit_version(project, version)
+            self.idempotency[key] = version.id
+            self._append_event(project_id, "project.version_restored", {
+                "source_project_version_id": restore_version_id,
+                "project_version_id": version.id,
+            })
+            return deepcopy(version)
+
+    async def create_export(
+        self, *, project_id: str, base_version_id: str, idempotency_key: str, format: str,
+    ) -> ExportRecord:
+        async with self.lock:
+            project = self._project(project_id)
+            key = (project_id, "export", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                return deepcopy(self.exports[existing_id])
+            self._assert_version(project, base_version_id)
+            export = ExportRecord(
+                project_id=project_id,
+                project_version_id=base_version_id,
+                idempotency_key=idempotency_key,
+                format=format,
+            )
+            if format == "mp4":
+                version = self.versions[base_version_id]
+                candidates = [
+                    self.artifacts[project_id][version_id]
+                    for version_id in version.selections.values()
+                    if self.artifacts[project_id][version_id].type
+                    in {"final_video", "video_mixed", "video_assembled"}
+                    and self.artifacts[project_id][version_id].uri
+                ]
+                if candidates:
+                    selected = max(
+                        candidates,
+                        key=lambda item: (
+                            item.type == "final_video", item.type == "video_mixed", item.created_at,
+                        ),
+                    )
+                    export.status = "completed"
+                    export.uri = selected.uri
+            self.exports[export.id] = deepcopy(export)
+            self.idempotency[key] = export.id
+            self._append_event(project_id, f"export.{export.status}", {
+                "export_id": export.id, "format": format, "uri": export.uri,
+            })
+            return deepcopy(export)
+
+    async def list_events(self, project_id: str, after: int = 0) -> list[ProjectEvent]:
+        await self.get_project(project_id)
+        return deepcopy([event for event in self.events[project_id] if event.sequence > after])
+
+    async def active_builds(self, project_id: str) -> list[Build]:
+        return deepcopy([
+            build for build in self.builds.values()
+            if build.project_id == project_id
+            and build.status in {"queued", "running", "waiting_external"}
+        ])
+
+    async def list_builds(self, project_id: str) -> list[Build]:
+        await self.get_project(project_id)
+        return sorted(
+            (deepcopy(item) for item in self.builds.values() if item.project_id == project_id),
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+
+    def _project(self, project_id: str) -> Project:
+        project = self.projects.get(project_id)
+        if project is None:
+            raise LookupError("project not found")
+        return project
+
+    @staticmethod
+    def _assert_version(project: Project, expected: str) -> None:
+        if project.current_version_id != expected:
+            raise ProjectVersionConflict(expected, project.current_version_id)
+
+    def _commit_version(self, project: Project, version: ProjectVersion) -> None:
+        self.versions[version.id] = deepcopy(version)
+        self.project_versions[project.id].append(version.id)
+        project.current_version_id = version.id
+        project.updated_at = now()
+        self.projects[project.id] = deepcopy(project)
+
+    def _append_event(self, project_id: str, event_type: str, payload: dict) -> ProjectEvent:
+        event = ProjectEvent(
+            project_id=project_id,
+            sequence=len(self.events[project_id]) + 1,
+            type=event_type,
+            payload=payload,
+        )
+        self.events[project_id].append(event)
+        return event

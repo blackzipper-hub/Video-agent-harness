@@ -1,0 +1,1076 @@
+from __future__ import annotations
+
+import json
+import re
+
+import asyncpg
+
+from .models import (
+    ArtifactDependency, Build, BuildStep, ChangeRequest, ExportRecord, MediaArtifactVersion,
+    Project, ProjectEvent, ProjectSessionBinding, ProjectSkillLock, ProjectVersion, RebuildPlan,
+    RebuildPlanItem, ValidationResult, now,
+)
+from .repository import ProjectVersionConflict
+
+
+class PostgresVideoProjectRepository:
+    """Durable normalized repository for the incremental media core."""
+
+    def __init__(self, pool: asyncpg.Pool, schema: str = "cuti_video_runtime") -> None:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+            raise ValueError("invalid video runtime database schema")
+        self.pool = pool
+        self.schema = schema
+
+    @classmethod
+    async def connect(
+        cls, database_url: str, schema: str = "cuti_video_runtime",
+    ) -> "PostgresVideoProjectRepository":
+        return cls(await asyncpg.create_pool(database_url, min_size=1, max_size=10), schema)
+
+    async def close(self) -> None:
+        await self.pool.close()
+
+    async def create_project(self, project: Project) -> tuple[Project, ProjectVersion]:
+        version = ProjectVersion(project_id=project.id)
+        project.current_version_id = version.id
+        async with self.pool.acquire() as connection, connection.transaction():
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.projects
+                (id,user_id,title,status,current_version_id,created_at,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7)""",
+                project.id, project.user_id, project.title, project.status,
+                project.current_version_id, project.created_at, project.updated_at,
+            )
+            await self._insert_version(connection, version)
+            await self._append_event(connection, project.id, "project.created", {
+                "project_version_id": version.id,
+            })
+        return project, version
+
+    async def create_project_idempotently(
+        self, project: Project, idempotency_key: str,
+    ) -> tuple[Project, ProjectVersion]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                f"video-project-create:{project.user_id}:{idempotency_key}",
+            )
+            existing_id = await connection.fetchval(
+                f"""SELECT project_id FROM {self.schema}.project_creation_idempotency
+                WHERE user_id=$1 AND idempotency_key=$2""",
+                project.user_id, idempotency_key,
+            )
+            if existing_id is not None:
+                row = await connection.fetchrow(
+                    f"SELECT * FROM {self.schema}.projects WHERE id=$1", existing_id,
+                )
+                existing = Project(**dict(row))
+                return existing, await self._get_version(connection, existing.current_version_id)
+            version = ProjectVersion(project_id=project.id)
+            project.current_version_id = version.id
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.projects
+                (id,user_id,title,status,current_version_id,created_at,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7)""",
+                project.id, project.user_id, project.title, project.status,
+                project.current_version_id, project.created_at, project.updated_at,
+            )
+            await self._insert_version(connection, version)
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.project_creation_idempotency
+                (user_id,idempotency_key,project_id) VALUES($1,$2,$3)""",
+                project.user_id, idempotency_key, project.id,
+            )
+            await self._append_event(connection, project.id, "project.created", {
+                "project_version_id": version.id,
+            })
+        return project, version
+
+    async def get_project(self, project_id: str) -> Project:
+        row = await self.pool.fetchrow(f"SELECT * FROM {self.schema}.projects WHERE id=$1", project_id)
+        if row is None:
+            raise LookupError("project not found")
+        return Project(**dict(row))
+
+    async def list_projects(self, user_id: str) -> list[Project]:
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.projects WHERE user_id=$1 ORDER BY updated_at DESC",
+            user_id,
+        )
+        return [Project(**dict(row)) for row in rows]
+
+    async def list_all_projects(self) -> list[Project]:
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.projects ORDER BY updated_at DESC",
+        )
+        return [Project(**dict(row)) for row in rows]
+
+    async def get_project_version(self, version_id: str) -> ProjectVersion:
+        async with self.pool.acquire() as connection:
+            return await self._get_version(connection, version_id)
+
+    async def list_project_versions(self, project_id: str) -> list[ProjectVersion]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                f"SELECT id FROM {self.schema}.project_versions WHERE project_id=$1 ORDER BY created_at", project_id,
+            )
+            return [await self._get_version(connection, row["id"]) for row in rows]
+
+    async def bind_session(self, binding: ProjectSessionBinding) -> ProjectSessionBinding:
+        project = await self.get_project(binding.project_id)
+        if project.user_id != binding.user_id:
+            raise PermissionError("project does not belong to user")
+        async with self.pool.acquire() as connection, connection.transaction():
+            result = await connection.execute(
+                f"""INSERT INTO {self.schema}.project_session_bindings
+                (project_id,session_id,user_id,created_at) VALUES($1,$2,$3,$4)
+                ON CONFLICT(project_id,session_id) DO NOTHING""",
+                binding.project_id, binding.session_id, binding.user_id, binding.created_at,
+            )
+            if result != "INSERT 0 0":
+                await self._append_event(connection, binding.project_id, "project.session_bound", {
+                    "session_id": binding.session_id,
+                })
+        return binding
+
+    async def latest_session_binding(
+        self, project_id: str, user_id: str,
+    ) -> ProjectSessionBinding:
+        row = await self.pool.fetchrow(
+            f"""SELECT * FROM {self.schema}.project_session_bindings
+            WHERE project_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 1""",
+            project_id, user_id,
+        )
+        if row is None:
+            raise LookupError("project has no DeepSeek Session binding")
+        return ProjectSessionBinding(**dict(row))
+
+    async def project_for_session(
+        self, session_id: str, user_id: str,
+    ) -> tuple[Project, ProjectSessionBinding]:
+        row = await self.pool.fetchrow(
+            f"""SELECT binding.* FROM {self.schema}.project_session_bindings binding
+            JOIN {self.schema}.projects project ON project.id=binding.project_id
+            WHERE binding.session_id=$1 AND binding.user_id=$2 AND project.user_id=$2
+            ORDER BY binding.created_at DESC LIMIT 1""",
+            session_id, user_id,
+        )
+        if row is None:
+            raise LookupError("DeepSeek Session is not bound to a project")
+        binding = ProjectSessionBinding(**dict(row))
+        return await self.get_project(binding.project_id), binding
+
+    async def list_project_skill_locks(self, project_id: str) -> list[ProjectSkillLock]:
+        await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.project_skill_locks
+            WHERE project_id=$1 ORDER BY skill_id""",
+            project_id,
+        )
+        return [ProjectSkillLock(**dict(row)) for row in rows]
+
+    async def upsert_project_skill_lock(
+        self, lock: ProjectSkillLock,
+    ) -> ProjectSkillLock:
+        lock.updated_at = now()
+        async with self.pool.acquire() as connection, connection.transaction():
+            if not await connection.fetchval(
+                f"SELECT 1 FROM {self.schema}.projects WHERE id=$1",
+                lock.project_id,
+            ):
+                raise LookupError("project not found")
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.project_skill_locks
+                (project_id,skill_id,version,digest,source,enabled,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7)
+                ON CONFLICT(project_id,skill_id) DO UPDATE SET
+                  version=EXCLUDED.version,
+                  digest=EXCLUDED.digest,
+                  source=EXCLUDED.source,
+                  enabled=EXCLUDED.enabled,
+                  updated_at=EXCLUDED.updated_at""",
+                lock.project_id, lock.skill_id, lock.version, lock.digest,
+                lock.source, lock.enabled, lock.updated_at,
+            )
+            await self._append_event(connection, lock.project_id, "project.skill_lock.updated", {
+                "skill_id": lock.skill_id,
+                "version": lock.version,
+                "digest": lock.digest,
+                "source": lock.source,
+                "enabled": lock.enabled,
+            })
+        return lock
+
+    async def get_compatibility_run(
+        self, user_id: str, idempotency_key: str,
+    ) -> tuple[str, str] | None:
+        row = await self.pool.fetchrow(
+            f"""SELECT project_id,session_id FROM {self.schema}.compatibility_runs
+            WHERE user_id=$1 AND idempotency_key=$2""",
+            user_id, idempotency_key,
+        )
+        return None if row is None else (row["project_id"], row["session_id"])
+
+    async def remember_compatibility_run(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        project_id: str,
+        session_id: str,
+    ) -> None:
+        await self.pool.execute(
+            f"""INSERT INTO {self.schema}.compatibility_runs
+            (user_id,idempotency_key,project_id,session_id) VALUES($1,$2,$3,$4)
+            ON CONFLICT(user_id,idempotency_key) DO NOTHING""",
+            user_id, idempotency_key, project_id, session_id,
+        )
+
+    async def get_operation_result(
+        self, project_id: str, operation: str, idempotency_key: str,
+    ) -> str | None:
+        async with self.pool.acquire() as connection:
+            return await self._idempotent_result(
+                connection, project_id, operation, idempotency_key,
+            )
+
+    async def remember_operation_result(
+        self,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        result_id: str,
+    ) -> None:
+        await self.pool.execute(
+            f"""INSERT INTO {self.schema}.operation_idempotency
+            (project_id,operation,idempotency_key,result_id) VALUES($1,$2,$3,$4)
+            ON CONFLICT(project_id,operation,idempotency_key) DO NOTHING""",
+            project_id, operation, idempotency_key, result_id,
+        )
+
+    async def add_artifact(
+        self, artifact: MediaArtifactVersion, dependencies: list[ArtifactDependency] | None = None,
+    ) -> MediaArtifactVersion:
+        async with self.pool.acquire() as connection, connection.transaction():
+            project = await self._locked_project(connection, artifact.project_id)
+            artifact.version = await connection.fetchval(
+                f"SELECT COALESCE(max(version),0)+1 FROM {self.schema}.artifact_versions WHERE artifact_id=$1",
+                artifact.artifact_id,
+            )
+            await self._insert_artifact(connection, artifact)
+            for edge in dependencies or []:
+                await self._insert_edge(connection, edge)
+            current = await self._get_version(connection, project.current_version_id)
+            selections = {**current.selections, artifact.artifact_id: artifact.id}
+            version = ProjectVersion(
+                project_id=project.id, parent_version_id=current.id,
+                timeline_version_id=artifact.id if artifact.type == "timeline" else current.timeline_version_id,
+                selections=selections,
+            )
+            await self._commit_version(connection, project, version)
+            await self._append_event(connection, project.id, "artifact.committed", {
+                "artifact_id": artifact.artifact_id, "artifact_version_id": artifact.id,
+                "project_version_id": version.id,
+            })
+        return artifact
+
+    async def current_artifacts(self, project_id: str) -> list[MediaArtifactVersion]:
+        project = await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"""SELECT artifact.* FROM {self.schema}.project_version_artifacts selected
+            JOIN {self.schema}.artifact_versions artifact ON artifact.id=selected.artifact_version_id
+            WHERE selected.project_version_id=$1 ORDER BY artifact.created_at""",
+            project.current_version_id,
+        )
+        return [self._artifact(row) for row in rows]
+
+    async def list_artifact_versions(self, project_id: str) -> list[MediaArtifactVersion]:
+        await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.artifact_versions WHERE project_id=$1 ORDER BY created_at,version",
+            project_id,
+        )
+        return [self._artifact(row) for row in rows]
+
+    async def current_dependencies(self, project_id: str) -> list[ArtifactDependency]:
+        project = await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"""SELECT edge.* FROM {self.schema}.artifact_edges edge
+            WHERE edge.project_id=$1
+              AND edge.source_version_id IN (SELECT artifact_version_id FROM {self.schema}.project_version_artifacts WHERE project_version_id=$2)
+              AND edge.target_version_id IN (SELECT artifact_version_id FROM {self.schema}.project_version_artifacts WHERE project_version_id=$2)
+            ORDER BY edge.created_at""",
+            project_id, project.current_version_id,
+        )
+        return [ArtifactDependency(**dict(row)) for row in rows]
+
+    async def save_change_and_plan(
+        self, change: ChangeRequest, plan: RebuildPlan, idempotency_key: str | None = None,
+    ) -> RebuildPlan:
+        async with self.pool.acquire() as connection, connection.transaction():
+            project = await self._locked_project(connection, change.project_id)
+            if idempotency_key:
+                existing_id = await self._idempotent_result(
+                    connection, change.project_id, "preview", idempotency_key,
+                )
+                if existing_id is not None:
+                    return await self._get_plan(connection, existing_id)
+            self._assert_version(project, change.base_project_version_id)
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.change_requests
+                (id,project_id,base_project_version_id,description,targets,edits,proposed_video_spec,created_at)
+                VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8)""",
+                change.id, change.project_id, change.base_project_version_id,
+                change.description, json.dumps(change.target_artifact_version_ids),
+                json.dumps(change.edits),
+                json.dumps(change.proposed_video_spec.model_dump(mode="json") if change.proposed_video_spec else None),
+                change.created_at,
+            )
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.rebuild_plans
+                (id,project_id,change_request_id,base_project_version_id,kind,workflow_id,
+                 video_spec,items,estimated_cost,status,created_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11)""",
+                plan.id, plan.project_id, plan.change_request_id, plan.base_project_version_id,
+                plan.kind, plan.workflow_id,
+                json.dumps(plan.video_spec.model_dump(mode="json") if plan.video_spec else None),
+                json.dumps([item.model_dump(mode="json") for item in plan.items]),
+                plan.estimated_cost, plan.status, plan.created_at,
+            )
+            if idempotency_key:
+                await self._remember(
+                    connection, change.project_id, "preview", idempotency_key, plan.id,
+                )
+            await self._append_event(connection, project.id, "rebuild.previewed", {
+                "change_request_id": change.id, "plan_id": plan.id,
+                "base_project_version_id": plan.base_project_version_id,
+            })
+        return plan
+
+    async def get_plan(self, plan_id: str) -> RebuildPlan:
+        async with self.pool.acquire() as connection:
+            return await self._get_plan(connection, plan_id)
+
+    async def save_plan(self, plan: RebuildPlan, idempotency_key: str) -> RebuildPlan:
+        async with self.pool.acquire() as connection, connection.transaction():
+            project = await self._locked_project(connection, plan.project_id)
+            existing = await self._idempotent_result(
+                connection, plan.project_id, "plan", idempotency_key,
+            )
+            if existing:
+                return await self._get_plan(connection, existing)
+            self._assert_version(project, plan.base_project_version_id)
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.rebuild_plans
+                (id,project_id,change_request_id,base_project_version_id,kind,workflow_id,
+                 video_spec,items,estimated_cost,status,created_at)
+                VALUES($1,$2,NULL,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10)""",
+                plan.id, plan.project_id, plan.base_project_version_id, plan.kind,
+                plan.workflow_id,
+                json.dumps(plan.video_spec.model_dump(mode="json") if plan.video_spec else None),
+                json.dumps([item.model_dump(mode="json") for item in plan.items]),
+                plan.estimated_cost, plan.status, plan.created_at,
+            )
+            await self._remember(connection, plan.project_id, "plan", idempotency_key, plan.id)
+            await self._append_event(connection, plan.project_id, "build.plan_created", {
+                "plan_id": plan.id, "kind": plan.kind,
+                "estimated_cost": plan.estimated_cost,
+            })
+        return plan
+
+    async def submit_build(
+        self, *, project_id: str, plan_id: str, base_version_id: str,
+        idempotency_key: str, session_id: str | None = None, user_id: str | None = None,
+    ) -> Build:
+        async with self.pool.acquire() as connection, connection.transaction():
+            existing = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE project_id=$1 AND idempotency_key=$2",
+                project_id, idempotency_key,
+            )
+            if existing:
+                return self._build(existing)
+            project = await self._locked_project(connection, project_id)
+            self._assert_version(project, base_version_id)
+            plan_row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.rebuild_plans WHERE id=$1 AND project_id=$2 FOR UPDATE",
+                plan_id, project_id,
+            )
+            if plan_row is None:
+                raise LookupError("rebuild plan not found")
+            if plan_row["base_project_version_id"] != base_version_id or plan_row["status"] != "preview":
+                raise ProjectVersionConflict(plan_row["base_project_version_id"], project.current_version_id)
+            build = Build(
+                project_id=project_id, plan_id=plan_id,
+                base_project_version_id=base_version_id,
+                idempotency_key=idempotency_key,
+                session_id=session_id, user_id=user_id,
+                kind=str(plan_row.get("kind") or "incremental"),
+                estimated_cost=float(plan_row["estimated_cost"] or 0),
+            )
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.builds
+                (id,project_id,plan_id,base_project_version_id,idempotency_key,session_id,user_id,
+                 kind,status,progress,message,estimated_cost,actual_cost,created_at,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                build.id, build.project_id, build.plan_id, build.base_project_version_id,
+                build.idempotency_key, build.session_id, build.user_id,
+                build.kind, build.status, build.progress, build.message,
+                build.estimated_cost, build.actual_cost, build.created_at, build.updated_at,
+            )
+            items = plan_row["items"] if isinstance(plan_row["items"], list) else json.loads(plan_row["items"])
+            await connection.executemany(
+                f"""INSERT INTO {self.schema}.build_steps
+                (id,build_id,project_id,plan_step_id,action,capability,status,attempt,
+                 resolved_skills,skill_context,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11)""",
+                [
+                    (BuildStep(build_id=build.id, project_id=project_id,
+                               plan_step_id=item["step_id"], action=item["action"],
+                               capability=item.get("capability", "")).id,
+                     build.id, project_id, item["step_id"], item["action"],
+                     item.get("capability", ""), "pending", 0,
+                     json.dumps(item.get("resolved_skills") or []),
+                     json.dumps(item.get("skill_context")), now())
+                    for item in items
+                ],
+            )
+            await connection.execute(f"UPDATE {self.schema}.rebuild_plans SET status='applied' WHERE id=$1", plan_id)
+            await self._append_event(connection, project_id, "build.queued", {"build_id": build.id, "plan_id": plan_id})
+        return build
+
+    async def list_build_steps(self, project_id: str, build_id: str) -> list[BuildStep]:
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.build_steps WHERE project_id=$1 AND build_id=$2 ORDER BY created_at,id",
+            project_id, build_id,
+        )
+        values = []
+        for row in rows:
+            item = dict(row)
+            for key in ("resolved_skills", "skill_context"):
+                if isinstance(item.get(key), str):
+                    item[key] = json.loads(item[key])
+            values.append(BuildStep(**item))
+        return values
+
+    async def list_validation_results(
+        self, project_id: str, build_id: str,
+    ) -> list[ValidationResult]:
+        await self.get_build(project_id, build_id)
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.validation_results WHERE project_id=$1 AND build_id=$2 ORDER BY created_at",
+            project_id, build_id,
+        )
+        results = []
+        for row in rows:
+            values = dict(row)
+            for key in ("issues", "metadata"):
+                if isinstance(values.get(key), str):
+                    values[key] = json.loads(values[key])
+            results.append(ValidationResult(**values))
+        return results
+
+    async def update_build_step(self, step: BuildStep) -> BuildStep:
+        step.updated_at = now()
+        async with self.pool.acquire() as connection, connection.transaction():
+            result = await connection.execute(
+                f"""UPDATE {self.schema}.build_steps SET status=$4,attempt=$5,
+                remote_operation_id=$6,result_artifact_version_id=$7,error=$8,
+                started_at=$9,completed_at=$10,updated_at=$11,remote_provider=$12
+                WHERE id=$1 AND build_id=$2 AND project_id=$3""",
+                step.id, step.build_id, step.project_id, step.status, step.attempt,
+                step.remote_operation_id, step.result_artifact_version_id, step.error,
+                step.started_at, step.completed_at, step.updated_at,
+                step.remote_provider,
+            )
+            if result == "UPDATE 0":
+                raise LookupError("build step not found")
+            await self._append_event(connection, step.project_id, "build.step_status", {
+                "build_id": step.build_id, "step_id": step.plan_step_id,
+                "status": step.status, "attempt": step.attempt,
+                "artifact_version_id": step.result_artifact_version_id,
+            })
+        return step
+
+    async def stage_artifact(self, artifact: MediaArtifactVersion) -> MediaArtifactVersion:
+        async with self.pool.acquire() as connection, connection.transaction():
+            existing = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.artifact_versions WHERE id=$1", artifact.id,
+            )
+            if existing:
+                return self._artifact(existing)
+            await self._locked_project(connection, artifact.project_id)
+            artifact.version = await connection.fetchval(
+                f"SELECT COALESCE(max(version),0)+1 FROM {self.schema}.artifact_versions WHERE artifact_id=$1",
+                artifact.artifact_id,
+            )
+            artifact.status = "draft"
+            await self._insert_artifact(connection, artifact)
+        return artifact
+
+    async def get_artifact(self, project_id: str, version_id: str) -> MediaArtifactVersion:
+        row = await self.pool.fetchrow(
+            f"SELECT * FROM {self.schema}.artifact_versions WHERE project_id=$1 AND id=$2",
+            project_id, version_id,
+        )
+        if row is None:
+            raise LookupError("artifact version not found")
+        return self._artifact(row)
+
+    async def commit_initial_build(
+        self, *, build_id: str, artifacts: list[MediaArtifactVersion],
+        dependencies: list[ArtifactDependency], validation_results: list[ValidationResult],
+    ) -> tuple[Build, ProjectVersion]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE id=$1 FOR UPDATE", build_id,
+            )
+            if row is None:
+                raise LookupError("build not found")
+            build = self._build(row)
+            if build.status == "completed" and build.project_version_id:
+                return build, await self._get_version(connection, build.project_version_id)
+            project = await self._locked_project(connection, build.project_id)
+            self._assert_version(project, build.base_project_version_id)
+            if any(not item.passed for item in validation_results):
+                raise ValueError("all initial build validations must pass before commit")
+            selections, timeline_id = {}, None
+            for artifact in artifacts:
+                result = await connection.execute(
+                    f"""UPDATE {self.schema}.artifact_versions SET status='ready'
+                    WHERE id=$1 AND project_id=$2 AND status='draft'""",
+                    artifact.id, project.id,
+                )
+                if result == "UPDATE 0":
+                    raise LookupError(f"draft artifact not found: {artifact.id}")
+                selections[artifact.artifact_id] = artifact.id
+                if artifact.type == "timeline":
+                    timeline_id = artifact.id
+            for edge in dependencies:
+                await self._insert_edge(connection, edge)
+            version = ProjectVersion(
+                project_id=project.id, parent_version_id=project.current_version_id,
+                timeline_version_id=timeline_id, selections=selections,
+            )
+            await self._commit_version(connection, project, version)
+            for item in validation_results:
+                await connection.execute(
+                    f"""INSERT INTO {self.schema}.validation_results
+                    (id,project_id,build_id,artifact_version_id,validator_id,passed,score,issues,metadata,created_at)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10)""",
+                    item.id, item.project_id, item.build_id, item.artifact_version_id,
+                    item.validator_id, item.passed, item.score, json.dumps(item.issues),
+                    json.dumps(item.metadata), item.created_at,
+                )
+            build.status, build.progress = "completed", 1.0
+            build.message, build.project_version_id, build.updated_at = (
+                "Initial video build committed", version.id, now(),
+            )
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds SET status=$2,progress=$3,message=$4,
+                project_version_id=$5,updated_at=$6 WHERE id=$1""",
+                build.id, build.status, build.progress, build.message, version.id, build.updated_at,
+            )
+            await self._append_event(connection, project.id, "project.version_committed", {
+                "build_id": build.id, "kind": "initial",
+                "project_version_id": version.id, "parent_version_id": version.parent_version_id,
+            })
+        return build, version
+
+    async def get_build(self, project_id: str, build_id: str) -> Build:
+        row = await self.pool.fetchrow(
+            f"SELECT * FROM {self.schema}.builds WHERE id=$1 AND project_id=$2", build_id, project_id,
+        )
+        if row is None:
+            raise LookupError("build not found")
+        return self._build(row)
+
+    async def update_build(self, build: Build) -> Build:
+        build.updated_at = now()
+        async with self.pool.acquire() as connection, connection.transaction():
+            result = await connection.execute(
+                f"""UPDATE {self.schema}.builds SET status=$3,progress=$4,message=$5,
+                project_version_id=$6,error=$7,updated_at=$8,actual_cost=$9
+                WHERE id=$1 AND project_id=$2""",
+                build.id, build.project_id, build.status, build.progress, build.message,
+                build.project_version_id, build.error, build.updated_at, build.actual_cost,
+            )
+            if result == "UPDATE 0":
+                raise LookupError("build not found")
+            await self._append_event(connection, build.project_id, "build.status", {
+                "build_id": build.id, "status": build.status,
+                "progress": build.progress, "message": build.message,
+            })
+        return build
+
+    async def requeue_failed_build(self, project_id: str, build_id: str) -> Build:
+        """Retry failed steps without discarding successful, already-paid outputs."""
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE id=$1 AND project_id=$2 FOR UPDATE",
+                build_id, project_id,
+            )
+            if row is None:
+                raise LookupError("build not found")
+            build = self._build(row)
+            if build.status != "failed":
+                raise ValueError("only failed builds can be retried")
+            await connection.execute(
+                f"""UPDATE {self.schema}.build_steps
+                SET status='pending',attempt=0,error=NULL,started_at=NULL,completed_at=NULL,updated_at=$3
+                WHERE build_id=$1 AND project_id=$2 AND status='failed'""",
+                build_id, project_id, now(),
+            )
+            build.status = "queued"
+            build.message = "Retry queued"
+            build.error = None
+            build.updated_at = now()
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds
+                SET status=$3,message=$4,error=NULL,updated_at=$5
+                WHERE id=$1 AND project_id=$2""",
+                build_id, project_id, build.status, build.message, build.updated_at,
+            )
+            await self._append_event(
+                connection, project_id, "build.retry_queued", {"build_id": build.id},
+            )
+        return build
+
+    async def cancel_build(self, project_id: str, build_id: str) -> Build:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE id=$1 AND project_id=$2 FOR UPDATE",
+                build_id, project_id,
+            )
+            if row is None:
+                raise LookupError("build not found")
+            build = self._build(row)
+            if build.status not in {"completed", "failed", "cancelled"}:
+                build.status, build.message, build.updated_at = "cancelled", "Cancellation requested", now()
+                await connection.execute(
+                    f"UPDATE {self.schema}.builds SET status=$2,message=$3,updated_at=$4 WHERE id=$1",
+                    build.id, build.status, build.message, build.updated_at,
+                )
+                await self._append_event(connection, project_id, "build.cancelled", {"build_id": build.id})
+        return build
+
+    async def commit_build(
+        self, *, build_id: str, replacements: dict[str, MediaArtifactVersion],
+        validation_results: list[ValidationResult],
+        created_artifacts: dict[str, MediaArtifactVersion] | None = None,
+    ) -> tuple[Build, ProjectVersion]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(f"SELECT * FROM {self.schema}.builds WHERE id=$1 FOR UPDATE", build_id)
+            if row is None:
+                raise LookupError("build not found")
+            build = self._build(row)
+            if build.status == "completed" and build.project_version_id:
+                return build, await self._get_version(connection, build.project_version_id)
+            if build.status in {"failed", "cancelled"}:
+                raise ValueError(f"cannot commit {build.status} build")
+            project = await self._locked_project(connection, build.project_id)
+            self._assert_version(project, build.base_project_version_id)
+            plan = await self._get_plan(connection, build.plan_id)
+            rebuild_ids = {item for item in plan.ids_for("rebuild") if item}
+            if set(replacements) != rebuild_ids:
+                raise ValueError("build replacements must cover every rebuild plan item exactly")
+            created_artifacts = created_artifacts or {}
+            create_steps = {item.step_id for item in plan.items if item.action == "create"}
+            if set(created_artifacts) != create_steps:
+                raise ValueError("created artifacts must cover every create plan item exactly")
+            passed = {item.artifact_version_id for item in validation_results if item.passed}
+            if not {item for item in plan.ids_for("validate") if item} <= passed:
+                raise ValueError("all validation plan items must pass before commit")
+            current = await self._get_version(connection, project.current_version_id)
+            next_selections, replacement_ids = dict(current.selections), {}
+            for old_id, replacement in replacements.items():
+                old_row = await connection.fetchrow(
+                    f"SELECT * FROM {self.schema}.artifact_versions WHERE id=$1 AND project_id=$2", old_id, project.id,
+                )
+                if old_row is None:
+                    raise LookupError(f"artifact version not found: {old_id}")
+                old = self._artifact(old_row)
+                replacement.project_id, replacement.artifact_id = project.id, old.artifact_id
+                staged = await connection.fetchrow(
+                    f"SELECT * FROM {self.schema}.artifact_versions WHERE id=$1 AND project_id=$2",
+                    replacement.id, project.id,
+                )
+                if staged is not None:
+                    replacement.version = int(staged["version"])
+                    replacement.status = "ready"
+                    await connection.execute(
+                        f"""UPDATE {self.schema}.artifact_versions
+                        SET artifact_id=$2,status='ready',artifact_type=$3,uri=$4,title=$5,summary=$6,
+                            content_digest=$7,generation_spec_digest=$8,provider_id=$9,provider_version=$10,
+                            plugin_id=$11,plugin_version=$12,provenance=$13::jsonb,metadata=$14::jsonb
+                        WHERE id=$1""",
+                        replacement.id, old.artifact_id, replacement.type, replacement.uri,
+                        replacement.title, replacement.summary, replacement.content_digest,
+                        replacement.generation_spec_digest, replacement.provider_id,
+                        replacement.provider_version, replacement.plugin_id, replacement.plugin_version,
+                        json.dumps(replacement.provenance), json.dumps(replacement.metadata),
+                    )
+                else:
+                    replacement.version = await connection.fetchval(
+                        f"SELECT COALESCE(max(version),0)+1 FROM {self.schema}.artifact_versions WHERE artifact_id=$1",
+                        old.artifact_id,
+                    )
+                    replacement.status = "ready"
+                    await self._insert_artifact(connection, replacement)
+                replacement_ids[old_id] = replacement.id
+                next_selections[old.artifact_id] = replacement.id
+            created_ids: dict[str, str] = {}
+            for step_id, artifact in created_artifacts.items():
+                artifact.project_id = project.id
+                staged = await connection.fetchrow(
+                    f"SELECT id,version FROM {self.schema}.artifact_versions WHERE id=$1 AND project_id=$2",
+                    artifact.id, project.id,
+                )
+                artifact.status = "ready"
+                if staged is not None:
+                    artifact.version = int(staged["version"])
+                    await connection.execute(
+                        f"""UPDATE {self.schema}.artifact_versions
+                        SET artifact_id=$2,status='ready',artifact_type=$3,uri=$4,title=$5,summary=$6,
+                            content_digest=$7,generation_spec_digest=$8,provider_id=$9,provider_version=$10,
+                            plugin_id=$11,plugin_version=$12,provenance=$13::jsonb,metadata=$14::jsonb
+                        WHERE id=$1""",
+                        artifact.id, artifact.artifact_id, artifact.type, artifact.uri,
+                        artifact.title, artifact.summary, artifact.content_digest,
+                        artifact.generation_spec_digest, artifact.provider_id,
+                        artifact.provider_version, artifact.plugin_id, artifact.plugin_version,
+                        json.dumps(artifact.provenance), json.dumps(artifact.metadata),
+                    )
+                else:
+                    artifact.version = await connection.fetchval(
+                        f"SELECT COALESCE(max(version),0)+1 FROM {self.schema}.artifact_versions WHERE artifact_id=$1",
+                        artifact.artifact_id,
+                    )
+                    await self._insert_artifact(connection, artifact)
+                next_selections[artifact.artifact_id] = artifact.id
+                created_ids[step_id] = artifact.id
+            edges = await connection.fetch(f"SELECT * FROM {self.schema}.artifact_edges WHERE project_id=$1", project.id)
+            for row_edge in edges:
+                edge = ArtifactDependency(**dict(row_edge))
+                source = replacement_ids.get(edge.source_version_id, edge.source_version_id)
+                target = replacement_ids.get(edge.target_version_id, edge.target_version_id)
+                if source != edge.source_version_id or target != edge.target_version_id:
+                    await self._insert_edge(connection, ArtifactDependency(
+                        project_id=project.id, source_version_id=source, target_version_id=target,
+                        relation=edge.relation, invalidation_policy=edge.invalidation_policy,
+                    ))
+            output_by_step: dict[str, str] = {}
+            for item in plan.items:
+                if item.action == "create":
+                    output_id = created_ids.get(item.step_id)
+                elif item.artifact_version_id:
+                    output_id = replacement_ids.get(item.artifact_version_id, item.artifact_version_id)
+                else:
+                    output_id = None
+                if output_id:
+                    output_by_step[item.step_id] = output_id
+            existing_edges = {
+                (str(row["source_version_id"]), str(row["target_version_id"]))
+                for row in edges
+            }
+            for item in plan.items:
+                target = output_by_step.get(item.step_id)
+                if target is None:
+                    continue
+                for dependency in item.depends_on:
+                    source = output_by_step.get(dependency)
+                    if source is None or (source, target) in existing_edges:
+                        continue
+                    await self._insert_edge(connection, ArtifactDependency(
+                        project_id=project.id,
+                        source_version_id=source,
+                        target_version_id=target,
+                        relation="build_step_dependency",
+                    ))
+                    existing_edges.add((source, target))
+            timeline_version_id = replacement_ids.get(
+                current.timeline_version_id, current.timeline_version_id,
+            )
+            for artifact in created_artifacts.values():
+                if artifact.type == "timeline":
+                    timeline_version_id = artifact.id
+            version = ProjectVersion(
+                project_id=project.id, parent_version_id=current.id,
+                timeline_version_id=timeline_version_id,
+                selections=next_selections, change_request_id=plan.change_request_id,
+            )
+            await self._commit_version(connection, project, version)
+            for item in validation_results:
+                await connection.execute(
+                    f"""INSERT INTO {self.schema}.validation_results
+                    (id,project_id,build_id,artifact_version_id,validator_id,passed,score,issues,metadata,created_at)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10)""",
+                    item.id, item.project_id, item.build_id, item.artifact_version_id,
+                    item.validator_id, item.passed, item.score, json.dumps(item.issues),
+                    json.dumps(item.metadata), item.created_at,
+                )
+            build.status, build.progress, build.message = "completed", 1.0, "Build committed"
+            build.project_version_id, build.updated_at = version.id, now()
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds SET status=$2,progress=$3,message=$4,
+                project_version_id=$5,updated_at=$6 WHERE id=$1""",
+                build.id, build.status, build.progress, build.message, version.id, build.updated_at,
+            )
+            await self._append_event(connection, project.id, "project.version_committed", {
+                "build_id": build.id, "project_version_id": version.id,
+                "parent_version_id": version.parent_version_id,
+            })
+        return build, version
+
+    async def select_artifact(
+        self, *, project_id: str, version_id: str, base_version_id: str, idempotency_key: str,
+    ) -> tuple[MediaArtifactVersion, ProjectVersion]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            existing = await self._idempotent_result(connection, project_id, "select", idempotency_key)
+            if existing:
+                version = await self._get_version(connection, existing)
+                artifact = self._artifact(await connection.fetchrow(
+                    f"SELECT * FROM {self.schema}.artifact_versions WHERE id=$1", version_id,
+                ))
+                return artifact, version
+            project = await self._locked_project(connection, project_id)
+            self._assert_version(project, base_version_id)
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.artifact_versions WHERE id=$1 AND project_id=$2", version_id, project_id,
+            )
+            if row is None:
+                raise LookupError("artifact version not found")
+            artifact = self._artifact(row)
+            current = await self._get_version(connection, project.current_version_id)
+            version = ProjectVersion(
+                project_id=project_id, parent_version_id=current.id,
+                timeline_version_id=version_id if artifact.type == "timeline" else current.timeline_version_id,
+                selections={**current.selections, artifact.artifact_id: version_id},
+            )
+            await self._commit_version(connection, project, version)
+            await self._remember(connection, project_id, "select", idempotency_key, version.id)
+            await self._append_event(connection, project_id, "artifact.selected", {
+                "artifact_id": artifact.artifact_id, "artifact_version_id": artifact.id,
+                "project_version_id": version.id,
+            })
+        return artifact, version
+
+    async def restore_project_version(
+        self, *, project_id: str, restore_version_id: str, base_version_id: str, idempotency_key: str,
+    ) -> ProjectVersion:
+        async with self.pool.acquire() as connection, connection.transaction():
+            existing = await self._idempotent_result(connection, project_id, "restore", idempotency_key)
+            if existing:
+                return await self._get_version(connection, existing)
+            project = await self._locked_project(connection, project_id)
+            self._assert_version(project, base_version_id)
+            restored = await self._get_version(connection, restore_version_id)
+            if restored.project_id != project_id:
+                raise LookupError("project version not found")
+            current = await self._get_version(connection, project.current_version_id)
+            version = ProjectVersion(
+                project_id=project_id, parent_version_id=current.id,
+                timeline_version_id=restored.timeline_version_id, selections=dict(restored.selections),
+            )
+            await self._commit_version(connection, project, version)
+            await self._remember(connection, project_id, "restore", idempotency_key, version.id)
+            await self._append_event(connection, project_id, "project.version_restored", {
+                "source_project_version_id": restore_version_id, "project_version_id": version.id,
+            })
+        return version
+
+    async def create_export(
+        self, *, project_id: str, base_version_id: str, idempotency_key: str, format: str,
+    ) -> ExportRecord:
+        async with self.pool.acquire() as connection, connection.transaction():
+            existing = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.exports WHERE project_id=$1 AND idempotency_key=$2",
+                project_id, idempotency_key,
+            )
+            if existing:
+                return ExportRecord(**dict(existing))
+            project = await self._locked_project(connection, project_id)
+            self._assert_version(project, base_version_id)
+            export = ExportRecord(
+                project_id=project_id, project_version_id=base_version_id,
+                idempotency_key=idempotency_key, format=format,
+            )
+            if format == "mp4":
+                selected = await connection.fetchrow(
+                    f"""SELECT artifact.uri FROM {self.schema}.project_version_artifacts selection
+                    JOIN {self.schema}.artifact_versions artifact
+                      ON artifact.id=selection.artifact_version_id
+                    WHERE selection.project_version_id=$1
+                      AND artifact.artifact_type=ANY($2::text[]) AND artifact.uri IS NOT NULL
+                    ORDER BY CASE artifact.artifact_type WHEN 'final_video' THEN 0
+                      WHEN 'video_mixed' THEN 1 ELSE 2 END, artifact.created_at DESC LIMIT 1""",
+                    base_version_id, ["final_video", "video_mixed", "video_assembled"],
+                )
+                if selected:
+                    export.status, export.uri = "completed", selected["uri"]
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.exports
+                (id,project_id,project_version_id,idempotency_key,format,status,uri,created_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8)""",
+                export.id, export.project_id, export.project_version_id, export.idempotency_key,
+                export.format, export.status, export.uri, export.created_at,
+            )
+            await self._append_event(connection, project_id, f"export.{export.status}", {
+                "export_id": export.id, "format": format, "uri": export.uri,
+            })
+        return export
+
+    async def list_events(self, project_id: str, after: int = 0) -> list[ProjectEvent]:
+        await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"""SELECT project_id,sequence,event_type AS type,payload,created_at
+            FROM {self.schema}.project_events WHERE project_id=$1 AND sequence>$2 ORDER BY sequence""",
+            project_id, after,
+        )
+        events = []
+        for row in rows:
+            values = dict(row)
+            if isinstance(values.get("payload"), str):
+                values["payload"] = json.loads(values["payload"])
+            events.append(ProjectEvent(**values))
+        return events
+
+    async def active_builds(self, project_id: str) -> list[Build]:
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.builds WHERE project_id=$1 AND status=ANY($2::text[]) ORDER BY created_at",
+            project_id, ["queued", "running", "waiting_external"],
+        )
+        return [self._build(row) for row in rows]
+
+    async def list_builds(self, project_id: str) -> list[Build]:
+        await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"SELECT * FROM {self.schema}.builds WHERE project_id=$1 ORDER BY created_at DESC",
+            project_id,
+        )
+        return [self._build(row) for row in rows]
+
+    async def _locked_project(self, connection, project_id: str) -> Project:
+        row = await connection.fetchrow(f"SELECT * FROM {self.schema}.projects WHERE id=$1 FOR UPDATE", project_id)
+        if row is None:
+            raise LookupError("project not found")
+        return Project(**dict(row))
+
+    async def _insert_version(self, connection, version: ProjectVersion) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.project_versions
+            (id,project_id,parent_version_id,timeline_version_id,change_request_id,created_at)
+            VALUES($1,$2,$3,$4,$5,$6)""",
+            version.id, version.project_id, version.parent_version_id,
+            version.timeline_version_id, version.change_request_id, version.created_at,
+        )
+        if version.selections:
+            await connection.executemany(
+                f"""INSERT INTO {self.schema}.project_version_artifacts
+                (project_version_id,artifact_id,artifact_version_id) VALUES($1,$2,$3)""",
+                [(version.id, artifact_id, selected_id) for artifact_id, selected_id in version.selections.items()],
+            )
+
+    async def _get_version(self, connection, version_id: str) -> ProjectVersion:
+        row = await connection.fetchrow(f"SELECT * FROM {self.schema}.project_versions WHERE id=$1", version_id)
+        if row is None:
+            raise LookupError("project version not found")
+        selected = await connection.fetch(
+            f"SELECT artifact_id,artifact_version_id FROM {self.schema}.project_version_artifacts WHERE project_version_id=$1",
+            version_id,
+        )
+        return ProjectVersion(**dict(row), selections={item["artifact_id"]: item["artifact_version_id"] for item in selected})
+
+    async def _commit_version(self, connection, project: Project, version: ProjectVersion) -> None:
+        await self._insert_version(connection, version)
+        project.current_version_id, project.updated_at = version.id, now()
+        await connection.execute(
+            f"UPDATE {self.schema}.projects SET current_version_id=$2,updated_at=$3 WHERE id=$1",
+            project.id, project.current_version_id, project.updated_at,
+        )
+
+    async def _insert_artifact(self, connection, artifact: MediaArtifactVersion) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.artifact_versions
+            (id,artifact_id,project_id,artifact_type,version,status,uri,title,summary,content_digest,
+             generation_spec_digest,provider_id,provider_version,plugin_id,plugin_version,
+             provenance,metadata,created_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18)""",
+            artifact.id, artifact.artifact_id, artifact.project_id, artifact.type,
+            artifact.version, artifact.status, artifact.uri, artifact.title, artifact.summary,
+            artifact.content_digest,
+            artifact.generation_spec_digest, artifact.provider_id, artifact.provider_version,
+            artifact.plugin_id, artifact.plugin_version, json.dumps(artifact.provenance),
+            json.dumps(artifact.metadata), artifact.created_at,
+        )
+
+    async def _insert_edge(self, connection, edge: ArtifactDependency) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.artifact_edges
+            (id,project_id,source_version_id,target_version_id,relation,invalidation_policy,created_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7)""",
+            edge.id, edge.project_id, edge.source_version_id, edge.target_version_id,
+            edge.relation, edge.invalidation_policy.value, edge.created_at,
+        )
+
+    async def _get_plan(self, connection, plan_id: str) -> RebuildPlan:
+        row = await connection.fetchrow(f"SELECT * FROM {self.schema}.rebuild_plans WHERE id=$1", plan_id)
+        if row is None:
+            raise LookupError("rebuild plan not found")
+        items = row["items"] if isinstance(row["items"], list) else json.loads(row["items"])
+        values = dict(row)
+        video_spec = values.get("video_spec")
+        if isinstance(video_spec, str):
+            video_spec = json.loads(video_spec)
+        return RebuildPlan(**{
+            **values,
+            "video_spec": video_spec,
+            "items": [RebuildPlanItem(**item) for item in items],
+        })
+
+    async def _append_event(self, connection, project_id: str, event_type: str, payload: dict) -> ProjectEvent:
+        await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", project_id)
+        sequence = await connection.fetchval(
+            f"SELECT COALESCE(max(sequence),0)+1 FROM {self.schema}.project_events WHERE project_id=$1", project_id,
+        )
+        event = ProjectEvent(project_id=project_id, sequence=sequence, type=event_type, payload=payload)
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.project_events(project_id,sequence,event_type,payload,created_at)
+            VALUES($1,$2,$3,$4::jsonb,$5)""",
+            project_id, sequence, event_type, json.dumps(payload), event.created_at,
+        )
+        return event
+
+    async def _idempotent_result(self, connection, project_id: str, operation: str, key: str) -> str | None:
+        return await connection.fetchval(
+            f"""SELECT result_id FROM {self.schema}.operation_idempotency
+            WHERE project_id=$1 AND operation=$2 AND idempotency_key=$3""",
+            project_id, operation, key,
+        )
+
+    async def _remember(self, connection, project_id: str, operation: str, key: str, result_id: str) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.operation_idempotency
+            (project_id,operation,idempotency_key,result_id) VALUES($1,$2,$3,$4)""",
+            project_id, operation, key, result_id,
+        )
+
+    @staticmethod
+    def _assert_version(project: Project, expected: str) -> None:
+        if project.current_version_id != expected:
+            raise ProjectVersionConflict(expected, project.current_version_id)
+
+    @staticmethod
+    def _artifact(row) -> MediaArtifactVersion:
+        values = dict(row)
+        values["type"] = values.pop("artifact_type")
+        for key in ("provenance", "metadata"):
+            if isinstance(values.get(key), str):
+                values[key] = json.loads(values[key])
+        return MediaArtifactVersion(**values)
+
+    @staticmethod
+    def _build(row) -> Build:
+        raw = dict(row)
+        values = {key: raw[key] for key in Build.model_fields if key in raw}
+        return Build(**values)

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "agent_router": "./app/services/agent/agent_router_graph.py:graph",
+    "video_agent": "./app/services/agent/agent_router_graph.py:video_agent"
+  },
+  "env": ".env.development"
+}

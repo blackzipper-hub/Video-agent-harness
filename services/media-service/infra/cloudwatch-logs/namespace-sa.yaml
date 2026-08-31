@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: amazon-cloudwatch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluent-bit
+  namespace: amazon-cloudwatch
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::699475938168:role/FluentBitCloudWatchRole

@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cuti Platform Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e17;
+  --surface: #131a2a;
+  --surface2: #1a2338;
+  --border: #2a3654;
+  --accent: #00d4aa;
+  --accent2: #6366f1;
+  --accent3: #f59e0b;
+  --accent4: #ef4444;
+  --accent5: #8b5cf6;
+  --text: #e2e8f0;
+  --text-dim: #8892a8;
+  --text-bright: #fff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Instrument Sans', sans-serif;
+  min-height: 100vh;
+  padding: 40px 30px;
+}
+h1 { font-size: 28px; font-weight: 700; color: var(--text-bright); margin-bottom: 6px; letter-spacing: -0.5px; }
+h2 { font-size: 20px; font-weight: 700; color: var(--text-bright); margin-bottom: 16px; margin-top: 32px; }
+h3 { font-size: 16px; font-weight: 600; color: var(--text-bright); margin-top: 24px; margin-bottom: 12px; }
+h4 { font-size: 13px; font-weight: 600; color: var(--text-bright); margin-top: 12px; margin-bottom: 8px; }
+.subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 36px; font-family: 'DM Mono', monospace; }
+.arch-grid { display: grid; grid-template-columns: 1fr; gap: 20px; max-width: 1200px; }
+.layer { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; }
+.layer-label { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-dim); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.layer-label .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.boxes { display: flex; flex-wrap: wrap; gap: 12px; }
+.box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; min-width: 170px; flex: 1; transition: border-color 0.2s; }
+.box:hover { border-color: var(--accent); }
+.box-title { font-weight: 600; font-size: 14px; color: var(--text-bright); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tag { font-family: 'DM Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 400; }
+.tag-port { background: rgba(0,212,170,0.15); color: var(--accent); }
+.tag-k8s { background: rgba(99,102,241,0.15); color: var(--accent2); }
+.tag-ec2 { background: rgba(245,158,11,0.15); color: var(--accent3); }
+.tag-aws { background: rgba(239,68,68,0.15); color: var(--accent4); }
+.box-detail { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-dim); line-height: 1.7; }
+.box-detail strong { color: var(--text); font-weight: 500; }
+.arrow-section { display: flex; justify-content: center; padding: 4px 0; }
+.arrow { width: 2px; height: 24px; background: linear-gradient(to bottom, var(--accent), var(--accent2)); position: relative; }
+.arrow::after { content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%); border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--accent2); }
+.arrow-label { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--text-dim); margin-left: 12px; align-self: center; }
+.flow-row { display: flex; align-items: center; gap: 8px; }
+.section-divider { height: 1px; background: var(--border); margin: 28px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: 'DM Mono', monospace; margin-bottom: 20px; }
+table th { text-align: left; padding: 10px 14px; background: var(--surface2); color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 500; border-bottom: 1px solid var(--border); }
+table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text); }
+table tr:hover td { background: rgba(0,212,170,0.03); }
+.env-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; font-family: 'DM Mono', monospace; }
+.env-dev { background: rgba(99,102,241,0.15); color: var(--accent2); }
+.env-prod { background: rgba(0,212,170,0.15); color: var(--accent); }
+.deprecated { opacity: 0.45; }
+.deprecated .box-title { text-decoration: line-through; }
+.deprecated .box-detail { text-decoration: line-through; }
+.tag-deprecated { background: rgba(255,255,255,0.08); color: #666; font-style: italic; }
+.flow-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-top: 20px; max-width: 1200px; }
+.flow-diagram h3 { font-size: 14px; color: var(--text-bright); margin-bottom: 16px; margin-top: 0; }
+.flow-diagram pre { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text); line-height: 1.8; white-space: pre; overflow-x: auto; }
+.flow-diagram .comment { color: var(--text-dim); }
+.flow-diagram .highlight { color: var(--accent); }
+.flow-diagram .highlight2 { color: var(--accent2); }
+.flow-diagram .highlight3 { color: var(--accent3); }
+.alb-note { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 20px 0; max-width: 1200px; }
+.alb-note strong { color: var(--accent); }
+.mono { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-dim); }
+.note-box { background: rgba(245,158,11,0.08); border-left: 3px solid var(--accent3); padding: 10px 14px; margin: 16px 0; font-family: 'DM Mono', monospace; font-size: 11px; }
+details { margin: 8px 0; }
+details > summary { font-size: 14px; font-weight: 600; color: var(--text-bright); cursor: pointer; padding: 8px 0; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: '▸ '; color: var(--accent2); }
+details[open] > summary::before { content: '▾ '; color: var(--accent); }
+details[open] > summary { margin-bottom: 12px; }
+details > summary:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Cuti Platform Architecture</h1>
+<p class="subtitle">GoDaddy DNS → EC2 Nginx (SSL) → Backend Services → EKS K8s</p>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 1: ARCHITECTURE OVERVIEW
+     ═══════════════════════════════════════════════════════════════ -->
+
+<div class="arch-grid">
+
+  <!-- DNS -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent3)"></span> Layer 1 — DNS (GoDaddy)</div>
+    <div class="boxes">
+      <div class="box">
+        <div class="box-title">cuti.land / www.cuti.land <span class="tag tag-aws">prod</span></div>
+        <div class="box-detail">A record → EC2 Public IP</div>
+      </div>
+      <div class="box">
+        <div class="box-title">dev.newai.land <span class="tag tag-aws">dev</span></div>
+        <div class="box-detail">A record → EC2 Public IP</div>
+      </div>
+      <div class="box">
+        <div class="box-title">newai.land <span class="tag tag-aws">prod</span></div>
+        <div class="box-detail">A record → EC2 Public IP (legacy)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-section"><div class="flow-row"><div class="arrow"></div><span class="arrow-label">HTTPS :443 (Let's Encrypt TLS 1.2+1.3)</span></div></div>
+
+  <!-- Nginx -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent)"></span> Layer 2 — Nginx Reverse Proxy (EC2)</div>
+    <div class="boxes">
+      <div class="box" style="flex:2">
+        <div class="box-title">Routing Rules</div>
+        <div class="box-detail">
+          <strong>/</strong> → Cuti-backend-go (serves frontend dist/)<br>
+          <strong>/api/v1/</strong> → Cuti-backend-go (Go API)<br>
+          <strong>/api/cuti/</strong> → VideoAgent (EC2)<br>
+          <strong>/api/cv-v1/</strong> → VideoAgent EKS <span class="env-badge env-dev">dev only</span><br>
+          <strong>/api</strong> → CartoonBook Python backend<br>
+          <strong>/storybook/</strong> → static dist/<br>
+          <strong>/api/{photos,videos,audios}/</strong> → static files<br>
+          <strong>/opik/</strong> → localhost:5174 (admin auth gated)
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">SSL Config</div>
+        <div class="box-detail">
+          TLS 1.2 + 1.3<br>
+          HSTS max-age=63072000<br>
+          Let's Encrypt certs<br>
+          Session cache: 50m<br>
+          Session tickets: off
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-section"><div class="flow-row"><div class="arrow"></div><span class="arrow-label">proxy_pass → upstream ports</span></div></div>
+
+  <!-- App Services -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent2)"></span> Layer 3 — Application Services</div>
+    <div class="boxes">
+      <div class="box">
+        <div class="box-title">Cuti-backend-go <span class="tag tag-ec2">EC2</span></div>
+        <div class="box-detail">
+          <strong>Dev:</strong> :8443<br>
+          <strong>Prod:</strong> :2096<br>
+          Go HTTP server<br>
+          Serves frontend dist/ at /<br>
+          /api/v1/* routes:<br>
+          &nbsp; users, payment, stripe,<br>
+          &nbsp; subscription, folders, admin
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Cuti-VideoAgent <span class="tag tag-ec2">EC2</span><span class="tag tag-k8s">K8s</span></div>
+        <div class="box-detail">
+          <strong>EC2 Dev:</strong> :8002 (systemd)<br>
+          <strong>EC2 Prod:</strong> :8003 (systemd)<br>
+          <strong>K8s:</strong> :8000 (ClusterIP)<br>
+          Python FastAPI + uvicorn<br>
+          LangGraph agent pipeline<br>
+          deploy_conda_cuti.sh / Helm
+        </div>
+      </div>
+      <div class="box deprecated">
+        <div class="box-title">CartoonBook Backend <span class="tag tag-ec2">EC2</span> <span class="tag tag-deprecated">deprecated</span></div>
+        <div class="box-detail">
+          <strong>Dev:</strong> :8001<br>
+          <strong>Prod:</strong> :8000<br>
+          Python FastAPI<br>
+          Legacy /api routes<br>
+          Admin endpoints
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Cuti-Media-Service <span class="tag tag-k8s">K8s</span></div>
+        <div class="box-detail">
+          <strong>K8s:</strong> :8080 (ClusterIP)<br>
+          <strong>Dev:</strong> media-dev.cuti.internal<br>
+          <strong>Prod:</strong> media.cuti.internal<br>
+          video concat/trim, audio trim,<br>
+          image resize, S3 pipeline
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-section"><div class="flow-row"><div class="arrow"></div><span class="arrow-label">VideoAgent → Media-Service (httpx, internal ALB)</span></div></div>
+
+  <!-- Frontend -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent5)"></span> Layer 4 — Frontend</div>
+    <div class="boxes">
+      <div class="box">
+        <div class="box-title">Cuti Frontend (React/Lovable)</div>
+        <div class="box-detail">
+          Build → dist/<br>
+          Served by Go server at /<br>
+          <strong>Dev:</strong> :5176 (Vite dev server)<br>
+          <strong>Prod:</strong> Go serves dist/
+        </div>
+      </div>
+      <div class="box deprecated">
+        <div class="box-title">Storybook Frontend <span class="tag tag-deprecated">deprecated</span></div>
+        <div class="box-detail">
+          Build → dist/<br>
+          Served by Nginx at /storybook/<br>
+          <strong>Dev:</strong> :5175<br>
+          <strong>Prod:</strong> :5173
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <!-- Middleware -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent4)"></span> Layer 5 — Middleware & Infrastructure</div>
+    <div class="boxes">
+      <div class="box">
+        <div class="box-title">PostgreSQL <span class="tag tag-ec2">EC2</span></div>
+        <div class="box-detail">
+          :5432 localhost<br>
+          <strong>Dev:</strong> cuti_video_dev<br>
+          <strong>Prod:</strong> cuti_video_prod<br>
+          asyncpg / SQLAlchemy
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Redis <span class="tag tag-ec2">EC2</span></div>
+        <div class="box-detail">
+          :6379 localhost<br>
+          Streams (task events)<br>
+          Rate limiting<br>
+          Account cache
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">AWS SQS <span class="tag tag-aws">AWS</span></div>
+        <div class="box-detail">
+          ap-southeast-2<br>
+          cuti-agent-task-queue-dev<br>
+          cuti-agent-task-queue<br>
+          Task worker polling
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">AWS AppConfig <span class="tag tag-aws">AWS</span></div>
+        <div class="box-detail">
+          App: cuti-videoagent<br>
+          Profile: account-config<br>
+          Model rate limits<br>
+          Feature flags
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">AWS S3 <span class="tag tag-aws">AWS</span></div>
+        <div class="box-detail">
+          Images/videos/audios<br>
+          Media pipeline upload<br>
+          via Media-Service
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <!-- K8s Details -->
+  <div class="layer">
+    <div class="layer-label"><span class="dot" style="background:var(--accent2)"></span> EKS Cluster — HPA & Resources</div>
+    <div class="boxes">
+      <div class="box">
+        <div class="box-title">VideoAgent Pod</div>
+        <div class="box-detail">
+          <strong>Replicas:</strong> 1–4 (HPA)<br>
+          <strong>CPU target:</strong> 70%<br>
+          <strong>Scale up:</strong> +2 pods/60s<br>
+          <strong>Scale down:</strong> -1 pod/120s<br>
+          <strong>CPU:</strong> 500m–1500m<br>
+          <strong>Memory:</strong> 2–6Gi<br>
+          <strong>Node:</strong> workload-type=agent<br>
+          <strong>Grace:</strong> 10800s (3h)
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Media-Service Pod (Dev)</div>
+        <div class="box-detail">
+          <strong>Replicas:</strong> 1–5 (HPA)<br>
+          <strong>CPU target:</strong> 70%<br>
+          <strong>Scale up:</strong> +2 pods/60s<br>
+          <strong>Scale down:</strong> -1 pod/120s<br>
+          <strong>CPU:</strong> 500m–2000m<br>
+          <strong>Memory:</strong> 2–4Gi
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Media-Service Pod (Prod)</div>
+        <div class="box-detail">
+          <strong>Replicas:</strong> 1–20 (HPA)<br>
+          <strong>CPU target:</strong> 60%<br>
+          <strong>Scale up:</strong> +4 pods/60s<br>
+          <strong>Scale down:</strong> -1 pod/120s<br>
+          <strong>CPU:</strong> 1000m–2000m<br>
+          <strong>Memory:</strong> 2–4Gi
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-title">Ingress (ALB)</div>
+        <div class="box-detail">
+          <strong>Class:</strong> alb (AWS)<br>
+          <strong>Scheme:</strong> internal<br>
+          <strong>Target:</strong> ip<br>
+          <strong>Idle timeout:</strong> 1200s<br>
+          Only reachable from EC2
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 2: PORT TABLE
+     ═══════════════════════════════════════════════════════════════ -->
+
+<h2>Service & Port Summary</h2>
+<table>
+  <thead><tr><th>Service</th><th>Deploy</th><th>Dev Port</th><th>Prod Port</th><th>Nginx Route</th></tr></thead>
+  <tbody>
+    <tr><td>Cuti-backend-go</td><td><span class="env-badge env-prod">EC2</span></td><td>8443</td><td>2096</td><td>/api/v1/ , /</td></tr>
+    <tr><td>VideoAgent (EC2)</td><td><span class="env-badge env-prod">EC2</span></td><td>8002</td><td>8003</td><td>/api/cuti/</td></tr>
+    <tr><td>VideoAgent (K8s)</td><td><span class="env-badge env-dev">K8s</span></td><td>8000</td><td>8000</td><td>/api/cv-v1/ (dev)</td></tr>
+    <tr><td>Media-Service</td><td><span class="env-badge env-dev">K8s</span></td><td>8080</td><td>8080</td><td>internal ALB</td></tr>
+    <tr class="deprecated"><td>CartoonBook Backend</td><td><span class="env-badge env-prod">EC2</span></td><td>8001</td><td>8000</td><td>/api</td></tr>
+    <tr class="deprecated"><td>Storybook Frontend</td><td><span class="env-badge env-prod">EC2</span></td><td>5175</td><td>5173</td><td>/storybook/</td></tr>
+    <tr><td>Cuti Frontend</td><td><span class="env-badge env-prod">EC2</span></td><td>5176</td><td>Go dist</td><td>/</td></tr>
+    <tr><td>PostgreSQL</td><td><span class="env-badge env-prod">EC2</span></td><td>5432</td><td>5432</td><td>—</td></tr>
+    <tr><td>Redis</td><td><span class="env-badge env-prod">EC2</span></td><td>6379</td><td>6379</td><td>—</td></tr>
+    <tr class="deprecated"><td>Opik Monitor</td><td><span class="env-badge env-prod">EC2</span></td><td>5174</td><td>5174</td><td>/opik/ (auth)</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 3: FLOW DIAGRAMS (moved up for context)
+     ═══════════════════════════════════════════════════════════════ -->
+
+<div class="flow-diagram">
+  <h3>Request Flow — 用户请求链路</h3>
+  <pre>
+<span class="comment">┌─────────────────────────────────────────────────────────────────────────────────────┐</span>
+<span class="comment">│</span> <span class="highlight3">Browser</span>                                                                           <span class="comment">│</span>
+<span class="comment">│</span>   │                                                                               <span class="comment">│</span>
+<span class="comment">│</span>   ▼  HTTPS                                                                       <span class="comment">│</span>
+<span class="comment">│</span> <span class="highlight">GoDaddy DNS</span> (cuti.land / dev.newai.land)                                          <span class="comment">│</span>
+<span class="comment">│</span>   │  A record → EC2 Public IP                                                    <span class="comment">│</span>
+<span class="comment">│</span>   ▼                                                                               <span class="comment">│</span>
+<span class="comment">│</span> <span class="highlight">Nginx</span> (:443, TLS, EC2)                                                           <span class="comment">│</span>
+<span class="comment">│</span>   ├── /              → <span class="highlight2">Cuti-backend-go</span> (:8443 dev / :2096 prod)  → serves dist/   <span class="comment">│</span>
+<span class="comment">│</span>   ├── /api/v1/       → <span class="highlight2">Cuti-backend-go</span>  (users, payment, stripe)                 <span class="comment">│</span>
+<span class="comment">│</span>   ├── /api/cuti/     → <span class="highlight2">VideoAgent</span> EC2 (:8002 dev / :8003 prod)                    <span class="comment">│</span>
+<span class="comment">│</span>   ├── /api/cv-v1/    → <span class="highlight2">VideoAgent</span> K8s (internal ALB) <span class="highlight3">[dev only]</span>                    <span class="comment">│</span>
+<span class="comment">│</span>   ├── /api/{media}/  → static files (images/videos/audios)                       <span class="comment">│</span>
+<span class="comment">│</span>   └── /storybook/    → static dist/ <span class="comment">(deprecated)</span>                                  <span class="comment">│</span>
+<span class="comment">└─────────────────────────────────────────────────────────────────────────────────────┘</span>
+  </pre>
+</div>
+
+<div class="flow-diagram">
+  <h3>Service Interaction — 服务间调用关系</h3>
+  <pre>
+<span class="highlight3">Frontend</span> (React, Lovable)
+   │  POST /api/cuti/agent-router/stream  (FormData: user_input, user_option, files)
+   │  POST /api/cuti/agent-router/estimate-credits  (JSON: user_option, is_audio_driven)
+   │  POST /api/v1/* (users, payment, subscription)
+   │  GET  /api/cuti/agent-router/messages/{run_id}  (SSE)
+   ▼
+<span class="highlight">Cuti-backend-go</span> (Go)               <span class="highlight">Cuti-VideoAgent</span> (Python FastAPI)
+   │  /api/v1/* business               │
+   │  Serves frontend dist/            │  ┌─────────────────────────────────────────┐
+   │                                   │  │ <span class="highlight2">AgentRouterService</span> (LangGraph)         │
+   │                                   │  │   process_user_request()                │
+   │                                   │  │   LLM→推断agent_type→路由              │
+   │                                   │  │     ├→ <span class="highlight3">VIDEO</span>  → VideoAgentService       │
+   │                                   │  │     ├→ <span class="highlight3">STORY</span>  → story_generation       │
+   │                                   │  │     ├→ <span class="highlight3">MUSIC</span>  → music_generation       │
+   │                                   │  │     ├→ <span class="highlight3">IMAGE</span>  → image_generation       │
+   │                                   │  │     └→ CLARIFY / UNKNOWN              │
+   │                                   │  └─────────────────────────────────────────┘
+   │                                   │
+   │                                   │  <span class="highlight2">VideoAgentService</span> (LangGraph pipeline):
+   │                                   │    user_input_analysis → music_generation
+   │                                   │    → video_analysis → outline_generation
+   │                                   │    → main_character_design
+   │                                   │    → <span class="highlight3">gate_after_character</span> (暂停1: kf+video预估)
+   │                                   │    → scene_generation → storyboard_detail
+   │                                   │    → keyframe_generation → keyframe_reflection
+   │                                   │    → <span class="highlight3">gate_after_keyframe_reflection</span> (暂停2: video预估)
+   │                                   │    → video_generation
+   │                                   │    → <span class="highlight3">gate_after_shots</span> (暂停3: 0)
+   │                                   │    → video_segments → video_assembly
+   │                                   │
+   │                                   ├──→ <span class="highlight2">Media-Service</span> (K8s :8080, internal ALB)
+   │                                   │      pipeline_ensure_on_s3 (ffmpeg normalize)
+   │                                   │      video_concat, video_trim, audio_trim
+   │                                   │      image_resize, S3 upload
+   │                                   │
+   │                                   ├──→ <span class="highlight2">3rd-party APIs</span> (WaveSpeed / Google / OpenAI)
+   │                                   │      keyframe: Gemini 2.5 Flash / 3 Pro / Seedream
+   │                                   │      video: Seedance / Wan 2.5 / Wan 2.6 / Kling / Sora
+   │                                   │      lipsync: Wan 2.6 + audio_url
+   │                                   │
+   │                                   ├──→ <span class="highlight2">Redis</span> (:6379)
+   │                                   │      task status streams, rate limiting
+   │                                   │
+   │                                   ├──→ <span class="highlight2">PostgreSQL</span> (:5432)
+   │                                   │      conversations, scenes, shots, versions
+   │                                   │
+   │                                   ├──→ <span class="highlight2">AWS SQS</span> → task_worker polling
+   │                                   │
+   │                                   └──→ <span class="highlight2">AWS AppConfig</span> → rate limits, flags
+   │
+   └──→ <span class="highlight2">PostgreSQL</span> (:5432) users, payments
+  </pre>
+</div>
+
+<details>
+<summary>ALB (Application Load Balancer) — 全自动路由说明</summary>
+<div class="alb-note">
+  <strong>ALB = AWS Application Load Balancer — 全自动路由，无需人工干预</strong><br>
+  <span class="mono" style="line-height:1.8;">
+    K8s 中 VideoAgent 和 Media-Service 的 Ingress 都用 AWS ALB。<br><br>
+    <strong>DNS → ALB 自动：</strong>Route 53 Private Hosted Zone（cuti.internal）自动把 media-dev.cuti.internal 指向 ALB 内网地址。
+    AWS Load Balancer Controller 创建 Ingress 时自动注册 DNS，无需手动配置。<br>
+    <strong>ALB → Pod 自动：</strong>AWS VPC CNI 插件给每个 Pod 分配 VPC 内网 IP，Load Balancer Controller 自动把 Pod IP 注册为 Target Group 后端。
+    HPA 扩缩容时新 Pod 自动注册，Pod 终止后自动摘除。<br>
+    <strong>Pod IP 变化无影响：</strong>target-type=ip 模式下，所有 Pod IP 的注册/注销全自动。Nginx 只知道 media-dev.cuti.internal 这个 DNS 名，解析由 AWS 自动完成。<br><br>
+    <strong>Scheme: internal</strong> — 只在 VPC 内部可达，外部用户无法直接访问 K8s 服务，必须经 EC2 Nginx 转发。<br>
+    <strong>Target-type: ip</strong> — ALB 直接路由到 Pod IP（不经 NodePort），延迟更低。<br>
+    <strong>Idle timeout: 1200s</strong> — 支持长连接（VideoAgent 生成视频可能需要数分钟）。<br>
+    <strong>负载均衡策略：</strong>Round-Robin / Least Outstanding Requests 分配到各 Pod，健康检查失败自动摘除。
+  </span>
+</div>
+</details>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 4: TOOL COST PRICING (reference table)
+     ═══════════════════════════════════════════════════════════════ -->
+
+<h2>Tool Cost / Credit Pricing</h2>
+<p class="mono" style="margin-bottom:12px;">
+  1 USD = 100 Credits | 前端默认: <span style="color:var(--accent)">Nano Banana 2 + Seedance v1 Pro + 1080p</span>
+</p>
+<table>
+  <thead><tr><th>Tool</th><th>Type</th><th>Formula</th><th>Example (1080p)</th><th>Credits</th></tr></thead>
+  <tbody>
+    <tr><td>Nano Banana (Flash)</td><td>Image</td><td>$0.039/image</td><td>1 image = $0.039</td><td>4</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>Nano Banana 2 ← default</strong></td><td>Image</td><td>$0.067/image (1K)</td><td>1 image = $0.067</td><td>7</td></tr>
+    <tr><td>Nano Banana Pro</td><td>Image</td><td>$0.134/image (1K)</td><td>1 image = $0.134</td><td>13</td></tr>
+    <tr><td>Seedream</td><td>Image</td><td>$0.04/image</td><td>1 image = $0.04</td><td>4</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>Seedance v1 Pro Fast ← default</strong></td><td>Video</td><td>480p $0.012/s, 720p $0.024/s, <strong>1080p $0.048/s</strong></td><td>3s 1080p = <strong>$0.144</strong></td><td>14</td></tr>
+    <tr><td>Seedance v1.5 Pro Fast</td><td>Video</td><td>720p $0.02/s, 1080p $0.03/s</td><td>3s 1080p = $0.09</td><td>9</td></tr>
+    <tr><td>Seedance Lite (有尾帧)</td><td>Video</td><td>480p $0.016/s, 720p $0.032/s, <strong>1080p $0.09/s</strong></td><td>3s 1080p = $0.27</td><td>27</td></tr>
+    <tr><td>Wan 2.5</td><td>Video</td><td>480p $0.05/s, 720p $0.10/s, <strong>1080p $0.15/s</strong></td><td>3s 1080p = $0.45</td><td>45</td></tr>
+    <tr><td>Wan 2.6 (无audio)</td><td>Video</td><td>Base $0.125/5s (720p); <strong>1080p ×1.5</strong>; audio ×2</td><td>3s 1080p = $0.1125</td><td>11</td></tr>
+    <tr><td>Kling v3</td><td>Video</td><td>$0.90/5s; sound ×1.5</td><td>5s = $0.90</td><td>90</td></tr>
+    <tr><td>Sora 2</td><td>Video</td><td>$0.10/s (720×1280)</td><td>4s = $0.40</td><td>40</td></tr>
+    <tr><td>Sora 2 Pro</td><td>Video</td><td>720p $0.30/s, 1080p $0.50/s (代码统一走720p档)</td><td>4s = <strong>$1.20</strong></td><td>120</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>Wan 2.6 + audio (lipsync)</strong></td><td>Video/Lipsync</td><td>Base $0.125/5s × res × 2 (audio)</td><td>3s <strong>1080p = $0.225</strong></td><td>23</td></tr>
+    <tr><td>Wan 2.5 (lipsync fallback)</td><td>Video/Lipsync</td><td>同 Wan 2.5 标准定价 (无 audio 加价)</td><td>3s 1080p = $0.45</td><td>45</td></tr>
+    <tr style="opacity:0.45"><td>Lipsync 2 Pro (latentsync)</td><td>Post-process</td><td>$0.08/s audio</td><td>5s = $0.40 (not in main pipeline)</td><td>40</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  <strong>注</strong>: 上表 Example 列使用 3s（threshold 默认值）或工具最小时长。Tool 按秒/次计费，实际 shot 时长 ≈ split threshold。
+</p>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 5: GENERATION COST (核心成本推算)
+     ═══════════════════════════════════════════════════════════════ -->
+
+<h2>Generation Cost — API 成本推算 (含 built-in retry)</h2>
+<p class="mono" style="margin-bottom:16px;">
+  <strong>前端默认值</strong>（cuti-front-end-lovable/src/constants/defaults.ts）：<br>
+  Image: <span style="color:var(--accent)">nano_banana_2</span> ($0.067/image) &nbsp;|&nbsp;
+  Video: <span style="color:var(--accent)">Auto → Seedance v1 Pro Fast</span> &nbsp;|&nbsp;
+  Resolution: <span style="color:var(--accent)">1080p</span><br>
+  Duration: 30s &nbsp;|&nbsp;
+  lipsyncCoverage: <span style="color:var(--accent)">50</span> &nbsp;|&nbsp;
+  enableContinuityMode: false &nbsp;|&nbsp;
+  enableKeyframeReflection: false<br>
+  <strong>shot 时长</strong>: threshold = min(video_durations) = <span style="color:var(--accent)">3s</span> (普通模式)<br>
+  <strong>重要</strong>: 所有成本已包含 built-in consistency check retry (kf ×1.2, video ×1.25)
+</p>
+
+<!-- Built-in Reflection Notice -->
+<div class="note-box">
+  <strong style="color:var(--accent3);">Built-in Consistency Check（always-on，前端无法关闭）</strong><br>
+  <strong>Video</strong>: <code>check_video_consistency_llm</code> 每个视频生成后自动运行, ~20-25% 概率触发 retry → 有效倍数 <strong>×1.25</strong><br>
+  &nbsp;&nbsp;来源: <code>video_tool_wrapper.py:348-355</code> — 始终开启, 无开关<br>
+  <strong>Keyframe</strong>: <code>check_character_consistency_llm</code> 每个 keyframe 生成后自动运行, ~15-20% retry → 有效倍数 <strong>×1.2</strong><br>
+  &nbsp;&nbsp;来源: <code>image_tool_wrapper.py:406-412</code> — 始终开启 (除 character design/fusion 外)<br>
+  这些 built-in check 与 <code>enable_keyframe_reflection</code>（VLM 反思节点）<strong>不同且独立</strong>。VLM 反思默认关闭, built-in check 始终运行。<br><br>
+  <strong>下方表格所有数字已包含 built-in retry 倍数</strong>。代码 <code>cost_estimation.py</code> 自动乘入。
+</div>
+
+<details>
+<summary>Shot 数量预估公式 — Video-Driven vs Audio-Driven</summary>
+<p class="mono" style="margin-bottom:12px;">
+  threshold = min(video_durations) ≈ <strong>3s</strong> (普通模式) | LIP_SYNC_MV: max(durations) ≈ 10-15s<br>
+  scene : shot = <strong>1:1</strong>（prompt 强制 shots数 = scenes数）
+</p>
+<table>
+  <thead><tr><th>总时长</th><th>Video-Driven (无音频)</th><th>Audio-Driven (均匀段)</th><th>Audio-Driven (不均匀段, 示例)</th></tr></thead>
+  <tbody>
+    <tr><td><strong>30s</strong></td><td>ceil(30/3) = <strong>10</strong> shots</td><td>10段×3s → 10 shots</td><td>3段 [8s,12s,10s] → 3+4+4 = <strong>11</strong> shots</td></tr>
+    <tr><td><strong>60s</strong></td><td>ceil(60/3) = <strong>20</strong> shots</td><td>10段×6s → ceil(6/3)×10 = 20</td><td>3段 [15s,25s,20s] → 5+9+7 = <strong>21</strong> shots</td></tr>
+    <tr><td><strong>120s</strong></td><td>ceil(120/3) = <strong>40</strong> shots</td><td>20段×6s → 40</td><td>5段 [20s,30s,25s,15s,30s] → 7+10+9+5+10 = <strong>41</strong></td></tr>
+    <tr><td><strong>180s</strong></td><td>ceil(180/3) = <strong>60</strong> shots</td><td>30段×6s → 60</td><td>6段 [30s,35s,25s,30s,35s,25s] → 10+12+9+10+12+9 = <strong>62</strong></td></tr>
+    <tr><td><strong>240s</strong></td><td>ceil(240/3) = <strong>80</strong> shots</td><td>40段×6s → 80</td><td>8段 [25,35,30,30,25,35,30,30] → 9+12+10+10+9+12+10+10 = <strong>82</strong></td></tr>
+    <tr><td><strong>300s</strong></td><td>ceil(300/3) = <strong>100</strong> shots</td><td>50段×6s → 100</td><td>实际取决于 audio segment 分布</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  <strong>关键差异</strong>：audio-driven 的 shot 数取决于音频 segment 长度分布。<br>
+  短 segment (&lt;=3s) = 1 shot; 长 segment = ceil(duration/3) shots。<br>
+  均匀段时两者基本一致; 不均匀段时 audio-driven 可能略多（每个 segment 向上取整的开销）。
+</p>
+</details>
+
+<!-- Video-Driven Cost Table -->
+<h3>API Cost: Video-Driven (1-5 min, lipsync=50%, 含 built-in retry)</h3>
+<p class="mono" style="margin-bottom:8px;">
+  每 shot @<strong>3s</strong>: kf=$0.067×1.2 + video(0.5×$0.144 + 0.5×$0.225)×1.25 = <strong>$0.311/shot</strong><br>
+  数据来源: <code>cost_estimation.py</code> 实际调用 — threshold=3s, built-in kf×1.2, video×1.25 已乘入
+</p>
+<table>
+  <thead><tr><th>Duration</th><th>Shots</th><th>KF (USD)</th><th>Video (USD)</th><th>Total USD</th><th>RMB</th><th>Credits</th></tr></thead>
+  <tbody>
+    <tr><td><strong>30s</strong></td><td>10</td><td>$0.80</td><td>$2.31</td><td><strong>$3.11</strong></td><td><strong>¥22.4</strong></td><td><strong>311</strong></td></tr>
+    <tr><td><strong>60s</strong></td><td>20</td><td>$1.61</td><td>$4.61</td><td><strong>$6.22</strong></td><td><strong>¥44.8</strong></td><td><strong>622</strong></td></tr>
+    <tr><td><strong>120s</strong></td><td>40</td><td>$3.22</td><td>$9.22</td><td><strong>$12.44</strong></td><td><strong>¥89.6</strong></td><td><strong>1,244</strong></td></tr>
+    <tr><td><strong>180s</strong></td><td>60</td><td>$4.82</td><td>$13.84</td><td><strong>$18.66</strong></td><td><strong>¥134.4</strong></td><td><strong>1,866</strong></td></tr>
+    <tr><td><strong>240s</strong></td><td>80</td><td>$6.43</td><td>$18.45</td><td><strong>$24.88</strong></td><td><strong>¥179.1</strong></td><td><strong>2,488</strong></td></tr>
+    <tr><td><strong>300s</strong></td><td>100</td><td>$8.04</td><td>$23.06</td><td><strong>$31.10</strong></td><td><strong>¥223.9</strong></td><td><strong>3,110</strong></td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  video 拆分: 50% 普通 (Seedance v1 Pro 3s $0.144×1.25=$0.18) + 50% lipsync (Wan 2.6+audio 3s $0.225×1.25=$0.281)<br>
+  无 lipsync (coverage=0): 60s → $1.61(kf) + 20×$0.144×1.25×100=$3.60(vid) = <strong>$5.21</strong> (521 credits)
+</p>
+
+<!-- Audio-Driven Cost Table -->
+<h3>API Cost: Audio-Driven (1-5 min, lipsync=100%, 含 built-in retry)</h3>
+<p class="mono" style="margin-bottom:8px;">
+  lipsync=100% (audio-driven 常见) | 每 shot @3s → <strong>等价于 total_duration × $0.075/s × 1.25</strong><br>
+  因为 shots = ceil(duration/3), 每 shot $0.225 → shots × $0.225 = duration × $0.075 (线性关系)
+</p>
+<table>
+  <thead><tr><th>Duration</th><th>Shots</th><th>KF (USD)</th><th>Video (USD)</th><th>Total USD</th><th>RMB</th><th>Credits</th></tr></thead>
+  <tbody>
+    <tr><td><strong>30s</strong></td><td>10</td><td>$0.80</td><td>$2.81</td><td><strong>$3.61</strong></td><td><strong>¥26.0</strong></td><td><strong>361</strong></td></tr>
+    <tr><td><strong>60s</strong></td><td>20</td><td>$1.61</td><td>$5.62</td><td><strong>$7.23</strong></td><td><strong>¥52.1</strong></td><td><strong>723</strong></td></tr>
+    <tr><td><strong>120s</strong></td><td>40</td><td>$3.22</td><td>$11.25</td><td><strong>$14.47</strong></td><td><strong>¥104.2</strong></td><td><strong>1,447</strong></td></tr>
+    <tr><td><strong>180s</strong></td><td>60</td><td>$4.82</td><td>$16.87</td><td><strong>$21.69</strong></td><td><strong>¥156.2</strong></td><td><strong>2,169</strong></td></tr>
+    <tr><td><strong>240s</strong></td><td>80</td><td>$6.43</td><td>$22.50</td><td><strong>$28.93</strong></td><td><strong>¥208.3</strong></td><td><strong>2,893</strong></td></tr>
+    <tr><td><strong>300s</strong></td><td>100</td><td>$8.04</td><td>$28.12</td><td><strong>$36.16</strong></td><td><strong>¥260.4</strong></td><td><strong>3,616</strong></td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  audio-driven 简便公式: video_cost = total_seconds × $0.075/s × 1.25 (Wan 2.6 1080p+audio + retry)<br>
+  kf_cost = shots × $0.067 × 1.2 | total = kf + video<br>
+  不均匀 segment 的 shot 数可能比 ceil(total/3) 略多（每 segment 向上取整），实际差异 &lt;5%。
+</p>
+
+<details>
+<summary>60s Video-Driven 详细 API 成本拆分</summary>
+<table>
+  <thead><tr><th>Cost Item</th><th>Count (理想)</th><th>Count (含retry)</th><th>Unit Cost (@3s)</th><th>理想 USD</th><th>含retry USD</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Keyframe</strong> (Nano Banana 2)</td><td>20 images</td><td>24 (×1.2)</td><td>$0.067</td><td>$1.34</td><td>$1.61</td></tr>
+    <tr><td><strong>Video Normal</strong> (Seedance v1 Pro 3s)</td><td>10 shots</td><td>12.5 (×1.25)</td><td>$0.144</td><td>$1.44</td><td>$1.80</td></tr>
+    <tr><td><strong>Video Lipsync</strong> (Wan 2.6+audio 3s)</td><td>10 shots</td><td>12.5 (×1.25)</td><td>$0.225</td><td>$2.25</td><td>$2.81</td></tr>
+    <tr><td><strong>LLM</strong> (Gemini Flash)</td><td>~15 calls</td><td>~18</td><td>~$0.02</td><td>~$0.30</td><td>~$0.36</td></tr>
+    <tr><td><strong>ffmpeg</strong> (ensure_on_s3 + concat)</td><td>21 ops</td><td>26 ops</td><td>CPU only</td><td>$0</td><td>$0</td></tr>
+    <tr style="background:rgba(0,212,170,0.08)"><td><strong>API Subtotal</strong></td><td></td><td></td><td></td><td><strong>$5.33</strong></td><td><strong>$6.58</strong></td></tr>
+  </tbody>
+</table>
+</details>
+
+<details>
+<summary>Storage Cost — 单次生成存储分析</summary>
+<p class="mono" style="margin-bottom:12px;">
+  所有文件上传到 S3，路径: images/{uuid}.webp, videos/{uuid}.mp4, audios/{uuid}.mp3<br>
+  图片: PIL resize + WEBP quality 85 &nbsp;|&nbsp; 视频: FFmpeg normalize to 1080p/24fps/h264/strip audio
+</p>
+<table>
+  <thead><tr><th>文件类型</th><th>数量 (60s video)</th><th>单文件大小</th><th>小计</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><strong>角色主图</strong> (character)</td><td>1-2</td><td>~200-400KB (WEBP 1080p)</td><td>~0.5MB</td><td>main image + optional multi-view</td></tr>
+    <tr><td><strong>角色融合图</strong> (fusion)</td><td>0-20 (per scene)</td><td>~200KB</td><td>~0-4MB</td><td>scene-specific character references</td></tr>
+    <tr><td><strong>Keyframe 图片</strong></td><td>20</td><td>~200-400KB (WEBP 1080p)</td><td>~5MB</td><td>1 per shot, resize from ~2752×1536 to 1920×1080</td></tr>
+    <tr><td><strong>Shot 视频</strong> (normalized)</td><td>20</td><td>~5-10MB (1080p 3s h264)</td><td>~140MB</td><td>ensure_on_s3: normalize + watermark + strip_audio</td></tr>
+    <tr><td><strong>最终合成视频</strong></td><td>1</td><td>~80-150MB (1080p 60s)</td><td>~100MB</td><td>video_assembly: concat + audio mix + BGM</td></tr>
+    <tr><td><strong>音频文件</strong></td><td>1-3</td><td>~0.5-2MB</td><td>~2MB</td><td>user audio + narration + BGM</td></tr>
+    <tr style="background:rgba(0,212,170,0.08)"><td><strong>Total per 60s video</strong></td><td></td><td></td><td><strong>~250MB</strong></td><td>S3: $0.025/GB-month = $0.006/month/video</td></tr>
+  </tbody>
+</table>
+<table style="margin-top:8px;">
+  <thead><tr><th>Duration</th><th>Shots</th><th>Est. Storage</th><th>S3 月存储 (USD)</th><th>S3 月存储 (RMB)</th><th>首次下载带宽 (USD)</th></tr></thead>
+  <tbody>
+    <tr><td>30s</td><td>10</td><td>~130MB</td><td>$0.003</td><td>¥0.023</td><td>$0.015</td></tr>
+    <tr><td>60s</td><td>20</td><td>~250MB</td><td>$0.006</td><td>¥0.045</td><td>$0.029</td></tr>
+    <tr><td>120s</td><td>40</td><td>~480MB</td><td>$0.012</td><td>¥0.086</td><td>$0.055</td></tr>
+    <tr><td>180s</td><td>60</td><td>~700MB</td><td>$0.018</td><td>¥0.126</td><td>$0.080</td></tr>
+    <tr><td>240s</td><td>80</td><td>~930MB</td><td>$0.023</td><td>¥0.168</td><td>$0.106</td></tr>
+    <tr><td>300s</td><td>100</td><td>~1.2GB</td><td>$0.030</td><td>¥0.216</td><td>$0.137</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:6px;">
+  S3 storage: $0.025/GB-month (ap-southeast-2) | S3 bandwidth (out): $0.114/GB<br>
+  Shot 视频 3s 比 5s 更小（~5-10MB vs ~8-15MB），总存储降低 ~20%。<br>
+  无 S3 lifecycle 策略 — 文件永久保留。Media-Service 临时 workspace 有 TTL 自动清理。
+</p>
+</details>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 6: QPS & POD ESTIMATION
+     ═══════════════════════════════════════════════════════════════ -->
+
+<h2>QPS Budget & Pod Count Estimation</h2>
+
+<details open>
+<summary>VideoAgent — I/O 密集型（几乎不占 CPU）</summary>
+<p class="mono" style="margin-bottom:12px;">
+  <strong>来源：</strong>test_real_pipeline.py::TestConcurrentVideoGenLLM (50并发实测) + media-service-proposal.md<br>
+  <strong>实测数据</strong>：EC2 t3.xlarge (4C/16G) 跑 <strong>50 并发 video gen → CPU 仅 74%</strong>，LLM API 是唯一瓶颈。<br>
+  CPU 唯一峰值：PIL downsample（2752×1536→1920×1080, LANCZOS + WEBP encode）— 单线程打满 1 核, &lt;1s/张。
+</p>
+<table>
+  <thead><tr><th>指标</th><th>Value</th><th>来源</th></tr></thead>
+  <tbody>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>EC2 实测 50 并发</strong></td><td><strong>CPU 74%</strong> (4C t3.xlarge 16GB), API 是瓶颈, <strong>memory 无问题</strong></td><td>media-service-proposal.md, test_real_pipeline.py</td></tr>
+    <tr><td>单任务 wall-clock</td><td>15-20 min (60s video)</td><td>video-pipeline-optimization-proposal.md</td></tr>
+    <tr><td>单任务实际 CPU 占用</td><td>&lt;30s total (PIL resize × 20 shots)</td><td>regenerate_cpu_spike_analysis.md</td></tr>
+    <tr><td>K8s Pod 资源</td><td>req 0.5C/2Gi, limit <strong>1.5C/6Gi</strong></td><td>helm/cuti-videoagent/values.yaml:14-18</td></tr>
+  </tbody>
+</table>
+
+<h4>Memory 分析 & 并发容量</h4>
+<p class="mono" style="margin-bottom:8px;">
+  <strong>Checkpointer</strong>: MemorySaver (in-memory dict) — 每任务 state ≈ 几十KB~几MB (URLs + scene dicts + prompt text)<br>
+  <strong>结论</strong>: 100 tasks × 5MB = 500MB, 远小于 6Gi limit。<strong>Memory 不是瓶颈</strong>。
+</p>
+<table>
+  <thead><tr><th>部署方式</th><th>规格</th><th>预估并发任务数</th><th>瓶颈</th></tr></thead>
+  <tbody>
+    <tr><td>EC2 (当前)</td><td>t3.xlarge 4C/16G</td><td><strong>50-100+</strong></td><td>3rd-party API rate limits</td></tr>
+    <tr><td>K8s Pod (单)</td><td>limit 1.5C/6Gi</td><td><strong>50-100</strong></td><td>3rd-party API</td></tr>
+    <tr><td>K8s 4 Pods (HPA max)</td><td>4 × 1.5C/6Gi</td><td><strong>200-400</strong></td><td>API rate limits / node 上限</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  <strong>结论</strong>：VA 单 pod 轻松扛 50-100 并发。1-2 个 pod 足以应对绝大多数场景。
+</p>
+</details>
+
+<details open>
+<summary>Media-Service — CPU 密集型（FFmpeg 容量分析）</summary>
+
+<h4>核心模型：只需要三个数字</h4>
+<div class="note-box">
+  <strong style="color:var(--accent3);">1 次 ensure_on_s3 = 5 CPU-seconds</strong><br>
+  FFmpeg 编码 1080p 3s 视频 (libx264 ultrafast + scale/pad + strip_audio + watermark) = 1 个 CPU 跑 5 秒。<br><br>
+  <strong style="color:var(--accent3);">60s 任务 = 25 次 ensure_on_s3 = 125 CPU-seconds</strong><br>
+  20 shots × 1.25 (built-in retry) = 25 次。其他操作 (segment, concat) 全是 <code>-c copy</code>，CPU 可忽略。<br><br>
+  <strong style="color:var(--accent3);">这 25 次操作分散在 ~5 分钟 (300s) 的 video gen 阶段</strong><br>
+  semaphore=10, API 响应 60-180s → ops 在 5 min 内陆续到达，不是同时发生。<br>
+  <strong>每任务平均 CPU 需求 = 125 / 300 = 0.42C</strong>
+</div>
+
+<h4>单次生成 FFmpeg 操作量</h4>
+<table>
+  <thead><tr><th>操作</th><th>次数 (60s, 20 shots)</th><th>耗时</th><th>CPU</th></tr></thead>
+  <tbody>
+    <tr><td><strong>ensure_on_s3</strong> (per shot video)</td><td><strong>~25</strong> (含 retry)</td><td>3-8s (avg 5s)</td><td><strong>~1C (重)</strong></td></tr>
+    <tr><td>segment_process (-c copy)</td><td>0 (VD) / ~10 (AD)</td><td>1-3s</td><td>~0.1C (轻)</td></tr>
+    <tr><td>assembly concat + mix_audio</td><td>2</td><td>1-3s</td><td>~0.1C (轻)</td></tr>
+    <tr style="background:rgba(0,212,170,0.08)"><td><strong>瓶颈 = ensure_on_s3</strong></td><td colspan="3"><strong>其他全是 -c copy，CPU 可忽略。Pod 数只取决于 ensure_on_s3 量</strong></td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  <strong>不同时长</strong>：shots = duration/3, ops = shots×1.25。但 video gen 阶段也等比例变长，<br>
+  所以<strong>每任务的平均 CPU 需求 ≈ 0.42C，跟视频时长无关</strong>。
+</p>
+
+<h4>并发 → 需要多少 CPU → 多少 Node</h4>
+<p class="mono" style="margin-bottom:8px;">
+  <strong>公式</strong>：总 CPU = N × 0.42C &nbsp;|&nbsp; Node 可用 CPU = 总 CPU - 系统预留 (~1C/node)<br>
+  <code>MAX_CONCURRENT_JOBS</code> (Semaphore) 是可调参数，应设为 = Node 可用 CPU / 1C (每 op ~1C)
+</p>
+<table>
+  <thead><tr><th>并发</th><th>需要 CPU</th><th>c6i.xlarge Nodes (3C可用/node, $147/mo)</th><th>c6i.2xlarge Nodes (7C可用/node, $294/mo)</th></tr></thead>
+  <tbody>
+    <tr><td><strong>1-7</strong></td><td>≤3C</td><td><strong>1</strong></td><td><strong>1</strong></td></tr>
+    <tr><td><strong>10</strong></td><td>4.2C</td><td><strong>2</strong></td><td><strong>1</strong></td></tr>
+    <tr><td><strong>20</strong></td><td>8.4C</td><td><strong>3</strong></td><td><strong>2</strong></td></tr>
+    <tr><td><strong>50</strong></td><td>21C</td><td><strong>7</strong></td><td><strong>3</strong></td></tr>
+    <tr><td><strong>100</strong></td><td>42C</td><td><strong>14</strong></td><td><strong>6</strong></td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:4px;">
+  以上是<strong>零延迟</strong>所需 Node 数。实际可以用更少 Node + 接受排队延迟（见下方"延迟容忍"表）。<br>
+  排队<strong>不会崩溃</strong>：超出的 ensure_on_s3 请求在 asyncio 层等待，只是慢几秒/分钟，不 OOM。
+</p>
+
+<h4>延迟容忍分析 — 用更少 Node，接受排队</h4>
+<p class="mono" style="margin-bottom:8px;">
+  <strong>公式</strong>：延迟 = max(0, 总ops / 处理速度 − 正常5min)<br>
+  处理速度 = Node总可用CPU / 5s = ops/s &nbsp;|&nbsp; 视频生成正常 ~5 min，排队延迟会使其变长
+</p>
+<table>
+  <thead><tr><th>MS 配置</th><th>可用 CPU</th><th>ops/s</th><th>零延迟上限</th><th>50 并发延迟</th><th>100 并发延迟</th><th>MS 月费</th><th>风险</th></tr></thead>
+  <tbody>
+    <tr><td>1 × c6i.xlarge</td><td>3C</td><td>0.6</td><td>7</td><td style="color:var(--accent4)">+30 min</td><td style="color:var(--accent4)">+64 min</td><td>$147</td><td style="color:var(--accent4)">超时失败</td></tr>
+    <tr><td>3 × c6i.xlarge</td><td>9C</td><td>1.8</td><td>21</td><td>+7 min</td><td style="color:var(--accent4)">+18 min</td><td>$441</td><td>需增大 timeout</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>5 × c6i.xlarge</strong></td><td>15C</td><td>3.0</td><td>36</td><td><strong>+2 min</strong></td><td>+9 min</td><td>$735</td><td>基本无感</td></tr>
+    <tr><td>7 × c6i.xlarge</td><td>21C</td><td>4.2</td><td>50</td><td><strong>0</strong></td><td>+5 min</td><td>$1,029</td><td>无</td></tr>
+    <tr><td>14 × c6i.xlarge</td><td>42C</td><td>8.4</td><td>100</td><td>0</td><td><strong>0</strong></td><td>$2,058</td><td>无</td></tr>
+    <tr><td colspan="8" style="border:none;height:8px;"></td></tr>
+    <tr><td>1 × c6i.2xlarge</td><td>7C</td><td>1.4</td><td>17</td><td>+10 min</td><td style="color:var(--accent4)">+25 min</td><td>$294</td><td>需增大 timeout</td></tr>
+    <tr><td>2 × c6i.2xlarge</td><td>14C</td><td>2.8</td><td>33</td><td>+2 min</td><td>+10 min</td><td>$588</td><td>基本无感</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>3 × c6i.2xlarge ← 推荐</strong></td><td>21C</td><td>4.2</td><td><strong>50</strong></td><td><strong>0</strong></td><td>+5 min</td><td>$882</td><td>无</td></tr>
+    <tr><td>5 × c6i.2xlarge</td><td>35C</td><td>7.0</td><td>83</td><td>0</td><td><strong>+1 min</strong></td><td>$1,470</td><td>无</td></tr>
+    <tr><td>6 × c6i.2xlarge</td><td>42C</td><td>8.4</td><td>100</td><td>0</td><td>0</td><td>$1,764</td><td>无</td></tr>
+  </tbody>
+</table>
+<div class="note-box" style="margin-top:12px;">
+  <strong style="color:var(--accent3);">排队风险</strong>：唯一风险是 <strong>HTTP 请求超时</strong>。VideoAgent 调 Media-Service 的 httpx 默认 timeout 需要调大。<br>
+  延迟 &lt;5 min → timeout 设 <strong>600s</strong> 即可 | 延迟 &gt;10 min → 不推荐，大概率超时失败<br>
+  排队<strong>不会 OOM</strong>：等待的请求只占 asyncio coroutine ~KB 级内存。<br>
+  <strong>自动减速</strong>：ensure_on_s3 排队时持有 VideoAgent semaphore slot → API 调用变少 → 到达率自然降低，系统会自平衡。
+</div>
+</details>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 7: SERVER & INFRASTRUCTURE COST
+     ═══════════════════════════════════════════════════════════════ -->
+
+<details open>
+<summary style="font-size:20px; margin-top:32px;">Server & Infrastructure Cost (AWS / 阿里云)</summary>
+
+<h3>AWS 单价表 (ap-southeast-2 Sydney)</h3>
+<table>
+  <thead><tr><th>Service</th><th>Spec / Config</th><th>月费 (USD)</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td colspan="4" style="color:var(--accent);font-weight:600;">固定成本 — 不随并发变化</td></tr>
+    <tr><td>EC2 (Nginx+Go+PG+Redis)</td><td>t3.xlarge 4C/16G</td><td><strong>$145</strong></td><td>$0.2016/hr × 720hr</td></tr>
+    <tr><td>EKS Cluster Fee</td><td>Control Plane 管控面</td><td><strong>$72</strong></td><td><a href="https://aws.amazon.com/eks/pricing/" style="color:var(--accent2)">pricing</a> — Node 另算</td></tr>
+    <tr><td>VideoAgent Node</td><td>m6i.large 2C/8G × <strong>1</strong></td><td><strong>$83</strong></td><td>1 pod 扛 50-100 并发，几乎不用加</td></tr>
+    <tr><td>ALB</td><td>Internal</td><td><strong>$18</strong></td><td><a href="https://aws.amazon.com/elasticloadbalancing/pricing/" style="color:var(--accent2)">pricing</a></td></tr>
+    <tr><td>Route 53 + ECR</td><td>Hosted Zone + 2 images</td><td><strong>$1.3</strong></td><td>$0.50 + $0.30 × 2 images</td></tr>
+    <tr style="background:rgba(0,212,170,0.08)"><td colspan="3"><strong>固定小计</strong></td><td><strong>$319/mo</strong> — 不管跑多少任务都要付</td></tr>
+
+    <tr><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:12px;">弹性成本 — Media-Service Nodes</td></tr>
+    <tr><td>c6i.xlarge (MS Node 选项A)</td><td>4C/8G, <strong>可用 3C</strong></td><td><strong>$147/node</strong></td><td>当前使用。适合低并发</td></tr>
+    <tr><td>c6i.2xlarge (MS Node 选项B)</td><td>8C/16G, <strong>可用 7C</strong></td><td><strong>$294/node</strong></td><td>单 Node CPU 翻倍，节省 Node 数。推荐</td></tr>
+
+    <tr><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:12px;">按量 — 可忽略</td></tr>
+    <tr><td>S3</td><td>~250MB/video</td><td>$0.006/video/mo</td><td>$0.025/GB-month</td></tr>
+    <tr><td>CloudFront</td><td>1TB free tier</td><td>$0.114/GB 超出部分</td><td>早期用量在 free tier 内</td></tr>
+    <tr><td>SQS + AppConfig</td><td>-</td><td>~$0</td><td>远低于 free tier</td></tr>
+  </tbody>
+</table>
+
+<h3>AWS 月费 — 按并发等级 (动态)</h3>
+<p class="mono" style="margin-bottom:8px;">
+  <strong>公式</strong>：月费 = 固定 $319 + MS_Nodes × 单价 &nbsp;|&nbsp; VA 始终 1 个 Node 够用<br>
+  MS Node 数由上方 "延迟容忍分析" 决定。这里给出<strong>零延迟</strong>和<strong>推荐省钱</strong>两种方案。
+</p>
+<table>
+  <thead><tr><th>并发</th><th colspan="3">零延迟方案</th><th colspan="3">省钱方案 (可接受延迟)</th></tr>
+  <tr><th></th><th>MS Nodes</th><th>月费</th><th>RMB</th><th>MS Nodes</th><th>月费 (延迟)</th><th>RMB</th></tr></thead>
+  <tbody>
+    <tr><td><strong>1-7</strong></td><td>1 × c6i.xlarge</td><td><strong>$466</strong></td><td>¥3,355</td><td>同左</td><td><strong>$466</strong></td><td>¥3,355</td></tr>
+    <tr><td><strong>10</strong></td><td>2 × c6i.xlarge</td><td><strong>$613</strong></td><td>¥4,414</td><td>1 × c6i.2xlarge</td><td><strong>$613</strong> (0)</td><td>¥4,414</td></tr>
+    <tr><td><strong>20</strong></td><td>3 × c6i.xlarge</td><td><strong>$760</strong></td><td>¥5,472</td><td>2 × c6i.xlarge</td><td><strong>$613</strong> (+2min)</td><td>¥4,414</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>50</strong></td><td>7 × c6i.xlarge</td><td><strong>$1,348</strong></td><td>¥9,706</td><td>3 × c6i.2xlarge</td><td><strong>$1,201</strong> (0)</td><td>¥8,647</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>100</strong></td><td>14 × c6i.xlarge</td><td><strong>$2,377</strong></td><td>¥17,114</td><td>5 × c6i.2xlarge</td><td><strong>$1,789</strong> (+1min)</td><td>¥12,881</td></tr>
+  </tbody>
+</table>
+
+<details style="margin-top:12px;">
+<summary>推荐配置方案 (3 档)</summary>
+<table>
+  <thead><tr><th>方案</th><th>MS 配置</th><th>月费总计</th><th>零延迟上限</th><th>100 并发延迟</th><th>适合阶段</th></tr></thead>
+  <tbody>
+    <tr style="background:rgba(245,158,11,0.08)"><td><strong>省钱 A</strong></td><td>3 × c6i.xlarge</td><td><strong>$760</strong> (¥5,472)</td><td>21 并发</td><td>+18 min ⚠️</td><td>内测/demo (≤20 并发)</td></tr>
+    <tr style="background:rgba(0,212,170,0.08)"><td><strong>性价比 B ← 推荐</strong></td><td>3 × c6i.2xlarge</td><td><strong>$1,201</strong> (¥8,647)</td><td>50 并发</td><td>+5 min</td><td>正式上线 (50 并发)</td></tr>
+    <tr style="background:rgba(99,102,241,0.08)"><td><strong>充裕 C</strong></td><td>5 × c6i.2xlarge</td><td><strong>$1,789</strong> (¥12,881)</td><td>83 并发</td><td>+1 min</td><td>高峰/增长期</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:6px;">
+  <strong>方案 B 最推荐</strong>：50 并发零延迟，100 并发仅 +5min（用户无感，总生成 15-20min），<br>
+  比零延迟方案 ($2,377) <strong>节省 $1,176/mo</strong>。只需 <code>httpx timeout=600s</code>。<br>
+  <strong>HPA 配合</strong>：设 min=2 max=5 pods (2xlarge)，低峰期自动缩到 2 nodes ($907/mo)。
+</p>
+</details>
+
+<details style="margin-top:12px;">
+<summary>阿里云对比 (China alternative)</summary>
+<table>
+  <thead><tr><th>Service</th><th>Spec</th><th>月费</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>ECS (Nginx+Go+PG+Redis)</td><td>g7.xlarge 4C16G</td><td>¥1,174 ($163)</td><td>¥1.63/hr</td></tr>
+    <tr><td>ACK Cluster Fee</td><td>标准版 Control Plane</td><td>¥461 ($64)</td><td>¥0.64/hr, vs EKS $72/mo</td></tr>
+    <tr><td>ECS g7.xlarge (VA Node)</td><td>4C8G</td><td>¥590 ($82)</td><td>¥0.82/hr</td></tr>
+    <tr><td>ECS c7.xlarge (MS Node)</td><td>4C8G, 可用 ~3C</td><td>¥590/node ($82)</td><td>对标 c6i.xlarge $147</td></tr>
+    <tr><td>ECS c7.2xlarge (MS Node)</td><td>8C16G, 可用 ~7C</td><td>¥1,180/node ($164)</td><td>对标 c6i.2xlarge $294</td></tr>
+  </tbody>
+</table>
+<table style="margin-top:8px;">
+  <thead><tr><th>并发</th><th>阿里云方案</th><th>月费 (RMB)</th><th>USD</th><th>vs AWS</th></tr></thead>
+  <tbody>
+    <tr><td><strong>1-7</strong></td><td>固定 + 1×c7.xlarge</td><td><strong>¥2,815</strong></td><td>$391</td><td>AWS $466 → 省16%</td></tr>
+    <tr><td><strong>50</strong></td><td>固定 + 3×c7.2xlarge</td><td><strong>¥5,765</strong></td><td>$800</td><td>AWS $1,201 → 省33%</td></tr>
+    <tr><td><strong>100</strong></td><td>固定 + 5×c7.2xlarge</td><td><strong>¥8,125</strong></td><td>$1,128</td><td>AWS $1,789 → 省37%</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:6px;">
+  阿里云 ECS 便宜约 30-45%。但 API 仍调海外 (WaveSpeed/Google)，需考虑跨境延迟和流量费。<br>
+  <strong>Cluster 费 (EKS/ACK) 是管控面固定成本</strong>，不含 worker node。
+</p>
+</details>
+</details>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 8: TOTAL COST SUMMARY
+     ═══════════════════════════════════════════════════════════════ -->
+
+<h2>Total Cost Summary — 60s 1080p Video-Driven, 含 built-in retry</h2>
+
+<h3>单次生成全成本 (API + 分摊 Infra + Storage)</h3>
+<p class="mono" style="margin-bottom:8px;">
+  <strong>公式</strong>：Total/Gen = API成本 + (月Infra ÷ 月生成数) + S3<br>
+  假设每并发 slot 每天 ~2 次 (20min/task) → 月生成数 ≈ 并发 × 60 次/月<br>
+  <strong>API 成本以默认参数: Nano Banana 2 + 1080p + lipsync 50% + Seedance v1 Pro</strong>
+</p>
+<table>
+  <thead><tr><th>并发</th><th>MS 配置 (推荐)</th><th>月 Infra</th><th>API/Gen</th><th>Infra/Gen</th><th>S3</th><th><strong>Total/Gen</strong></th><th><strong>RMB</strong></th></tr></thead>
+  <tbody>
+    <tr><td><strong>1</strong></td><td>1 × c6i.xlarge</td><td>$466</td><td>$6.22</td><td>$7.77</td><td>$0.03</td><td><strong>$14.02</strong></td><td><strong>¥101</strong></td></tr>
+    <tr><td><strong>5</strong></td><td>1 × c6i.xlarge</td><td>$466</td><td>$6.22</td><td>$1.55</td><td>$0.03</td><td><strong>$7.80</strong></td><td><strong>¥56</strong></td></tr>
+    <tr><td><strong>10</strong></td><td>1 × c6i.2xlarge</td><td>$613</td><td>$6.22</td><td>$1.02</td><td>$0.03</td><td><strong>$7.27</strong></td><td><strong>¥52</strong></td></tr>
+    <tr><td><strong>20</strong></td><td>2 × c6i.2xlarge</td><td>$907</td><td>$6.22</td><td>$0.76</td><td>$0.03</td><td><strong>$7.01</strong></td><td><strong>¥50</strong></td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>50</strong></td><td>3 × c6i.2xlarge ←</td><td>$1,201</td><td>$6.22</td><td>$0.40</td><td>$0.03</td><td><strong>$6.65</strong></td><td><strong>¥48</strong></td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>100</strong></td><td>5 × c6i.2xlarge</td><td>$1,789</td><td>$6.22</td><td>$0.30</td><td>$0.03</td><td><strong>$6.55</strong></td><td><strong>¥47</strong></td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:8px;">
+  <strong>关键发现</strong>：<br>
+  ① <strong>并发 ≥5 后，单次成本趋于稳定</strong> ($6.5-$7.8)，因为 Infra 被更多任务分摊<br>
+  ② 并发 1 时 Infra 占比高 ($7.77)，因为 24/7 运行的服务器只跑 60 次/月<br>
+  ③ <strong>并发 ≥50 后，API 占 &gt;93%</strong>，优化 tool 选择才是降本核心<br>
+  ④ 无 lipsync (coverage=0): API 降到 <strong>$5.21</strong> | Audio-driven lipsync=100%: <strong>$7.23</strong>
+</p>
+
+<h3>月度运营总成本 (Infra + 全部 API)</h3>
+<table>
+  <thead><tr><th>并发</th><th>月生成量</th><th>月 API 费</th><th>月 Infra</th><th><strong>月总计</strong></th><th><strong>RMB</strong></th><th>延迟</th></tr></thead>
+  <tbody>
+    <tr><td><strong>1</strong></td><td>60</td><td>$373</td><td>$466</td><td><strong>$839</strong></td><td><strong>¥6,041</strong></td><td>0</td></tr>
+    <tr><td><strong>5</strong></td><td>300</td><td>$1,866</td><td>$466</td><td><strong>$2,332</strong></td><td><strong>¥16,790</strong></td><td>0</td></tr>
+    <tr><td><strong>10</strong></td><td>600</td><td>$3,732</td><td>$613</td><td><strong>$4,345</strong></td><td><strong>¥31,284</strong></td><td>0</td></tr>
+    <tr><td><strong>20</strong></td><td>1,200</td><td>$7,464</td><td>$907</td><td><strong>$8,371</strong></td><td><strong>¥60,271</strong></td><td>0</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>50</strong></td><td>3,000</td><td>$18,660</td><td>$1,201</td><td><strong>$19,861</strong></td><td><strong>¥143,000</strong></td><td>0</td></tr>
+    <tr style="background:rgba(0,212,170,0.05)"><td><strong>100</strong></td><td>6,000</td><td>$37,320</td><td>$1,789</td><td><strong>$39,109</strong></td><td><strong>¥281,585</strong></td><td>+1 min</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="margin-top:8px;">
+  <strong>核心结论</strong>：<strong>API 费永远是大头</strong>（占 70%-96%）。服务器 infra 是小头。<br>
+  月 100 并发产 6000 个视频，API 费 $37K vs Infra 仅 $1.8K。<br>
+  <strong>降本优先级</strong>：① tool 选择 (便宜 model) &gt; ② 减少 retry &gt; ③ 服务器砍价
+</p>
+
+<h3>瓶颈优先级</h3>
+<p class="mono" style="font-size:12px;">
+  1. <span style="color:var(--accent4)"><strong>3rd-party API rate limits</strong></span> — WaveSpeed/Google 每分钟调用限制, 是真正硬上限<br>
+  2. <span style="color:var(--accent3)"><strong>Media-Service FFmpeg CPU</strong></span> — 可通过加 Node 或升级 Node 机型 (xlarge→2xlarge) 解决<br>
+  3. <span style="color:var(--text-dim)">VideoAgent CPU/Memory</span> — 不是瓶颈, 1 pod 扛 50-100 任务
+</p>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 9: CREDIT ESTIMATION FORMULA
+     ═══════════════════════════════════════════════════════════════ -->
+
+<details>
+<summary style="font-size:20px; margin-top:32px;">Credit Estimation — 积分预估公式 & 代码流程</summary>
+<div class="flow-diagram">
+  <h3>积分预估接口 & 暂停逻辑</h3>
+  <pre>
+<span class="highlight3">提交前</span> (新接口)                              <span class="highlight3">暂停时</span> (interrupt payload)
+   │                                              │
+   │  POST /estimate-credits                      │  get_credit_estimate_for_gate(state, step)
+   │  { user_option, is_audio_driven,             │    暂停1 (after_character): remaining = kf + video
+   │    audio_duration_sec?,                      │    暂停2 (after_keyframe):  remaining = video only
+   │    audio_segment_durations? }                │    暂停3 (after_shots):     remaining = 0
+   ▼                                              ▼
+<span class="highlight2">estimate_video_agent_credits</span>(user_option, ...)  →  <span class="highlight">CreditEstimateResult</span> (Pydantic)
+
+<span class="highlight">══════════════ 核心公式 (cost_estimation.py) ══════════════</span>
+
+<span class="highlight2">Step 1: Scene/Shot 估算 (1:1)</span>
+  threshold = get_split_threshold(user_option)
+    ├─ audio-driven 普通模式:   min(video_durations) ≈ <span class="highlight3">3s</span>
+    ├─ audio-driven LIP_SYNC_MV: max(lipsync_durations) ≈ <span class="highlight3">10-15s</span>
+    └─ video-driven:            min(video_durations) ≈ <span class="highlight3">3s</span>
+  shots = ceil(total_duration / threshold)
+
+<span class="highlight2">Step 1.5: 推算每 shot 视频时长</span>
+  <span class="highlight3">est_shot_duration = max(3, threshold) ≈ 3s</span>  ← 关键改进! 不再固定 5s
+  cost functions 传入此真实时长
+
+<span class="highlight2">Step 2: Keyframe 数量</span>
+  base_keyframes = shots × (enable_continuity_mode ? <span class="highlight3">2</span> : <span class="highlight3">1</span>)
+  reflection_mult = enable_keyframe_reflection ? <span class="highlight3">1.25</span> : <span class="highlight3">1.0</span>
+                    enable_show_reflection ?     max(mult, <span class="highlight3">2.0</span>)
+  keyframe_count = round(base_keyframes × reflection_mult)
+
+<span class="highlight2">Step 3: 查单价 → ToolService.calculate_cost(duration=est_shot_duration)</span>
+  <span class="highlight">keyframe</span>: Nano Banana 2 = <span class="highlight3">$0.067</span>/image
+  <span class="highlight">video @3s</span>: Seedance v1 Pro 1080p = <span class="highlight3">$0.144</span>/shot
+  <span class="highlight">lipsync @3s</span>: Wan 2.6+audio 1080p = <span class="highlight3">$0.225</span>/shot
+
+<span class="highlight2">Step 4: 积分计算 (含 built-in retry)</span>
+  keyframe_usd = keyframe_count × kf_cost × <span class="highlight3">1.2</span>  (built-in character consistency)
+  video_usd    = shots × avg_video_cost × <span class="highlight3">1.25</span>  (built-in video consistency)
+  <span class="highlight3">total_credits = round((keyframe_usd + video_usd) × 100)</span>
+
+<span class="highlight">══════════════ 例子 1: Video-Driven 60s (默认参数) ══════════════</span>
+  threshold=3s → shots = <span class="highlight3">20</span>, est_shot_duration = 3s
+  keyframes = 20 × 1 = 20 | kf_cost = 20 × $0.067 × 1.2 = <span class="highlight3">$1.61</span>
+  video = 20 × (0.5×$0.144 + 0.5×$0.225) × 1.25 = 20 × $0.1845 × 1.25 = <span class="highlight3">$4.61</span>
+  total = $1.61 + $4.61 = <span class="highlight3">$6.22 = 622 credits</span>
+
+<span class="highlight">══════════════ 例子 2: Audio-Driven 45s, lipsync=100% ══════════════</span>
+  3 segments [12s, 18s, 15s], threshold=3s → shots = 4+6+5 = <span class="highlight3">15</span>
+  kf_cost = 15 × $0.067 × 1.2 = <span class="highlight3">$1.21</span>
+  video = 15 × $0.225 × 1.25 = <span class="highlight3">$4.22</span>  (≈ 45s × $0.075 × 1.25)
+  total = <span class="highlight3">$5.43 = 543 credits</span>
+
+<span class="highlight">══════════════ 例子 3: 首尾帧 + VLM反思 30s ══════════════</span>
+  Seedance Lite (有尾帧), lipsync=0%, threshold=3s → shots = <span class="highlight3">10</span>
+  keyframes = 10 × <span class="highlight3">2</span>(首尾帧) × <span class="highlight3">1.25</span>(VLM反思) = 25
+  kf_cost = 25 × $0.067 × 1.2 = <span class="highlight3">$2.01</span>
+  video = 10 × $0.27(Lite 3s) × 1.25 = <span class="highlight3">$3.375</span>
+  total = <span class="highlight3">$5.39 = 539 credits</span>
+
+<span class="highlight">══════════════ 反思/Retry 说明 ══════════════</span>
+  <span class="highlight3">[Always-ON] Built-in Consistency Check</span>
+  • keyframe: check_character_consistency_llm → ×1.2 (image_tool_wrapper.py:406)
+  • video: check_video_consistency_llm → ×1.25 (video_tool_wrapper.py:348)
+  <span class="highlight3">代码已自动乘入</span> → BUILTIN_KEYFRAME_CONSISTENCY_MULT / BUILTIN_VIDEO_CONSISTENCY_MULT
+
+  <span class="comment">[可选] VLM Keyframe Reflection Node (前端 enableKeyframeReflection, 默认关闭)</span>
+  • ~25% 概率触发重生 → 额外 ×1.25 (叠加在 built-in 之上)
+  </pre>
+</div>
+</details>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 10: BILLING FLOW
+     ═══════════════════════════════════════════════════════════════ -->
+
+<details>
+<summary>Tool Cost Billing Flow — 实际扣费链路</summary>
+<div class="flow-diagram">
+  <h3>实际扣费链路</h3>
+  <pre>
+<span class="highlight">keyframe_generation_service</span>                   <span class="highlight">video_generation_service</span>
+   │ create_agent(tools=image_tools)              │ create_agent(tools=video_tools)
+   │ image_tool_wrapper → nano_banana.py          │ video_tool_wrapper → seedance.py
+   │                     / seedream.py            │ lipsync_tool_wrapper → wan25/wan26.py
+   ▼                                              ▼
+<span class="highlight2">ToolService.calculate_cost</span>(tool_type, duration, resolution, ...)
+   │  查 _PRICING_CONFIG → 算出美元单价
+   ▼
+result.billing_cost = cost
+   │
+   ├──→ <span class="highlight3">CreditCheckCallbackHandler</span>.add_tool_cost(cost)  <span class="comment">← 累加到 callback</span>
+   │
+   └──→ wrapper: accumulated_tool_cost += billing_cost   <span class="comment">← 含重试/fallback 的累加</span>
+         │
+         ▼
+   KeyframeVersion.tool_cost / VideoGenerationVersion.tool_cost  <span class="comment">← 写入 DB</span>
+         │
+         ▼
+<span class="highlight3">billing_worker</span> → get_cost_and_credits_for_run(run_id)
+   │  credits = int(cost_usd × 100)
+   ▼
+deduct_credits_with_cost(user_id, credits)
+  </pre>
+</div>
+</details>
+
+<p class="mono" style="margin-top:20px;">
+  1 USD = 100 Credits &nbsp;|&nbsp; 1 USD ≈ 7.2 RMB &nbsp;|&nbsp;
+  前端默认: Nano Banana 2 + Seedance v1 Pro + 1080p + lipsync 50% &nbsp;|&nbsp;
+  shot 时长: threshold = <strong>3s</strong> (代码自动推算) &nbsp;|&nbsp;
+  built-in retry: kf ×1.2, video ×1.25 (已乘入) &nbsp;|&nbsp;
+  VA 50并发实测: CPU 74% (t3.xlarge) &nbsp;|&nbsp;
+  Updated 2026-03-11
+</p>
+
+</body>
+</html>

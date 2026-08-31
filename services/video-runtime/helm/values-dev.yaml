@@ -1,0 +1,80 @@
+replicaCount: 1
+
+image:
+  repository: 699475938168.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-videoagent
+  tag: latest
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "3500m"
+    memory: "12Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  scaleUp:
+    stabilizationWindowSeconds: 120
+    maxPods: 1
+    periodSeconds: 60
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    maxPods: 1
+    periodSeconds: 120
+
+terminationGracePeriodSeconds: 10800
+
+nodeSelector:
+  workload-type: agent
+
+workspace:
+  sizeLimit: 20Gi
+
+persistence:
+  enabled: true
+  createPVC: true
+  claimName: cuti-videoagent-data
+  storageClassName: efs-sc
+  accessModes:
+    - ReadWriteMany
+  size: 20Gi
+  mountPath: /app/data
+
+env:
+  ENVIRONMENT: development
+  LOG_LEVEL: debug
+  SERVER_PORT: "8000"
+  AWS_REGION: ap-southeast-2
+  LLM_QUALITY: best
+  STAGE_ARTIFACT_ROOT: data/run_workspaces
+  # 3合1:同进程内挂载 Chat Router,并让 Chat 直接进程内调用 VideoAgent 核心(无跨进程 HTTP hop)。
+  # 因此 VIDEOAGENT_BASE_URL / CUTI_SERVICE_TOKEN 的跨进程委托不再需要(WORKFLOW_CLIENT_MODE=local)。
+  ENABLE_CHAT_AGENT: "true"
+  WORKFLOW_CLIENT_MODE: "local"
+
+secretEnvFrom: cuti-videoagent-secrets
+
+ingress:
+  enabled: true
+  scheme: internal
+  annotations:
+    alb.ingress.kubernetes.io/tags: Environment=dev,Project=cuti-videoagent
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=1200
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 60
+    timeoutSeconds: 10
+    failureThreshold: 5
+  readiness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3

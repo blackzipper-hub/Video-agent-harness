@@ -1,0 +1,600 @@
+"""Config-driven video provider bridge (Ark preferred, WaveSpeed fallback).
+
+Vendor-agnostic: Skills request a normalized generate profile; this module
+selects the live provider from env keys + DEEP_AGENT_V2_PROVIDER_FALLBACKS_JSON.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
+from uuid import uuid4
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+DEFAULT_ARK_MODEL = "doubao-seedance-2-0-260128"
+DEFAULT_FALLBACKS = {
+    "ark": "wavespeed",
+    "doubao-seedance-2-0": "wavespeed",
+    # Coordinator-facing vendor shorthand. Seedance executions in this
+    # deployment are backed by the configured WaveSpeed account.
+    "seedance": "wavespeed",
+    # The frontend/legacy UserOption calls this route POLLO_SEEDANCE. Deep
+    # Agent V2 executes normalized provider profiles through the WaveSpeed
+    # bridge, so preserve the user-facing option while resolving its backend.
+    "pollo_seedance": "wavespeed",
+}
+
+_REMOTE_TASK_ID_RE = re.compile(r"remote_task_id=([A-Za-z0-9_-]+)")
+
+
+class ProviderGenerateError(RuntimeError):
+    """Structured provider failure so callers can decide retry vs fallback."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str,
+        retryable: bool = False,
+        remote_task_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.retryable = retryable
+        self.remote_task_id = remote_task_id
+        self.provider = provider
+        self.model = model
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.category,
+            "retryable": self.retryable,
+            "remote_task_id": self.remote_task_id,
+            "provider": self.provider,
+            "model": self.model,
+            "message": str(self),
+        }
+
+
+def _load_fallbacks(raw: str | None) -> dict[str, str]:
+    if not raw or not raw.strip():
+        return dict(DEFAULT_FALLBACKS)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("invalid DEEP_AGENT_V2_PROVIDER_FALLBACKS_JSON; using defaults")
+        return dict(DEFAULT_FALLBACKS)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_FALLBACKS)
+    return {str(k).lower(): str(v).lower() for k, v in data.items()}
+
+
+def resolve_provider(
+    requested: str,
+    *,
+    fallbacks_json: str | None = None,
+    ark_key: str | None = None,
+    wavespeed_key: str | None = None,
+) -> str:
+    requested = (requested or "ark").strip().lower()
+    # POLLO_SEEDANCE is a legacy frontend/tool selection, not a provider that
+    # this bridge can call directly. Canonicalize aliases before applying a
+    # deployment-specific fallback map (which may intentionally replace the
+    # defaults and therefore omit this compatibility alias).
+    requested = {
+        "seedance": "wavespeed",
+        "pollo_seedance": "wavespeed",
+        "wavespeed-seedance-2": "wavespeed",
+    }.get(requested, requested)
+    ark_key = ark_key if ark_key is not None else os.environ.get("ARK_API_KEY")
+    wavespeed_key = (
+        wavespeed_key if wavespeed_key is not None else os.environ.get("WAVESPEED_API_KEY")
+    )
+    fallbacks = _load_fallbacks(fallbacks_json)
+
+    def has_key(provider: str) -> bool:
+        if provider == "ark":
+            return bool(ark_key)
+        if provider in {"wavespeed", "wavespeed-seedance-2"}:
+            return bool(wavespeed_key)
+        return False
+
+    if requested == "auto":
+        if has_key("ark"):
+            return "ark"
+        if has_key("wavespeed"):
+            return "wavespeed"
+
+    if has_key(requested):
+        return requested
+    # model-prefix match then provider-level fallback
+    for key, target in fallbacks.items():
+        if requested == key or requested.startswith(key):
+            if has_key(target):
+                return target
+    if requested == "ark" and has_key("wavespeed"):
+        return "wavespeed"
+    if has_key(requested):
+        return requested
+    raise RuntimeError(
+        f"no API key for provider {requested!r} and no usable fallback "
+        f"(need ARK_API_KEY and/or WAVESPEED_API_KEY)"
+    )
+
+
+def _model_family(model: str | None) -> str:
+    """Map profile.model → wavespeed handler family."""
+    raw = (model or "").strip().lower()
+    if not raw or raw in {"ark", "wavespeed", "wavespeed-seedance-2"}:
+        return "seedance_2"
+    if any(token in raw for token in ("2.5", "2-5", "seedance_2_5")):
+        return "seedance_2_5"
+    if any(token in raw for token in ("1.5", "1-5", "v1.5", "seedance-v1.5", "seedance_v1_5")):
+        return "seedance_1_5"
+    if any(token in raw for token in ("seedance-2", "seedance_2", "seedance2", "doubao-seedance-2")):
+        return "seedance_2"
+    if "doubao-seedance" in raw or "seedance" in raw:
+        # Unknown seedance variant — refuse silent 2.0 remap.
+        raise ValueError(
+            f"unsupported Seedance model for WaveSpeed bridge: {model!r}; "
+            "use doubao-seedance-2-0 / seedance-2.0 or doubao-seedance-1-5 / seedance-1.5"
+        )
+    # Non-Seedance labels still default to Seedance 2.0 T2V (legacy profiles).
+    return "seedance_2"
+
+
+def _is_i2v_mode(profile: dict[str, Any]) -> bool:
+    mode = str(
+        profile.get("mode")
+        or profile.get("generation_mode")
+        or profile.get("task_type")
+        or ""
+    ).strip().lower()
+    return mode in {"i2v", "image_to_video", "image-to-video"}
+
+
+def _first_media_value(profile: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = profile.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+async def _resolve_media_urls(urls: list[str]) -> list[str]:
+    from app.utils.media_egress import resolve_outbound_media_url
+
+    resolved: list[str] = []
+    for url in urls:
+        if not isinstance(url, str) or not url.strip():
+            continue
+        resolved.append(await resolve_outbound_media_url(url.strip()))
+    return resolved
+
+
+def _classify_wavespeed_failure(
+    err: str,
+    *,
+    provider: str,
+    model: str | None,
+) -> ProviderGenerateError:
+    text = (err or "").strip() or "WaveSpeed generate failed"
+    remote = None
+    match = _REMOTE_TASK_ID_RE.search(text)
+    if match:
+        remote = match.group(1)
+    lower = text.lower()
+    if "provider_pending_timeout" in lower or "still processing" in lower:
+        return ProviderGenerateError(
+            text,
+            category="provider_pending_timeout",
+            retryable=True,
+            remote_task_id=remote,
+            provider=provider,
+            model=model,
+        )
+    if "invalid" in lower or "invalid_image_url" in lower:
+        return ProviderGenerateError(
+            text,
+            category="invalid_input",
+            retryable=False,
+            remote_task_id=remote,
+            provider=provider,
+            model=model,
+        )
+    if "rate limit" in lower or "429" in lower:
+        return ProviderGenerateError(
+            text,
+            category="rate_limited",
+            retryable=True,
+            remote_task_id=remote,
+            provider=provider,
+            model=model,
+        )
+    if "insufficient credits" in lower or "insufficient balance" in lower:
+        # WaveSpeed returns this explicit 400 when the available account
+        # balance cannot cover the prediction price. Retrying the same payload
+        # cannot change that balance and only creates noisy duplicate attempts;
+        # require a top-up/key change before the task is resumed.
+        return ProviderGenerateError(
+            text,
+            category="insufficient_credits",
+            retryable=False,
+            remote_task_id=remote,
+            provider=provider,
+            model=model,
+        )
+    return ProviderGenerateError(
+        text,
+        category="provider_explicit_failure",
+        retryable=False,
+        remote_task_id=remote,
+        provider=provider,
+        model=model,
+    )
+
+
+RemoteSubmittedCallback = Callable[[str, str], Awaitable[None]]
+
+
+async def _ark_generate(
+    profile: dict[str, Any],
+    api_key: str,
+    on_remote_submitted: RemoteSubmittedCallback | None = None,
+) -> dict[str, Any]:
+    prompt = str(profile.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("provider generate requires prompt")
+    images = await _resolve_media_urls([
+        u for u in (profile.get("images") or profile.get("reference_images") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+    videos = await _resolve_media_urls([
+        u for u in (profile.get("videos") or profile.get("reference_videos") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+    audios = await _resolve_media_urls([
+        u for u in (profile.get("audios") or profile.get("reference_audios") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for url in images:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": url},
+            "role": "reference_image",
+        })
+    for url in videos:
+        content.append({
+            "type": "video_url",
+            "video_url": {"url": url},
+        })
+    for url in audios:
+        content.append({
+            "type": "audio_url",
+            "audio_url": {"url": url},
+        })
+    body: dict[str, Any] = {
+        "model": str(profile.get("model") or DEFAULT_ARK_MODEL),
+        "content": content,
+    }
+    if profile.get("aspect_ratio") or profile.get("ratio"):
+        body["ratio"] = profile.get("aspect_ratio") or profile.get("ratio")
+    if profile.get("duration") is not None:
+        body["duration"] = int(profile["duration"])
+    if profile.get("resolution"):
+        body["resolution"] = profile["resolution"]
+    if profile.get("generate_audio") is not None:
+        body["generate_audio"] = bool(profile["generate_audio"])
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        task_id = profile.get("remote_operation_id")
+        if not task_id:
+            create = await client.post(ARK_BASE_URL, headers=headers, json=body)
+            create.raise_for_status()
+            created = create.json()
+            task_id = created.get("id") or created.get("task_id")
+            if not task_id:
+                raise RuntimeError(f"Ark create missing task id: {created}")
+            if on_remote_submitted:
+                await on_remote_submitted(str(task_id), "ark")
+        deadline = time.monotonic() + float(profile.get("timeout_seconds") or 600)
+        while time.monotonic() < deadline:
+            status_resp = await client.get(f"{ARK_BASE_URL}/{task_id}", headers=headers)
+            status_resp.raise_for_status()
+            status_body = status_resp.json()
+            state = str(status_body.get("status") or "").lower()
+            if state in {"succeeded", "success", "completed"}:
+                video_url = (
+                    status_body.get("content", {}).get("video_url")
+                    if isinstance(status_body.get("content"), dict)
+                    else None
+                )
+                video_url = video_url or status_body.get("video_url") or status_body.get("result_url")
+                if not video_url:
+                    raise RuntimeError(f"Ark succeeded without video_url: {status_body}")
+                return {
+                    "video_url": video_url,
+                    "uri": video_url,
+                    "provider_used": "ark",
+                    "raw_task_id": task_id,
+                    "raw": status_body,
+                }
+            if state in {"failed", "error", "cancelled"}:
+                raise ProviderGenerateError(
+                    f"Ark task failed: {status_body}",
+                    category="provider_explicit_failure",
+                    retryable=False,
+                    remote_task_id=str(task_id),
+                    provider="ark",
+                    model=str(profile.get("model") or DEFAULT_ARK_MODEL),
+                )
+            await __import__("asyncio").sleep(float(profile.get("poll_interval") or 5))
+    raise ProviderGenerateError(
+        f"provider_pending_timeout: Ark task still processing; remote_task_id={task_id}",
+        category="provider_pending_timeout",
+        retryable=True,
+        remote_task_id=str(task_id),
+        provider="ark",
+        model=str(profile.get("model") or DEFAULT_ARK_MODEL),
+    )
+
+
+async def _wavespeed_generate(
+    profile: dict[str, Any],
+    on_remote_submitted: RemoteSubmittedCallback | None = None,
+) -> dict[str, Any]:
+    from app.llm.wavespeed_service import get_wavespeed_service
+
+    prompt = str(profile.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("provider generate requires prompt")
+    duration = int(profile.get("duration") or 5)
+    resolution = str(profile.get("resolution") or "1080p")
+    aspect_ratio = profile.get("aspect_ratio") or profile.get("ratio")
+    generate_audio = bool(profile.get("generate_audio", True))
+    model = str(profile.get("model") or "")
+    family = _model_family(model)
+
+    images = await _resolve_media_urls([
+        u for u in (profile.get("images") or profile.get("reference_images") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+    start_image_values = await _resolve_media_urls([
+        value for value in [_first_media_value(
+            profile,
+            "start_image_url",
+            "start_image",
+            "first_frame_url",
+            "first_frame",
+            "continuity_frame_url",
+        )]
+        if value
+    ])
+    end_image_values = await _resolve_media_urls([
+        value for value in [_first_media_value(
+            profile,
+            "end_image_url",
+            "end_image",
+            "last_image_url",
+            "last_image",
+        )]
+        if value
+    ])
+    explicit_start_image = start_image_values[0] if start_image_values else None
+    explicit_end_image = end_image_values[0] if end_image_values else None
+    images = [
+        url for url in images
+        if url not in {explicit_start_image, explicit_end_image}
+    ]
+    videos = await _resolve_media_urls([
+        u for u in (profile.get("videos") or profile.get("reference_videos") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+    audios = await _resolve_media_urls([
+        u for u in (profile.get("audios") or profile.get("reference_audios") or [])
+        if isinstance(u, str) and u.strip()
+    ])
+
+    i2v_requested = _is_i2v_mode(profile) or bool(explicit_start_image)
+    start_image = explicit_start_image
+    end_image = explicit_end_image
+    if i2v_requested and not start_image and images:
+        # Backward compatibility for legacy ``generation_mode=i2v`` calls.
+        start_image = images.pop(0)
+        if not end_image and images:
+            end_image = images.pop(0)
+    if i2v_requested and not start_image:
+        raise ValueError(
+            "image-to-video generation requires start_image_url (or a legacy first images entry)"
+        )
+
+    svc = get_wavespeed_service()
+    logger.info(
+        "api-provider-bridge wavespeed: family=%s model=%s refs=%s i2v=%s start=%s end=%s",
+        family,
+        model or "(default)",
+        len(images),
+        i2v_requested,
+        bool(start_image),
+        bool(end_image),
+    )
+    if i2v_requested and images:
+        logger.info(
+            "api-provider-bridge wavespeed: %d generic reference image(s) are not sent "
+            "to the Seedance I2V endpoint; the strict start frame takes precedence",
+            len(images),
+        )
+
+    request_id = str(profile.get("remote_operation_id") or "").strip() or None
+    created_remote = request_id is None
+    try:
+        if family == "seedance_2_5":
+            if i2v_requested:
+                request_id = request_id or await svc.create_seedance_2_5_i2v_task(
+                    image=start_image,
+                    prompt=prompt,
+                    duration=duration,
+                    resolution=resolution,
+                    last_image=end_image,
+                    generate_audio=generate_audio,
+                )
+            else:
+                # T2V is intentional for multi-reference workflows: reference
+                # images guide identity/style without becoming a forced first frame.
+                request_id = request_id or await svc.create_seedance_2_5_t2v_task(
+                    prompt=prompt,
+                    duration=duration,
+                    resolution=resolution,
+                    aspect_ratio=aspect_ratio,
+                    generate_audio=generate_audio,
+                    reference_images=images or None,
+                    reference_videos=videos or None,
+                    reference_audios=audios or None,
+                )
+            if created_remote and on_remote_submitted:
+                await on_remote_submitted(request_id, "wavespeed")
+            result = await svc.poll_seedance_video_task_until_complete(
+                request_id, start_image or (images[0] if images else ""), prompt,
+                duration, resolution, 0, end_image=None,
+                strip_audio=not generate_audio,
+            )
+        elif family == "seedance_1_5":
+            v15_image = start_image or (images[0] if images else None)
+            if not v15_image:
+                raise ValueError("Seedance 1.5 Pro requires at least one image")
+            request_id = request_id or await svc.create_seedance_v1_5_video_task(
+                v15_image, prompt, False, duration,
+                resolution if resolution in {"720p", "1080p"} else "720p", -1,
+            )
+            if created_remote and on_remote_submitted:
+                await on_remote_submitted(request_id, "wavespeed")
+            result = await svc.poll_seedance_video_task_until_complete(
+                request_id, v15_image, prompt, duration, resolution, -1,
+                end_image=None,
+            )
+        elif i2v_requested:
+            request_id = request_id or await svc.create_seedance_2_i2v_task(
+                image=start_image,
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                last_image=end_image,
+                aspect_ratio=aspect_ratio,
+                generate_audio=generate_audio,
+            )
+            if created_remote and on_remote_submitted:
+                await on_remote_submitted(request_id, "wavespeed")
+            result = await svc.poll_seedance_video_task_until_complete(
+                request_id, start_image, prompt, duration, resolution, 0,
+                end_image=None, strip_audio=not generate_audio,
+            )
+        else:
+            # Default continuity path: Seedance 2.0 T2V + optional reference media.
+            request_id = request_id or await svc.create_seedance_2_t2v_task(
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                generate_audio=generate_audio,
+                reference_images=images or None,
+                reference_videos=videos or None,
+                reference_audios=audios or None,
+            )
+            if created_remote and on_remote_submitted:
+                await on_remote_submitted(request_id, "wavespeed")
+            result = await svc.poll_seedance_video_task_until_complete(
+                request_id, "", prompt, duration, resolution, 0,
+                end_image=None, strip_audio=not generate_audio,
+            )
+    except Exception as exc:
+        if isinstance(exc, ProviderGenerateError):
+            raise
+        if type(exc).__name__ == "RetryError" and request_id:
+            raise ProviderGenerateError(
+                f"provider_pending_timeout: WaveSpeed task still processing; remote_task_id={request_id}",
+                category="provider_pending_timeout",
+                retryable=True,
+                remote_task_id=request_id,
+                provider="wavespeed",
+                model=model or family,
+            ) from exc
+        if isinstance(exc, ValueError):
+            raise
+        raise _classify_wavespeed_failure(
+            str(exc), provider="wavespeed", model=model or family,
+        ) from exc
+
+    video_url = getattr(result, "video_url", None) or getattr(result, "url", None)
+    if not video_url:
+        err = (
+            getattr(result, "error_message", None)
+            or getattr(result, "message", None)
+            or "WaveSpeed generate failed"
+        )
+        raise _classify_wavespeed_failure(
+            str(err),
+            provider="wavespeed",
+            model=model or family,
+        )
+    return {
+        "video_url": video_url,
+        "uri": video_url,
+        "provider_used": "wavespeed",
+        "model_family": family,
+        "generation_mode": "i2v" if i2v_requested else "t2v",
+        "start_image_url": start_image,
+        "end_image_url": end_image,
+        "reference_image_count": len(images),
+        "raw_task_id": request_id,
+        "raw": result.model_dump() if hasattr(result, "model_dump") else {"video_url": video_url},
+    }
+
+
+async def generate_video(
+    profile: dict[str, Any],
+    *,
+    fallbacks_json: str | None = None,
+    on_remote_submitted: RemoteSubmittedCallback | None = None,
+) -> dict[str, Any]:
+    requested = str(profile.get("provider") or profile.get("model") or "ark")
+    # If model looks like doubao-*, treat provider as ark unless explicitly set.
+    provider_hint = str(profile.get("provider") or "ark")
+    if not profile.get("provider") and str(profile.get("model") or "").startswith("doubao"):
+        provider_hint = "ark"
+    provider = resolve_provider(provider_hint, fallbacks_json=fallbacks_json)
+    logger.info(
+        "api-provider-bridge: requested=%s resolved=%s model=%s",
+        provider_hint,
+        provider,
+        profile.get("model"),
+    )
+    if provider == "ark":
+        key = os.environ.get("ARK_API_KEY") or ""
+        return await _ark_generate(profile, key, on_remote_submitted)
+    if provider in {"wavespeed", "wavespeed-seedance-2"}:
+        return await _wavespeed_generate(profile, on_remote_submitted)
+    raise RuntimeError(f"unsupported resolved provider: {provider}")
+
+
+def public_http_host_allowlist_for_providers() -> tuple[str, ...]:
+    """Domains Skills typically need when calling providers via host.http.request."""
+    hosts = set()
+    for url in (ARK_BASE_URL, "https://api.wavespeed.ai/"):
+        host = urlparse(url).hostname
+        if host:
+            hosts.add(host)
+    return tuple(sorted(hosts))

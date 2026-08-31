@@ -1,0 +1,25 @@
+# Cuti Video Agent bundle. Apply over a normal DeepSeek Harness profile.
+- id: llm-pi-ai
+  config:
+    providers:
+      openai:
+        apiKeyEnv: OPENAI_API_KEY
+        timeoutMs: 300000
+        streamIdleTimeoutMs: 300000
+
+- id: agent-default-model
+  config:
+    provider: openai
+    model: !!js process.env.VIDEO_AGENT_MODEL ?? 'gpt-5.6-terra'
+
+- insert:
+    - id: cuti-video-runtime
+      name: '@cuti-ai/video-runtime-http'
+      config:
+        baseUrl: !!js process.env.VIDEO_RUNTIME_URL ?? 'http://127.0.0.1:8001'
+        serviceToken: !!js process.env.VIDEO_RUNTIME_SERVICE_TOKEN
+        userId: !!js process.env.VIDEO_RUNTIME_USER_ID ?? 'local-user'
+        timeoutMs: !!js Number(process.env.VIDEO_RUNTIME_TIMEOUT_MS ?? 30000)
+
+    - id: cuti-tool-video
+      name: '@cuti-ai/tool-video'

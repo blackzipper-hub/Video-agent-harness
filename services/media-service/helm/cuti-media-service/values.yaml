@@ -1,0 +1,71 @@
+replicaCount: 2
+
+image:
+  repository: ""  # e.g. 123456789.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "2Gi"
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 60
+  scaleUp:
+    stabilizationWindowSeconds: 30
+    maxPods: 4
+    periodSeconds: 60
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    maxPods: 1
+    periodSeconds: 120
+
+workspace:
+  sizeLimit: 20Gi
+
+env:
+  ENVIRONMENT: production
+  LOG_LEVEL: info
+  PORT: "8080"
+  FFMPEG_THREADS: "2"
+  MAX_CONCURRENT_JOBS: "3"
+  WORKSPACE_BASE: /workspace
+  WORKSPACE_TTL_HOURS: "2"
+  AWS_REGION: ap-southeast-2
+  WATERMARK_IMAGE_PATH: assets/watermark.png
+
+serviceAccountName: cuti-media-service-sa
+
+createSecret: false
+secretEnvFrom: cuti-media-service-secrets
+
+ingress:
+  enabled: true
+  scheme: internal
+  annotations:
+    alb.ingress.kubernetes.io/tags: Environment=production,Project=cuti-media-service
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3

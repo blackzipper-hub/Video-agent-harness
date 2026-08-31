@@ -1,0 +1,124 @@
+from pathlib import Path
+
+from app.chat.v2.language import (
+    LanguageSkillConflictError,
+    active_language_skill,
+    explicit_language_skill,
+    language_contract,
+    output_language_instruction,
+    resolve_output_language,
+    resolve_spoken_language,
+)
+import pytest
+from app.chat.v2.models import AgentRun, PlannedTask, RunSnapshot
+from app.orchestration.context import ContextAssembler
+from app.chat.v2.models import PlanPatch
+from app.orchestration.task_runtime.harness import DynamicHarness
+from app.chat.v2.skill_catalog import SkillCatalog
+
+
+def test_product_ad_workflow_category_maps_to_legacy_product_launch():
+    from app.models.tool_enums import ContentCategory
+
+    assert ContentCategory.PRODUCT_LAUNCH.value == "Product Launch"
+
+
+def test_chinese_message_overrides_english_ui_language():
+    assert resolve_output_language("请生成一个商业广告", requested="en") == "zh"
+
+
+def test_ui_language_preserves_chinese_for_language_neutral_followup():
+    assert resolve_output_language("OK", requested="zh", current="en") == "zh"
+
+
+def test_explicit_english_skill_wins_over_chinese_message_and_alias_is_canonical():
+    selected = explicit_language_skill("$eng 请生成英文广告")
+    assert selected == "language-en"
+    assert resolve_output_language(
+        "请生成英文广告", requested="zh", language_skill=selected,
+    ) == "en"
+
+
+def test_language_skill_conflict_is_rejected():
+    with pytest.raises(LanguageSkillConflictError):
+        explicit_language_skill("$zh $eng generate an ad")
+
+
+def test_active_language_skill_and_structured_contract():
+    assert active_language_skill(["cuti-product-workflow", "language-zh"]) == "language-zh"
+    assert language_contract("en", provider_prompt_language="zh-CN") == {
+        "user_visible_language": "en-US",
+        "spoken_language": "en-US",
+        "on_screen_text_language": "en-US",
+        "provider_prompt_language": "zh-CN",
+    }
+
+
+def test_explicit_english_dialogue_is_independent_from_chinese_output():
+    request = "制作一支中文策划的产品广告，对话保持英文"
+    assert resolve_output_language(request, requested="zh") == "zh"
+    assert resolve_spoken_language(request, output_language="zh") == "en-US"
+    instruction = output_language_instruction("zh", user_request=request)
+    assert "Simplified Chinese" in instruction
+    assert "Spoken narration/dialogue language: en-US" in instruction
+    assert "never translate spoken lines" in instruction
+
+
+def test_explicit_chinese_voiceover_is_independent_from_english_output():
+    request = "Create an English shot plan, but use Chinese narration"
+    assert resolve_spoken_language(request, output_language="en") == "zh-CN"
+
+
+def test_run_language_skill_has_priority_over_inline_spoken_language():
+    assert resolve_spoken_language(
+        "$eng 对话使用中文",
+        output_language="en",
+        language_skill="language-en",
+    ) == "en-US"
+
+
+def test_language_skills_are_discoverable_as_run_scoped_skills():
+    catalog = SkillCatalog([Path(__file__).parents[1] / "skills" / "external"])
+    discovered = {item.name: item for item in catalog.discover()}
+    assert discovered["language-zh"].metadata["scope"]["type"] == "run"
+    assert discovered["language-en"].metadata["scope"]["type"] == "run"
+
+
+def test_context_assembler_injects_chinese_output_contract():
+    run = AgentRun(
+        thread_id="thread-1",
+        project_id="project-1",
+        user_id="user-1",
+        objective="生成广告",
+        idempotency_key="request-1",
+        output_language="zh",
+    )
+    context = ContextAssembler().assemble(RunSnapshot(run=run))
+    assert "Simplified Chinese" in context
+
+
+def test_harness_adds_language_contract_when_stage_has_no_matching_skill():
+    run = AgentRun(
+        thread_id="thread-1",
+        project_id="project-1",
+        user_id="user-1",
+        objective="生成字幕",
+        idempotency_key="request-1",
+        output_language="zh",
+    )
+    class EmptyResolver:
+        def resolve(self, _run, _task):
+            return None
+
+    harness = DynamicHarness.__new__(DynamicHarness)
+    harness.skill_resolver = EmptyResolver()
+    patch = harness._resolve_stage_skills(
+        run,
+        PlanPatch(add_tasks=[
+            PlannedTask(capability_id="subtitle.compose", objective="Compose captions")
+        ]),
+    )
+    context = patch.add_tasks[0].skill_context
+    assert context is not None
+    assert context.applied_skills == []
+    assert context.instructions == output_language_instruction("zh")

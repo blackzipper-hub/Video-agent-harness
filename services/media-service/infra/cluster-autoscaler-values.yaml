@@ -1,0 +1,30 @@
+# Cluster Autoscaler Helm values (chart cluster-autoscaler, e.g. 9.56.x).
+# Use AFTER IAM role exists and SA is annotated (or rely on this file on helm upgrade).
+# Safe for Git: this file alone does not change any cluster; apply via helm upgrade when ready.
+#
+# One-shot (before helm): create IAM role + trust OIDC for SA
+#   system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler
+# then:
+#   kubectl annotate sa cluster-autoscaler-aws-cluster-autoscaler -n kube-system \
+#     eks.amazonaws.com/role-arn=arn:aws:iam::699475938168:role/ClusterAutoscaler-cuti-cluster --overwrite
+#   kubectl rollout restart deployment/cluster-autoscaler-aws-cluster-autoscaler -n kube-system
+#
+# Persist annotations across helm upgrades:
+#   helm upgrade cluster-autoscaler autoscaler/cluster-autoscaler -n kube-system \
+#     -f infra/cluster-autoscaler-values.yaml --version 9.56.0
+
+autoDiscovery:
+  clusterName: cuti-cluster
+
+awsRegion: ap-southeast-2
+
+rbac:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::699475938168:role/ClusterAutoscaler-cuti-cluster
+
+extraArgs:
+  balance-similar-node-groups: true
+  scale-down-delay-after-add: 5m
+  scale-down-unneeded-time: 5m
+  skip-nodes-with-system-pods: false

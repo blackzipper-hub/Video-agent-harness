@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.pnpm-store
+**/node_modules
+**/lib
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+tmp
+services/video-runtime/skills/external
+services/video-runtime/ee
+services/video-runtime/logs
+services/video-runtime/data
+apps/video-studio/.env*
+services/video-runtime/.env*

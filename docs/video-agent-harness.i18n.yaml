@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/video-agent-harness.md
+video-agent-harness.md: 695b8a7b2a15b06c7ce7f5e435166bc9d37dc296
+video-agent-harness.zh.md: f898a60fe8a4237a160411c2d914751aa056b7fb

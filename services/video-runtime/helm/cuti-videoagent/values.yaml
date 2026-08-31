@@ -1,0 +1,84 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "1500m"
+    memory: "6Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  scaleUp:
+    stabilizationWindowSeconds: 60
+    maxPods: 2
+    periodSeconds: 60
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    maxPods: 1
+    periodSeconds: 120
+
+terminationGracePeriodSeconds: 10800
+
+nodeSelector:
+  workload-type: agent
+
+workspace:
+  sizeLimit: 20Gi
+
+# Stage artifacts under /app/data/run_workspaces (STAGE_ARTIFACT_ROOT).
+# Use EFS (RWX) when HPA / multi-replica may schedule across nodes.
+persistence:
+  enabled: false
+  createPVC: true
+  claimName: cuti-videoagent-data
+  storageClassName: efs-sc
+  accessModes:
+    - ReadWriteMany
+  size: 20Gi
+  mountPath: /app/data
+
+env:
+  ENVIRONMENT: production
+  LOG_LEVEL: info
+  SERVER_PORT: "8000"
+  AWS_REGION: ap-southeast-2
+  LLM_QUALITY: best
+  STAGE_ARTIFACT_ROOT: data/run_workspaces
+
+serviceAccountName: default
+
+createSecret: false
+secretEnvFrom: cuti-videoagent-secrets
+
+ingress:
+  enabled: true
+  scheme: internal
+  annotations:
+    alb.ingress.kubernetes.io/tags: Environment=production,Project=cuti-videoagent
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=1200
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    failureThreshold: 3

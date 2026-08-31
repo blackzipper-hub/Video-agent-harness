@@ -1,0 +1,25 @@
+id: cuti.media-core
+version: 1.0.0
+api_version: v1
+runtime_entrypoint: app.video_runtime.builtin_plugins.media_core:MediaCorePlugin
+trusted: true
+contributions:
+  capabilities:
+    - runtime.artifact.persist
+    - media.tts
+    - media.extract_frame
+    - media.timeline.compose
+    - media.concat
+    - media.mix_audio
+    - media.subtitle.compose
+    - media.subtitle.burn
+    - media.lipsync
+  media_operators:
+    - cuti.media-core
+permissions:
+  network_domains:
+    - api.wavespeed.ai
+  credentials:
+    - WAVESPEED_API_KEY
+  sandbox: false
+  max_cost_usd: 50

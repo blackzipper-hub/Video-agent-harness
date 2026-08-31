@@ -1,0 +1,95 @@
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from .api import router, set_runtime
+from .deepseek_bff import (
+    router as deepseek_bff_router,
+    set_deepseek_client,
+    studio_router as deepseek_studio_bff_router,
+)
+from .deepseek_client import DeepSeekHarnessClient
+from .postgres_repository import PostgresVideoProjectRepository
+from .plugins.registry import configured_plugin_roots
+from .runtime import VideoBuildRuntime
+from .security import CapabilityGrantSigner
+from .skill_workflows import load_workflow_skills
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    repository = None
+    deepseek = None
+    build_runtime = VideoBuildRuntime()
+    database_url = os.getenv("VIDEO_RUNTIME_DATABASE_URL", "").strip()
+    if database_url:
+        repository = await PostgresVideoProjectRepository.connect(
+            database_url, os.getenv("VIDEO_RUNTIME_DATABASE_SCHEMA", "cuti_video_runtime"),
+        )
+        build_runtime = VideoBuildRuntime(repository=repository)
+    roots = configured_plugin_roots()
+    if roots:
+        await build_runtime.plugins.load_directories(roots)
+        await load_workflow_skills(build_runtime.plugins, build_runtime.skills)
+        if any(
+            callable(getattr(item.implementation, "capability_handlers", None))
+            for item in build_runtime.plugins.loaded
+        ):
+            secret = os.getenv("VIDEO_CAPABILITY_GRANT_SECRET", "").encode()
+            if len(secret) < 32:
+                raise RuntimeError(
+                    "VIDEO_CAPABILITY_GRANT_SECRET must contain at least 32 bytes "
+                    "when executable plugin handlers are loaded",
+                )
+            build_runtime.configure_plugin_execution(CapabilityGrantSigner(secret))
+            await build_runtime.recover_active_builds()
+    set_runtime(build_runtime)
+    backend = os.getenv("VIDEO_AGENT_BACKEND", "deepseek").strip().lower()
+    if backend != "deepseek":
+        raise RuntimeError("VIDEO_AGENT_BACKEND only supports 'deepseek'")
+    deepseek = DeepSeekHarnessClient(
+        os.getenv("DEEPSEEK_HARNESS_URL", "http://127.0.0.1:3080"),
+        authorization=os.getenv("DEEPSEEK_HARNESS_AUTHORIZATION") or None,
+    )
+    set_deepseek_client(deepseek)
+    try:
+        yield
+    finally:
+        await build_runtime.close()
+        set_deepseek_client(None)
+        if deepseek is not None:
+            await deepseek.close()
+        if repository is not None:
+            await repository.close()
+
+
+app = FastAPI(
+    title="Cuti Video Runtime",
+    description="Project-oriented incremental media build runtime.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+app.include_router(router)
+
+# The open-source profile does not require S3. The Cuti Media Service writes
+# immutable outputs into this shared directory and the Runtime exposes them to
+# providers, validators, Studio previews, and downloads through one stable URL.
+if os.getenv("STORAGE_BACKEND", "").strip().lower() == "local":
+    local_storage_dir = Path(
+        os.getenv("LOCAL_STORAGE_DIR", "./data/uploads"),
+    ).expanduser().resolve()
+    local_storage_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/files", StaticFiles(directory=str(local_storage_dir)), name="video-files")
+
+chat_app = FastAPI(title="DeepSeek compatibility BFF")
+chat_app.include_router(deepseek_bff_router)
+chat_app.include_router(deepseek_studio_bff_router)
+app.mount("/chat-v1/service", chat_app)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "healthy"}

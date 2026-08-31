@@ -1,0 +1,23 @@
+id: cuti.atomic-providers
+version: 1.0.0
+api_version: v1
+runtime_entrypoint: app.video_runtime.builtin_plugins.cuti_provider:CutiAtomicProviderPlugin
+trusted: true
+contributions:
+  capabilities:
+    - atomic.text.generate
+    - atomic.image.generate
+    - atomic.music.generate
+    - atomic.video.generate
+permissions:
+  network_domains:
+    - api.sunoapi.com
+    - api.wavespeed.ai
+    - ark.cn-beijing.volces.com
+  credentials:
+    - ARK_API_KEY
+    - OPENAI_API_KEY
+    - SUNO_API_KEY
+    - WAVESPEED_API_KEY
+  sandbox: false
+  max_cost_usd: 50

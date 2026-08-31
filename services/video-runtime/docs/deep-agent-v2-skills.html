@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep Agent V2 · Skill / 沙箱 / 热加载</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    securityLevel: "loose",
+    flowchart: { curve: "basis", htmlLabels: true },
+    sequence: { actorMargin: 28, messageMargin: 28 },
+  });
+</script>
+<style>
+:root {
+  --bg: #0a0e17;
+  --surface: #131a2a;
+  --surface2: #1a2338;
+  --border: #2a3654;
+  --accent: #00d4aa;
+  --accent2: #6366f1;
+  --accent3: #f59e0b;
+  --accent4: #ef4444;
+  --accent5: #8b5cf6;
+  --text: #e2e8f0;
+  --text-dim: #8892a8;
+  --text-bright: #fff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Instrument Sans", sans-serif;
+  min-height: 100vh;
+  padding: 40px 24px 80px;
+  line-height: 1.55;
+}
+.wrap { max-width: 1100px; margin: 0 auto; }
+h1 {
+  font-size: 28px; font-weight: 700; color: var(--text-bright);
+  letter-spacing: -0.4px; margin-bottom: 8px;
+}
+.subtitle {
+  color: var(--text-dim); font-size: 13px; margin-bottom: 28px;
+  font-family: "DM Mono", monospace;
+}
+nav {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px;
+}
+nav a {
+  font-size: 12px; color: var(--accent); text-decoration: none;
+  border: 1px solid var(--border); background: var(--surface);
+  padding: 6px 10px; border-radius: 999px;
+}
+nav a:hover { border-color: var(--accent); }
+section {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 22px 24px; margin-bottom: 20px;
+}
+h2 {
+  font-size: 18px; color: var(--text-bright); margin-bottom: 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+h2 .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  display: inline-block;
+}
+h3 { font-size: 14px; color: var(--text-bright); margin: 18px 0 10px; }
+p, li { font-size: 14px; color: var(--text); }
+ul, ol { padding-left: 1.2rem; margin: 8px 0 12px; }
+li + li { margin-top: 4px; }
+table {
+  width: 100%; border-collapse: collapse; margin: 12px 0 8px;
+  font-size: 13px;
+}
+th, td {
+  border: 1px solid var(--border); padding: 8px 10px; text-align: left;
+  vertical-align: top;
+}
+th { background: var(--surface2); color: var(--text-bright); font-weight: 600; }
+code, .mono {
+  font-family: "DM Mono", monospace; font-size: 12px;
+  color: var(--accent);
+}
+.mermaid {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; margin: 14px 0 6px;
+  overflow-x: auto;
+}
+.note {
+  font-size: 12px; color: var(--text-dim); margin-top: 8px;
+}
+.grid-2 {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+@media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+.card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px;
+}
+.card h4 { font-size: 13px; color: var(--text-bright); margin-bottom: 8px; }
+.tag-ok { color: var(--accent); }
+.tag-need { color: var(--accent3); }
+.tag-no { color: var(--accent4); }
+a.doclink { color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Deep Agent V2：调用结构 · Skill · 热加载 · 沙箱</h1>
+  <p class="subtitle">
+    cuti-video-agent / app/chat/v2 · 同步 Markdown：
+    <a class="doclink" href="./deep-agent-v2-skills.md">deep-agent-v2-skills.md</a>
+  </p>
+
+  <nav>
+    <a href="#call">调用结构</a>
+    <a href="#load">Skill 加载</a>
+    <a href="#hot">热加载</a>
+    <a href="#sandbox">沙箱</a>
+    <a href="#decide">热加载 vs 改代码</a>
+    <a href="#flows">流程图</a>
+  </nav>
+
+  <section id="call">
+    <h2><span class="dot" style="background:var(--accent2)"></span>1. 代码调用结构</h2>
+    <p>用户消息从前端进入 V2 API，经 Harness 持久化与调度，由 Coordinator（LangGraph）选 Skill / 提计划，再由 CapabilityExecutor 分发到沙箱、进程内服务或 VideoAgent。</p>
+    <table>
+      <thead><tr><th>层</th><th>关键模块</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td>前端</td><td><code>features/deep-agent-v2/</code></td><td>run / message / SSE / artifacts</td></tr>
+        <tr><td>API</td><td><code>api/v2/v2_endpoints.py</code></td><td><code>/chat-v1/service/v2/*</code></td></tr>
+        <tr><td>Harness</td><td><code>harness.py</code></td><td>计划校验、任务调度、artifact</td></tr>
+        <tr><td>Coordinator</td><td><code>coordinator.py</code> + <code>deep_agent_runtime.py</code></td><td>LLM 工具循环</td></tr>
+        <tr><td>Tools</td><td><code>tools.py</code></td><td>list/load skill、propose_plan_patch、run_skill_script</td></tr>
+        <tr><td>Executor</td><td><code>executors.py</code></td><td>sandbox / local.service / delegate / mcp</td></tr>
+      </tbody>
+    </table>
+    <h3>一次消息主路径</h3>
+    <ol>
+      <li><code>POST /v2/runs/{id}/messages</code> → <code>DynamicHarness.add_message</code></li>
+      <li><code>DeepAgentCoordinator.run</code> → Runtime 工具：<code>load_skill</code> / <code>propose_plan_patch</code> …</li>
+      <li><code>commit_agent_patch</code> → 落库 tasks → <code>CapabilityExecutor.submit</code></li>
+      <li>产出 artifact → 再协调；delegate 可能经 <code>/internal/video-agent/events</code> 异步完成</li>
+    </ol>
+  </section>
+
+  <section id="load">
+    <h2><span class="dot" style="background:var(--accent5)"></span>2. Skill 加载逻辑</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h4>根目录与信任</h4>
+        <ul>
+          <li><code>skills/.system</code> → <span class="tag-ok">trusted</span>，可走 local.service / delegate</li>
+          <li><code>skills/external</code> → <span class="tag-need">untrusted</span>，可执行合同仅允许 <code>sandbox.run</code></li>
+          <li><code>.cuti-disabled</code> → 目录级禁用</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>两类 Skill</h4>
+        <ul>
+          <li><b>Instruction-only</b>：无 cuti-contract，不注册 capability</li>
+          <li><b>Executable</b>：有 cuti-contract → CapabilityRegistry</li>
+        </ul>
+        <p class="note">资源列表跳过 <code>.cuti-*</code> 与以 <code>.</code> 开头的路径段（如 <code>.filtered</code>）。</p>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>示例</th><th>类型</th><th>执行</th></tr></thead>
+      <tbody>
+        <tr><td><code>open-montage</code></td><td>instruction-only</td><td>组合阶段能力 + 可选 scripts</td></tr>
+        <tr><td><code>open-montage-tools</code></td><td>.system local.service</td><td><code>open_montage.tool.invoke</code></td></tr>
+        <tr><td><code>seedance2</code></td><td>instruction + script</td><td><code>run_skill_script</code> + Ark 桥</td></tr>
+        <tr><td><code>media-concat</code></td><td>.system</td><td>HostGateway media.concat</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="hot">
+    <h2><span class="dot" style="background:var(--accent)"></span>3. 热加载逻辑</h2>
+    <p>入口：<code>POST /chat-v1/service/v2/internal/skills/reload</code> → <code>reload_v2_skills()</code>。</p>
+    <ol>
+      <li><code>catalog.reload()</code> 重新扫盘</li>
+      <li><code>build_registry</code> / <code>replace_all</code> 刷新 capability</li>
+      <li><code>_apply_runtime_policy</code>（沙箱关闭则禁用 sandbox.run）</li>
+      <li><code>runtime.reload_skill_files()</code> 刷新虚拟 <code>/skills/**</code></li>
+    </ol>
+    <div class="grid-2">
+      <div class="card">
+        <h4 class="tag-ok">Reload 立即生效</h4>
+        <ul>
+          <li>SKILL.md / 资源 / scripts 内容</li>
+          <li>Capability 注册表</li>
+          <li>.cuti-disabled / install / delete</li>
+          <li>list_skills / list_capabilities 视图</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4 class="tag-no">需改代码并重启</h4>
+        <ul>
+          <li>新 <code>local.service</code> target 分支</li>
+          <li>新 HostGateway capability</li>
+          <li>系统 prompt / LangGraph 结构</li>
+          <li>新 VideoAgent 阶段服务接线</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">热加载刷新的是「Skill 包 + 注册表」，不是「Agent Python 业务逻辑」。</p>
+  </section>
+
+  <section id="sandbox">
+    <h2><span class="dot" style="background:var(--accent3)"></span>4. 沙箱是什么？逻辑如何？</h2>
+    <p><b>沙箱</b> = 独立 <code>sandbox-worker</code> 在隔离容器（默认 <code>python:3.11-slim</code>）中执行 Skill 代码，写出 <code>output/result.json</code>，由 Agent 收成 artifact。开关：<code>DEEP_AGENT_V2_SANDBOX_ENABLED</code>。</p>
+    <h3>两条入口</h3>
+    <table>
+      <thead><tr><th>路径</th><th>触发</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>propose_plan_patch</code> + <code>sandbox.run</code></td>
+          <td>有 cuti-contract</td>
+          <td>按 sandbox 策略跑 entrypoint</td>
+        </tr>
+        <tr>
+          <td><code>run_skill_script</code></td>
+          <td>协调器工具</td>
+          <td>仅 <code>scripts/*</code>；instruction-only 也可用</td>
+        </tr>
+      </tbody>
+    </table>
+    <h3>Host Gateway</h3>
+    <p>容器通过注入的 <code>host_dispatch</code> 回调 Agent：</p>
+    <p class="mono">POST /v2/internal/host/dispatch → HostGateway</p>
+    <ul>
+      <li>媒体：<code>media.concat</code> / <code>extract_frame</code> / <code>trim</code> / <code>speed_adjust</code></li>
+      <li>生成：<code>provider.generate</code></li>
+      <li>其它：<code>http.request</code>、<code>artifact.*</code>、<code>log</code>、<code>progress</code></li>
+    </ul>
+    <p class="note"><code>local.service</code>（outline/character 等）在 Agent 进程内执行，不进沙箱；external Skill 不能声明 local.service。</p>
+  </section>
+
+  <section id="decide">
+    <h2><span class="dot" style="background:var(--accent4)"></span>5. 可直接热加载 vs 需代码适配</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h4 class="tag-ok">可直接热加载</h4>
+        <ul>
+          <li>Instruction-only：只组合已有 capability</li>
+          <li>scripts 仅依赖已有 host / Ark 桥</li>
+          <li>external + <code>sandbox.run</code> 完整合同</li>
+          <li>启停已存在 Skill（.cuti-disabled）</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4 class="tag-need">需要代码适配</h4>
+        <ul>
+          <li>新 DB/阶段服务 → executors 新 target</li>
+          <li>新宿主能力 → host_gateway +（可选）Media</li>
+          <li>OM 工具映射扩展 → open_montage_bridge</li>
+          <li>产品级 local.service → 做成 .system 随发</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="flows">
+    <h2><span class="dot"></span>6. Mermaid 流程图</h2>
+
+    <h3>6.1 端到端调用</h3>
+    <pre class="mermaid">
+sequenceDiagram
+    participant FE as Frontend
+    participant API as v2_endpoints
+    participant H as DynamicHarness
+    participant C as Coordinator
+    participant R as DeepAgentRuntime
+    participant E as CapabilityExecutor
+    participant X as Sandbox_Media_VideoAgent
+
+    FE->>API: POST /runs/{id}/messages
+    API->>H: add_message()
+    H->>C: run(observation)
+    C->>R: astream_events + tools
+    R-->>C: load_skill / propose_plan_patch
+    C->>H: commit_agent_patch
+    H->>E: submit(task)
+    E->>X: sandbox / local.service / delegate
+    X-->>H: artifact or WAITING_EXTERNAL
+    H->>C: re-coordinate
+    </pre>
+
+    <h3>6.2 Skill 发现与注册</h3>
+    <pre class="mermaid">
+flowchart LR
+    A[".system / external 根目录"] --> B[SkillCatalog.discover]
+    B --> C{有 cuti-contract?}
+    C -->|否| D[Instruction-only]
+    C -->|是| E[capability_loader]
+    E --> F{trusted / sandbox.run?}
+    F -->|否| G[拒绝或禁用]
+    F -->|是| H[CapabilityRegistry]
+    D --> I[Runtime.skill_files]
+    H --> J[PlanValidator / Executor]
+    I --> K[list_skills / load_skill]
+    </pre>
+
+    <h3>6.3 热加载流程</h3>
+    <pre class="mermaid">
+flowchart TD
+    U[改 Skill 包 / install / .cuti-disabled] --> R[POST /internal/skills/reload]
+    R --> C[catalog.reload]
+    C --> G[build_registry replace_all]
+    G --> P[_apply_runtime_policy]
+    P --> F[runtime.reload_skill_files]
+    F --> OK[list_skills / capabilities 立即可见]
+    X[改 executors / host_gateway / 系统提示] --> Y[部署代码并重启进程]
+    </pre>
+
+    <h3>6.4 沙箱与宿主回调</h3>
+    <pre class="mermaid">
+flowchart TB
+    subgraph Agent["Agent 进程"]
+      T[run_skill_script / sandbox.run]
+      SC[SandboxClient]
+      HG[HostGateway]
+      LS[local.service]
+    end
+    subgraph Worker["sandbox-worker"]
+      CTR["容器 python:3.11-slim"]
+      HOST["host_dispatch"]
+      OUT[output/result.json]
+    end
+    T --> SC --> CTR
+    CTR --> HOST
+    HOST -->|internal/host/dispatch| HG
+    HG --> M[Media / provider.generate]
+    CTR --> OUT --> SC
+    LS -.->|不进沙箱| VA[VideoAgent 阶段服务]
+    </pre>
+
+    <h3>6.5 热加载 vs 改代码决策</h3>
+    <pre class="mermaid">
+flowchart TD
+    Q{Skill 需要什么?}
+    Q -->|说明 + 组合现有 capability| H1[热加载 Instruction-only]
+    Q -->|scripts 只用已有 host/Ark 桥| H2[热加载 + run_skill_script]
+    Q -->|vendor 逻辑 + sandbox.run| H3[zip 安装 + reload]
+    Q -->|新 DB 阶段 / 新 Media / 新 host cap| C1[改 Agent 代码 + 重启]
+    Q -->|产品级 local.service| C2[做成 .system + executor 分支]
+    </pre>
+  </section>
+
+  <p class="note" style="text-align:center;margin-top:24px;">
+    关键文件：<code>container.py</code> · <code>skill_catalog.py</code> · <code>capability_loader.py</code> ·
+    <code>harness.py</code> · <code>executors.py</code> · <code>sandbox_client.py</code> ·
+    <code>host_gateway.py</code> · <code>EXTERNAL_SKILL_AUTHORING.md</code>
+  </p>
+</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+id: cuti.lipsync-music-video
+version: 1.0.0
+api_version: v1
+runtime_entrypoint: app.video_runtime.builtin_plugins.music_workflows:LipsyncMusicVideoWorkflowPlugin
+trusted: true
+dependencies:
+  - cuti.atomic-providers
+  - cuti.media-core
+  - cuti.continuity-validator
+  - cuti.style-presets
+contributions:
+  workflows:
+    - cuti.lipsync-music-video
+skills:
+  - workflow-keyframe-pipeline
+permissions:
+  network_domains: []
+  credentials: []
+  sandbox: false
+  max_cost_usd: 0

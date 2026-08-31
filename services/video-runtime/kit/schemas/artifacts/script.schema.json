@@ -1,0 +1,412 @@
+{
+  "$defs": {
+    "ScriptDeliveryCues": {
+      "description": "OM delivery_cues — structured voice-performance hints for TTS.",
+      "properties": {
+        "pace": {
+          "anyOf": [
+            {
+              "enum": [
+                "slow",
+                "measured",
+                "conversational",
+                "brisk",
+                "fast",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Speaking pace band for TTS",
+          "title": "Pace"
+        },
+        "energy": {
+          "default": "",
+          "description": "Energy adjective, e.g. tense / warm / clipped",
+          "title": "Energy",
+          "type": "string"
+        },
+        "emphasis_words": {
+          "description": "Words to stress in performance",
+          "items": {
+            "type": "string"
+          },
+          "title": "Emphasis Words",
+          "type": "array"
+        },
+        "pause_before_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Silence before this section starts",
+          "title": "Pause Before Seconds"
+        },
+        "pause_after_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Silence after this section ends",
+          "title": "Pause After Seconds"
+        },
+        "delivery_note": {
+          "default": "",
+          "description": "Free-text acting note for voice",
+          "title": "Delivery Note",
+          "type": "string"
+        },
+        "provider_text": {
+          "default": "",
+          "description": "Provider-specific TTS markup if needed; else leave empty",
+          "title": "Provider Text",
+          "type": "string"
+        }
+      },
+      "title": "ScriptDeliveryCues",
+      "type": "object"
+    },
+    "ScriptEnhancementCue": {
+      "properties": {
+        "type": {
+          "default": "broll",
+          "description": "Visual enhancement type for this beat",
+          "enum": [
+            "overlay",
+            "broll",
+            "diagram",
+            "stat_card",
+            "code_snippet",
+            "animation"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "description": {
+          "description": "What to show / overlay (no readable fake UI digits)",
+          "title": "Description",
+          "type": "string"
+        },
+        "timestamp_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional offset within section",
+          "title": "Timestamp Seconds"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "ScriptEnhancementCue",
+      "type": "object"
+    },
+    "ScriptPronunciationGuide": {
+      "properties": {
+        "word": {
+          "description": "Word/name that needs pronunciation help",
+          "title": "Word",
+          "type": "string"
+        },
+        "phonetic": {
+          "description": "Phonetic or TTS-friendly spelling",
+          "title": "Phonetic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "word",
+        "phonetic"
+      ],
+      "title": "ScriptPronunciationGuide",
+      "type": "object"
+    },
+    "ScriptSectionDraft": {
+      "properties": {
+        "id": {
+          "description": "Stable section id, e.g. sec_hook_01 — scenes bind via this",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "description": "Human label, e.g. HOOK / ESCALATION / DIALOGUE / REVEAL / LANDING",
+          "title": "Label",
+          "type": "string"
+        },
+        "beat_role": {
+          "default": "dialogue",
+          "description": "Short-drama rhythm role of this section",
+          "enum": [
+            "hook",
+            "escalation",
+            "reveal",
+            "landing",
+            "midpoint",
+            "narration",
+            "dialogue"
+          ],
+          "title": "Beat Role",
+          "type": "string"
+        },
+        "text": {
+          "description": "Performable dialogue and/or narration lines for this beat",
+          "title": "Text",
+          "type": "string"
+        },
+        "start_seconds": {
+          "description": "Section start on timeline (seconds)",
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "description": "Section end on timeline (seconds)",
+          "title": "End Seconds",
+          "type": "number"
+        },
+        "speaker_directions": {
+          "default": "",
+          "description": "A/V delivery: Seedance lip-sync / TTS narration / silence title only",
+          "title": "Speaker Directions",
+          "type": "string"
+        },
+        "delivery_cues": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScriptDeliveryCues"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional TTS performance block"
+        },
+        "enhancement_cues": {
+          "description": "Optional broll/overlay hints",
+          "items": {
+            "$ref": "#/$defs/ScriptEnhancementCue"
+          },
+          "title": "Enhancement Cues",
+          "type": "array"
+        },
+        "pronunciation_guides": {
+          "description": "Optional pronunciation list for names/terms",
+          "items": {
+            "$ref": "#/$defs/ScriptPronunciationGuide"
+          },
+          "title": "Pronunciation Guides",
+          "type": "array"
+        },
+        "source_ref": {
+          "default": "",
+          "description": "Optional pointer back to outline chapter / brief",
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "chapter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cuti chapter binding id when known",
+          "title": "Chapter Id"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "start_seconds",
+        "end_seconds"
+      ],
+      "title": "ScriptSectionDraft",
+      "type": "object"
+    },
+    "ScriptVoicePerformance": {
+      "description": "OM voice_performance block (TTS contract).",
+      "properties": {
+        "performance_intent": {
+          "default": "",
+          "description": "Overall vocal intent for the piece",
+          "title": "Performance Intent",
+          "type": "string"
+        },
+        "pacing_profile": {
+          "anyOf": [
+            {
+              "enum": [
+                "contemplative",
+                "conversational",
+                "energetic",
+                "technical",
+                "cinematic",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Global pacing profile",
+          "title": "Pacing Profile"
+        },
+        "energy_curve": {
+          "default": "",
+          "description": "How energy rises/falls across the piece",
+          "title": "Energy Curve",
+          "type": "string"
+        },
+        "pause_policy": {
+          "default": "",
+          "description": "When/where to leave silence",
+          "title": "Pause Policy",
+          "type": "string"
+        },
+        "sample_section_id": {
+          "default": "",
+          "description": "Section id that best exemplifies the voice",
+          "title": "Sample Section Id",
+          "type": "string"
+        },
+        "provider_notes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Per-provider TTS notes keyed by provider name",
+          "title": "Provider Notes",
+          "type": "object"
+        }
+      },
+      "title": "ScriptVoicePerformance",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "title": {
+      "description": "Script title (can match outline title)",
+      "title": "Title",
+      "type": "string"
+    },
+    "total_duration_seconds": {
+      "description": "Total script length in seconds",
+      "title": "Total Duration Seconds",
+      "type": "integer"
+    },
+    "beat_map": {
+      "description": "Ordered beat labels across the piece: hook, escalation, reveal, landing…",
+      "items": {
+        "type": "string"
+      },
+      "title": "Beat Map",
+      "type": "array"
+    },
+    "sections": {
+      "description": "Timed sections; ≥2; cover the full duration without huge gaps",
+      "items": {
+        "$ref": "#/$defs/ScriptSectionDraft"
+      },
+      "minItems": 2,
+      "title": "Sections",
+      "type": "array"
+    },
+    "voice_performance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScriptVoicePerformance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional global TTS performance contract"
+    },
+    "voice_performance_intent": {
+      "default": "",
+      "description": "Flat intent string (compat); mirrors voice_performance.performance_intent",
+      "title": "Voice Performance Intent",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "version": {
+      "default": "1.0",
+      "title": "Version",
+      "type": "string"
+    },
+    "artifact": {
+      "const": "script",
+      "default": "script",
+      "title": "Artifact",
+      "type": "string"
+    },
+    "thread_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Thread Id"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "title",
+    "total_duration_seconds",
+    "sections"
+  ],
+  "title": "ScriptArtifact",
+  "type": "object"
+}

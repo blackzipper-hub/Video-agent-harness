@@ -1,0 +1,55 @@
+{
+  "description": "Audio-driven extras; companion file next to analysis_brief.",
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "artifact": {
+      "const": "audio_context",
+      "default": "audio_context",
+      "title": "Artifact",
+      "type": "string"
+    },
+    "audio_duration": {
+      "default": 0.0,
+      "title": "Audio Duration",
+      "type": "number"
+    },
+    "total_segments": {
+      "default": 0,
+      "title": "Total Segments",
+      "type": "integer"
+    },
+    "music_line_global": {
+      "default": "",
+      "title": "Music Line Global",
+      "type": "string"
+    },
+    "sections_info": {
+      "default": "",
+      "title": "Sections Info",
+      "type": "string"
+    },
+    "segments_info": {
+      "default": "",
+      "title": "Segments Info",
+      "type": "string"
+    },
+    "section_count": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Section Count"
+    }
+  },
+  "title": "AudioContextArtifact",
+  "type": "object"
+}
