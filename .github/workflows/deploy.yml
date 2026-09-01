@@ -1,4 +1,4 @@
-name: VDA
+name: Build and deploy
 
 # One run: check Helm, build images to ECR, then helm upgrade.
 # Git dev → image tag dev → namespace vda-dev.
@@ -12,7 +12,7 @@ on:
       - deploy/**
       - services/video-runtime/helm/**
       - services/media-service/helm/**
-      - .github/workflows/vda.yml
+      - .github/workflows/deploy.yml
   push:
     branches: [main, dev]
     paths:
@@ -21,7 +21,7 @@ on:
       - services/video-runtime/**
       - services/media-service/**
       - deploy/**
-      - .github/workflows/vda.yml
+      - .github/workflows/deploy.yml
   workflow_dispatch:
     inputs:
       environment:
@@ -52,7 +52,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: vda-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && inputs.environment) || github.ref_name }}
+  group: deploy-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && inputs.environment) || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -90,56 +90,57 @@ jobs:
     outputs:
       env: ${{ steps.s.outputs.env }}
       tag: ${{ steps.s.outputs.tag }}
+      images: ${{ steps.s.outputs.images }}
     steps:
       - id: s
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          INPUT_STUDIO: ${{ inputs.studio }}
+          INPUT_RUNTIME: ${{ inputs.runtime }}
+          INPUT_MEDIA: ${{ inputs.media }}
+          INPUT_DSH: ${{ inputs.dsh }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            env="${{ inputs.environment }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            env="$INPUT_ENV"
           elif [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; then
             env=prod
           else
             env=dev
           fi
           if [ "$env" = "prod" ]; then tag=main; else tag=dev; fi
+
+          want() {
+            if [ "$EVENT_NAME" != "workflow_dispatch" ]; then return 0; fi
+            [ "$1" = "true" ]
+          }
+
+          images='[]'
+          add() {
+            images=$(jq -c -n --argjson cur "$images" --arg n "$1" --arg i "$2" --arg c "$3" --arg d "$4" \
+              '$cur + [{name:$n, image:$i, context:$c, dockerfile:$d}]')
+          }
+          if want "$INPUT_RUNTIME"; then add runtime cuti-videoagent . services/video-runtime/Dockerfile.runtime; fi
+          if want "$INPUT_MEDIA"; then add media cuti-media-service services/media-service services/media-service/Dockerfile; fi
+          if want "$INPUT_STUDIO"; then add studio cuti-video-studio . apps/video-studio/Dockerfile; fi
+          if want "$INPUT_DSH"; then add dsh cuti-deepseek-harness . apps/dsh/Dockerfile; fi
+
           echo "env=$env" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
-          echo "will build and deploy tag $tag to vda-$env"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "will build and deploy tag $tag to vda-$env images=$images"
 
   images:
     name: Build ${{ matrix.name }}
     needs: setup
+    if: github.event_name != 'pull_request' && needs.setup.outputs.images != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: runtime
-            image: cuti-videoagent
-            context: .
-            dockerfile: services/video-runtime/Dockerfile.runtime
-          - name: media
-            image: cuti-media-service
-            context: services/media-service
-            dockerfile: services/media-service/Dockerfile
-          - name: studio
-            image: cuti-video-studio
-            context: .
-            dockerfile: apps/video-studio/Dockerfile
-          - name: dsh
-            image: cuti-deepseek-harness
-            context: .
-            dockerfile: apps/dsh/Dockerfile
-    if: |
-      github.event_name != 'pull_request' && (
-        github.event_name != 'workflow_dispatch' ||
-        (matrix.name == 'studio' && inputs.studio) ||
-        (matrix.name == 'runtime' && inputs.runtime) ||
-        (matrix.name == 'media' && inputs.media) ||
-        (matrix.name == 'dsh' && inputs.dsh)
-      )
+        include: ${{ fromJson(needs.setup.outputs.images) }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
