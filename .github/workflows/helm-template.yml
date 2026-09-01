@@ -7,7 +7,7 @@ on:
       - services/video-runtime/helm/**
       - services/media-service/helm/**
   push:
-    branches: [main, master, deepseek-harness]
+    branches: [main, master, dev, deepseek-harness]
     paths:
       - deploy/**
       - services/video-runtime/helm/**

@@ -1,10 +1,10 @@
 name: Build images
 
 # Docker → ECR. Does not helm. DeepSeek ci.yml / e2e.yml stay.
-# Tags: push/build on main → `main` (production). Any other branch → `dev`.
+# Tags: push/build on main → `main` (production). Git branch `dev` (and other listed non-main branches) → image tag `dev`.
 on:
   push:
-    branches: [main, master, deepseek-harness]
+    branches: [main, master, dev, deepseek-harness]
     paths:
       - apps/video-studio/**
       - apps/dsh/**
