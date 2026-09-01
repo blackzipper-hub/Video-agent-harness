@@ -120,6 +120,9 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertIn("video_project_build", prompt)
         self.assertIn("video_workflow_list", prompt)
         self.assertIn("video_workflow_load", prompt)
+        self.assertIn("video_skill_load", prompt)
+        self.assertIn("video_skill_read_resource", prompt)
+        self.assertNotIn("load_skill", prompt)
         self.assertNotIn("Set VideoSpec.workflow_id exactly to \"cuti.seedance-story\"", prompt)
         self.assertIn("Do not create another project", prompt)
         self.assertIn('"duration": 15', prompt)
@@ -460,3 +463,42 @@ Keep the requested visual tone consistent.
         self.assertEqual(usage["output_tokens"], 20)
         self.assertEqual(usage["cached_tokens"], 30)
         self.assertEqual(usage["total_tokens"], 64)
+
+    def test_create_prompt_follows_named_skills_without_workflow_hardcodes(self):
+        from app.video_runtime.deepseek_bff import _initial_video_build_prompt
+
+        prompt = _initial_video_build_prompt(
+            objective="做一首 MV",
+            project_id="p1",
+            base_project_version_id="v1",
+            idempotency_key="k1",
+            user_option=None,
+            input_files=[],
+            workflow_id="mv",
+            activated_skill_ids=[],
+        )
+        self.assertIn("video_workflow_load", prompt)
+        self.assertIn('"mv"', prompt)
+        self.assertIn("video_skill_load", prompt)
+        self.assertIn("video_skill_read_resource", prompt)
+        self.assertNotIn("load_skill", prompt)
+        self.assertNotIn("read_skill_resource", prompt)
+        self.assertNotIn("suno-song", prompt)
+        self.assertNotIn("video-research", prompt)
+        self.assertNotIn("hyperframes-captions", prompt)
+        self.assertNotIn("Bitwize", prompt)
+        self.assertNotIn("minimax-h3", prompt)
+        self.assertNotIn("Call video_skill_load for every activated_skill_id", prompt)
+
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "做一首 MV",
+                "idempotency_key": "mv-no-inject-1",
+                "workflow_id": "mv",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        self.assertEqual(run["workflow_id"], "mv")
+        self.assertEqual(run["activated_skill_ids"], [])

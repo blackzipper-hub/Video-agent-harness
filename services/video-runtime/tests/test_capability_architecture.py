@@ -9,8 +9,8 @@ from app.legacy.video_pipeline.capability import legacy_video_pipeline_capabilit
 
 def test_platform_atomic_capabilities_are_not_skill_packages():
     platform = platform_capabilities()
-    assert len(platform) == 30
-    assert len({item.id for item in platform}) == 30
+    assert len(platform) == 33
+    assert len({item.id for item in platform}) == 33
 
     root = Path(__file__).resolve().parents[1] / "skills" / "system"
     skill_names = {item.name for item in SkillCatalog([root]).discover()}
@@ -36,5 +36,5 @@ def test_provider_and_legacy_capabilities_have_dedicated_sources():
     assert legacy.mode == "master"
 
     all_items = default_capabilities()
-    assert len(all_items) == 34
-    assert len({item.id for item in all_items}) == 34
+    assert len(all_items) == 37
+    assert len({item.id for item in all_items}) == 37

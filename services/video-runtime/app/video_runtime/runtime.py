@@ -485,6 +485,8 @@ class VideoBuildRuntime:
             "atomic.image.generate": 0.08,
             "atomic.video.generate": 0.65,
             "atomic.music.generate": 0.10,
+            "suno.generate": 0.10,
+            "api.provider.generate": 0.65,
             "media.tts": 0.05,
             "media.concat": 0.02,
             "media.mix_audio": 0.01,
@@ -716,13 +718,21 @@ class VideoBuildRuntime:
         context: PluginContext,
         video_spec: VideoSpec,
     ) -> RebuildPlan:
-        workflow_plugin = next((
+        from .skill_workflows import SKILL_WORKFLOW_PLUGIN_ID
+
+        matches = [
             loaded for loaded in self.plugins.loaded
             if video_spec.workflow_id in loaded.manifest.contributions.workflows
-        ), None)
-        if workflow_plugin is None:
+        ]
+        if not matches:
             raise LookupError(f"workflow plugin is not installed: {video_spec.workflow_id}")
-        return await workflow_plugin.implementation.compile_build_plan(context, video_spec)
+        preferred = next(
+            (item for item in matches if item.manifest.id == SKILL_WORKFLOW_PLUGIN_ID),
+            None,
+        )
+        return await (preferred or matches[0]).implementation.compile_build_plan(
+            context, video_spec,
+        )
 
     async def _resolve_plan_skills(self, plan: RebuildPlan) -> None:
         activated = list(plan.video_spec.activated_skill_ids) if plan.video_spec else []

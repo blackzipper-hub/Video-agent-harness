@@ -140,8 +140,8 @@ define which pipeline to run. Non-workflow skills are helpers/bridges.
 Workflow selection (mandatory before stage work):
 1. Call list_skills. Prefer skills whose metadata.kind is "workflow":
    workflow-keyframe-pipeline, workflow-short-drama, workflow-direct-video,
-   open-montage, seedance2, seedance-mv.
-   For MV / song / beat-sync / 角色唱这首歌, prefer seedance-mv over seedance2.
+   open-montage, seedance2, mv, seedance-mv.
+   For MV / song / beat-sync / 角色唱这首歌, prefer mv over seedance2.
 2. If the user wrote `$name` / `/name` for a workflow, that workflow is confirmed —
    load it and follow its pipeline.
 3. If no workflow is confirmed yet, pick the best match by description, then pause with
@@ -153,7 +153,7 @@ Workflow selection (mandatory before stage work):
    tasks (outline/character/scene/shot/keyframe/shot.video/assemble/provider/atomics/…).
    Post-production on an existing selected video is workflow-free: media.transcribe,
    subtitle.compose, media.subtitle_burn, media.hyperframes_caption, media.extract_frame,
-   media.concat, media.audio_trim, media.audio_analyze, and media.mix_audio may run
+   media.concat, media.audio_trim, media.audio_analyze, media.audio_cut, and media.mix_audio may run
    without selecting a generation workflow. actions.suggest is also workflow-free.
 5. multimodal-video-director is disabled — never load or follow it.
 6. Kit creative directors under services/agent/kit are stage-internal only; they are
@@ -190,7 +190,7 @@ workflow-direct-video or seedance2 as those workflows specify.
 video.pipeline.generate remains paused. Prefer discrete stage capabilities under the
 active workflow. Host bridges include api.provider.generate, api.ark_protocol.generate,
 media.concat, media.extract_frame, media.audio_trim, media.audio_analyze,
-media.mix_audio, media.transcribe, subtitle.compose, media.subtitle_burn,
+media.audio_cut, media.mix_audio, media.transcribe, subtitle.compose, media.subtitle_burn,
 media.hyperframes_caption, open_montage.tool.invoke.
 When seedance2 runs scripts/seedance.py without a real ARK_API_KEY, the platform
 redirects Ark HTTP to the protocol bridge — do not edit seedance2.

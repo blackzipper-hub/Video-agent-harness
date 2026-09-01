@@ -21,6 +21,8 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         "atomic.image.generate",
         "atomic.music.generate",
         "atomic.video.generate",
+        "suno.generate",
+        "api.provider.generate",
     )
 
     def __init__(self, executor: AtomicExecutor | None = None) -> None:
@@ -76,12 +78,14 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         character_steps = parameters.pop("character_reference_from_steps", None) or []
         reference_steps = parameters.pop("reference_from_steps", None) or []
         audio_reference_step = parameters.pop("audio_reference_from_step", None)
+        audio_segment_index = parameters.pop("audio_segment_index", None)
         start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
         if start_artifact and start_artifact.uri:
             parameters.setdefault("start_image_url", start_artifact.uri)
             parameters.setdefault("image_url", start_artifact.uri)
         character_artifact = completed_by_step.get(str(character_step or ""))
         if character_artifact and character_artifact.uri:
+            parameters.setdefault("images", [character_artifact.uri])
             parameters.setdefault("image_urls", [character_artifact.uri])
         character_urls = [
             completed_by_step[str(step)].uri
@@ -89,6 +93,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
         ]
         if character_urls:
+            parameters.setdefault("images", character_urls)
             parameters.setdefault("image_urls", character_urls)
         reference_urls = [
             completed_by_step[str(step)].uri
@@ -96,12 +101,23 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
         ]
         if reference_urls:
+            parameters.setdefault("images", reference_urls)
             parameters.setdefault("reference_urls", reference_urls)
             parameters.setdefault("image_urls", reference_urls)
         audio_reference = completed_by_step.get(str(audio_reference_step or ""))
-        if audio_reference and audio_reference.uri:
-            parameters.setdefault("audio_url", audio_reference.uri)
-            parameters.setdefault("audio_urls", [audio_reference.uri])
+        if audio_reference:
+            audio_url = audio_reference.uri
+            if audio_segment_index is not None:
+                segments = audio_reference.metadata.get("segments") or []
+                index = int(audio_segment_index)
+                if index >= len(segments):
+                    raise ValueError(f"audio cut has no segment {index}")
+                segment = segments[index] if isinstance(segments[index], dict) else {}
+                audio_url = segment.get("audio_url") or audio_url
+            if audio_url:
+                parameters.setdefault("audios", [audio_url])
+                parameters.setdefault("audio_url", audio_url)
+                parameters.setdefault("audio_urls", [audio_url])
         prompt = str(
             parameters.get("prompt")
             or metadata.get("rebuild_prompt")
@@ -156,17 +172,39 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             ),
             skill_context=skill_context,
         )
-        executor = self._executor
-        if executor is None:
-            from app.chat.v2.atomic_executor import execute_atomic
-            executor = execute_atomic
-        remote_operation_id, generated = await executor(
-            run=run,
-            task=task,
-            selected=legacy_artifacts,
-            idempotency_key=envelope.grant.idempotency_key,
-            on_remote_submitted=envelope.report_remote_operation,
-        )
+        capability = envelope.grant.capability
+        if capability == "suno.generate":
+            from app.integrations.providers.suno_bridge import generate_suno_native
+
+            profile = dict(parameters)
+            profile.pop("workflow_parameters", None)
+            generated = await generate_suno_native(profile)
+            remote_operation_id = str(generated.get("clip_id") or envelope.grant.idempotency_key)
+        elif capability == "api.provider.generate":
+            from app.integrations.providers.provider_bridge import generate_video
+
+            profile = dict(parameters)
+            profile.pop("workflow_parameters", None)
+            generated = await generate_video(
+                profile, on_remote_submitted=envelope.report_remote_operation,
+            )
+            if not generated.get("uri"):
+                generated["uri"] = generated.get("video_url")
+            remote_operation_id = str(
+                generated.get("raw_task_id") or envelope.grant.idempotency_key
+            )
+        else:
+            executor = self._executor
+            if executor is None:
+                from app.chat.v2.atomic_executor import execute_atomic
+                executor = execute_atomic
+            remote_operation_id, generated = await executor(
+                run=run,
+                task=task,
+                selected=legacy_artifacts,
+                idempotency_key=envelope.grant.idempotency_key,
+                on_remote_submitted=envelope.report_remote_operation,
+            )
         generated_metadata = {
             **metadata,
             **dict(generated.get("metadata") or {}),

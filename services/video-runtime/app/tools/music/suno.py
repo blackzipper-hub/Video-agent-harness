@@ -56,7 +56,8 @@ async def _generate_music_with_suno_impl(
     auto_lyrics: bool = False,
     target_duration: Optional[int] = None,
     tags: Optional[str] = None,
-    vocal_gender: Optional[str] = None
+    vocal_gender: Optional[str] = None,
+    mv: Optional[str] = None,
 ) -> MusicGenerationResult:
     """SunoAPI音乐生成实现 - 核心逻辑"""
     try:
@@ -82,7 +83,7 @@ async def _generate_music_with_suno_impl(
             gpt_prompt = None
             if len(prompt) > 5000:
                 logger.warning(f"🎵 歌词过长，截取前5000字符")
-            logger.info(f"🎵 模式: Custom（带歌词，mv=chirp-v4-5）")
+            logger.info(f"🎵 模式: Custom（带歌词，mv={mv or 'chirp-v4-5'}）")
             logger.info(f"🎵 结构化歌词: {lyrics[:100]}...")
             if tags:
                 logger.info(f"🎵 风格标签: {tags}")
@@ -130,7 +131,7 @@ async def _generate_music_with_suno_impl(
                 custom_mode=custom_mode,
                 make_instrumental=make_instrumental,
                 lyrics=lyrics,
-                mv="chirp-v4-5",  # 默认使用 chirp-v4-5
+                mv=mv or "chirp-v4-5",
                 tags=tags,
                 vocal_gender=_vocal,
                 generation_params=generation_params

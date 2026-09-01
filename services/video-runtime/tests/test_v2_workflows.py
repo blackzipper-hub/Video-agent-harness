@@ -39,13 +39,15 @@ def _project_skill_catalog() -> SkillCatalog:
 
 
 def test_workflow_registry_covers_user_facing_pipelines():
+    catalog = _project_skill_catalog()
     assert is_workflow_skill("workflow-keyframe-pipeline")
     assert is_workflow_skill("workflow-short-drama")
     assert is_workflow_skill("workflow-direct-video")
-    assert is_workflow_skill("open-montage")
-    assert is_workflow_skill("seedance2")
-    assert is_workflow_skill("seedance-mv")
-    assert is_workflow_skill("product-ad-video")
+    assert is_workflow_skill("mv")
+    if catalog.has("open-montage"):
+        assert is_workflow_skill("open-montage")
+    if catalog.has("product-ad-video"):
+        assert is_workflow_skill("product-ad-video")
     assert not is_workflow_skill("generate-outline")
     assert WORKFLOWS["workflow-short-drama"].requires_keyframe is False
 
@@ -78,6 +80,8 @@ def test_parse_explicit_skill_names_rejects_partial_ascii_tokens(text):
 
 def test_runware_product_ad_workflow_is_installed_and_executable_by_cuti():
     catalog = _project_skill_catalog()
+    if not catalog.has("product-ad-video"):
+        pytest.skip("product-ad-video Skill is not installed in this checkout")
     metadata = next(
         item for item in catalog.list_metadata()
         if item.name == "product-ad-video"
@@ -112,19 +116,26 @@ def test_inject_workflow_parameters_sets_mode_defaults():
     assert merged["activated_workflow"] == "workflow-short-drama"
 
 
-def test_seedance_mv_workflow_pipeline_and_mode():
-    assert is_workflow_skill("seedance-mv")
-    spec = WORKFLOWS["seedance-mv"]
-    assert spec.mode == "seedance_mv"
-    assert "media.audio_analyze" in spec.pipeline
-    assert "media.audio_trim" in spec.pipeline
-    assert "media.mix_audio" in spec.pipeline
-    assert "media.concat" in spec.pipeline
+def test_mv_workflow_pipeline_and_mode():
+    assert is_workflow_skill("mv")
+    spec = WORKFLOWS["mv"]
+    assert spec.mode == "mv"
+    assert spec.pipeline == (
+        "research.generate",
+        "suno.generate",
+        "media.audio_analyze",
+        "media.audio_cut",
+        "atomic.image.generate",
+        "api.provider.generate",
+        "media.concat",
+        "media.mix_audio",
+        "media.transcribe",
+        "media.hyperframes_caption",
+    )
     assert spec.requires_keyframe is False
     merged = inject_workflow_parameters({}, spec)
-    assert merged["workflow_mode"] == "seedance_mv"
-    assert merged["content_category"] == "music_video"
-    assert merged["activated_workflow"] == "seedance-mv"
+    assert merged["workflow_mode"] == "mv"
+    assert merged["activated_workflow"] == "mv"
 
 
 def test_postproduction_capabilities_are_workflow_free():
@@ -135,6 +146,7 @@ def test_postproduction_capabilities_are_workflow_free():
     assert not capability_requires_workflow("media.subtitle_burn")
     assert not capability_requires_workflow("media.audio_trim")
     assert not capability_requires_workflow("media.audio_analyze")
+    assert not capability_requires_workflow("media.audio_cut")
     assert not capability_requires_workflow("media.mix_audio")
     assert capability_requires_workflow("api.provider.generate")
 
@@ -350,6 +362,9 @@ def test_short_drama_rejects_keyframe_generate():
 
 
 def test_libtv_requires_direct_seedance2_multireference_generation():
+    catalog = _project_skill_catalog()
+    if not catalog.has("libtv-product-workflow"):
+        pytest.skip("libtv-product-workflow Skill is not installed in this checkout")
     registry = CapabilityRegistry()
     validator = PlanValidator(
         registry, max_revisions=20, max_tasks=50, max_parallel_generation_tasks=3

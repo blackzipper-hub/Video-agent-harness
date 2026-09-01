@@ -97,9 +97,12 @@ async def hyperframes_caption(req: HyperframesCaptionRequest, request: Request):
             out_path,
             words=req.words,
             cues=req.cues,
-            style=req.style,
             accent_color=req.accent_color,
             position=req.position,
+            playbook=req.playbook,
+            layers=[layer.model_dump() for layer in req.layers],
+            caption_html=req.caption_html,
+            composition_html=req.composition_html,
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc

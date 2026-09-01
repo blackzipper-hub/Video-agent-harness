@@ -342,6 +342,13 @@ def _initial_video_build_prompt(
             "providers.video seedance-2.0; gpt_image_2 means providers.image gpt-image-2; "
             "use providers.music suno unless the user explicitly requests another installed provider."
         ),
+        (
+            "After video_workflow_load, follow that Skill's instructions, including any "
+            "video_skill_load and video_skill_read_resource calls it names, markdown links "
+            "to bundled files, and paths under references/. Helper Skills stay in context; "
+            "do not copy them into VideoSpec.activated_skill_ids unless the user or a "
+            "project lock already activated them."
+        ),
     ]
     if workflow_id:
         lines.append(

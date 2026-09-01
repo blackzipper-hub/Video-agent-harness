@@ -10,7 +10,8 @@ import type {
   ChangePreviewRequest, ExportRequest, ExportResult, ProjectSnapshot, RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
-  WorkflowSummary, WorkflowDetail, SkillDetail,
+  WorkflowSummary, WorkflowDetail,   SkillDetail,
+  SkillResourceDetail,
 } from '@cuti-ai/video-runtime'
 import * as videoTools from '../src/index.ts'
 
@@ -25,9 +26,25 @@ class FakeVideoRuntime extends VideoRuntime {
   inspectProject(_id: string, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
   listWorkflows(): Promise<WorkflowSummary[]> { return Promise.resolve([]) }
   loadWorkflow(workflowId: string): Promise<WorkflowDetail> {
-    return Promise.resolve({ id: workflowId, title: workflowId, description: '', mode: 'test', available: true, requiredCapabilities: [], missingCapabilities: [], userSelectable: true, executionKind: 'adapter', entrypoints: [], parameters: {}, pipeline: [], skillDependencies: [], instructions: '', resources: [], resourceContents: [] })
+    return Promise.resolve({
+      id: workflowId, title: workflowId, description: '', mode: 'test', available: true,
+      requiredCapabilities: [], missingCapabilities: [], userSelectable: true,
+      executionKind: 'adapter', entrypoints: [], parameters: {}, pipeline: [],
+      skillDependencies: [], instructions: 'Call video_skill_load("helper-skill").',
+      resources: ['reference.md'],
+      resourceContents: [{ path: 'reference.md', content: 'should not reach the model' }],
+    })
   }
-  loadSkill(skillId: string): Promise<SkillDetail> { return Promise.resolve({ id: skillId, description: '', kind: 'helper', instructions: '', resources: [], resourceContents: [] }) }
+  loadSkill(skillId: string): Promise<SkillDetail> {
+    return Promise.resolve({
+      id: skillId, description: '', kind: 'helper', instructions: 'Read note.md.',
+      resources: ['references/note.md'],
+      resourceContents: [{ path: 'references/note.md', content: 'should not reach the model' }],
+    })
+  }
+  loadSkillResource(skillId: string, path: string): Promise<SkillResourceDetail> {
+    return Promise.resolve({ id: skillId, path, content: 'file body' })
+  }
   previewChange(request: ChangePreviewRequest): Promise<ChangePreview> {
     return Promise.resolve({ planId: 'plan-1', projectId: request.projectId, baseProjectVersionId: 'version-1', staleArtifactIds: [], validationArtifactIds: [], reusedArtifactIds: [], rebuildOrder: [], estimatedCost: 0 })
   }
@@ -65,6 +82,7 @@ describe('video tool composition', () => {
 
     const names = [
       'video_workflow_list', 'video_workflow_load', 'video_skill_load',
+      'video_skill_read_resource',
       'video_project_create', 'video_project_plan', 'video_project_build',
       'video_project_open', 'video_project_inspect', 'video_change_preview', 'video_edit_preview', 'video_rebuild_apply',
       'video_build_status', 'video_build_cancel', 'video_artifact_select', 'video_export',
@@ -101,5 +119,38 @@ describe('video tool composition', () => {
     expect(legacyWorkflowPlan.isError).toBe(false)
     expect((legacyWorkflowPlan.value as unknown as BuildPlanSnapshot).workflowId)
       .toBe('workflow-short-drama')
+
+    const loadedSkill = await ctx.tools.execute({
+      callId: CallId('video-call-3'), name: 'video_skill_load',
+      arguments: { skill_id: 'helper-skill' }, signal: new AbortController().signal,
+    })
+    expect(loadedSkill.isError).toBe(false)
+    expect(loadedSkill.value).toMatchObject({
+      id: 'helper-skill',
+      instructions: 'Read note.md.',
+      resources: ['references/note.md'],
+    })
+    expect(loadedSkill.value).not.toHaveProperty('resourceContents')
+
+    const skillFile = await ctx.tools.execute({
+      callId: CallId('video-call-4'), name: 'video_skill_read_resource',
+      arguments: { skill_id: 'helper-skill', path: 'references/note.md' },
+      signal: new AbortController().signal,
+    })
+    expect(skillFile.isError).toBe(false)
+    expect(skillFile.value).toEqual({
+      id: 'helper-skill', path: 'references/note.md', content: 'file body',
+    })
+
+    const loadedWorkflow = await ctx.tools.execute({
+      callId: CallId('video-call-5'), name: 'video_workflow_load',
+      arguments: { workflow_id: 'demo-workflow' }, signal: new AbortController().signal,
+    })
+    expect(loadedWorkflow.isError).toBe(false)
+    expect(loadedWorkflow.value).toMatchObject({
+      id: 'demo-workflow',
+      resources: ['reference.md'],
+    })
+    expect(loadedWorkflow.value).not.toHaveProperty('resourceContents')
   })
 })

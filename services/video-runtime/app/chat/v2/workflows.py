@@ -23,8 +23,10 @@ STAGE_CAPABILITY_IDS = frozenset({
     "video_gen.generate", "video.edit", "video.pipeline.generate",
     "api.provider.generate", "api.ark_protocol.generate", "media.concat",
     "media.extract_frame", "media.audio_trim", "media.audio_analyze",
+    "media.audio_cut",
     "media.mix_audio", "open_montage.tool.invoke", "atomic.text.generate",
     "atomic.image.generate", "atomic.music.generate", "atomic.video.generate",
+    "suno.generate",
 })
 WORKFLOW_FREE_CAPABILITY_IDS = frozenset({
     "actions.suggest",
@@ -37,6 +39,7 @@ WORKFLOW_FREE_CAPABILITY_IDS = frozenset({
     "media.subtitle_burn",
     "media.audio_trim",
     "media.audio_analyze",
+    "media.audio_cut",
     "media.mix_audio",
     "media.hyperframes_caption",
 })

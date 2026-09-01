@@ -1,4 +1,4 @@
-"""Broad case coverage for seedance-mv media capabilities (analyze/trim/mix)."""
+"""Broad case coverage for mv media capabilities (analyze/cut/mix)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,9 +13,7 @@ from app.chat.v2.executors import CapabilityExecutor
 from app.chat.v2.host_gateway import HostGateway, HostGatewayError
 from app.chat.v2.models import AgentRun, ArtifactVersion, Task
 from app.chat.v2.mv_audio import (
-    build_audiomap,
-    plan_seedance_segments,
-    resolve_master_window,
+    reference_clips_for_cut,
 )
 from app.chat.v2.skill_catalog import SkillCatalog
 from app.chat.v2.workflows import (
@@ -57,149 +55,160 @@ def _video(uri: str = "http://localhost/files/clip.mp4") -> ArtifactVersion:
     )
 
 
-def _assert_segments_cover(window_start: float, window_end: float, segments: list[dict]):
-    assert segments
-    assert segments[0]["start_sec"] == pytest.approx(window_start, abs=1e-3)
-    assert segments[-1]["end_sec"] == pytest.approx(window_end, abs=1e-3)
-    total = sum(s["duration_sec"] for s in segments)
-    assert total == pytest.approx(window_end - window_start, abs=1e-2)
-    for i in range(1, len(segments)):
-        assert segments[i]["start_sec"] == pytest.approx(
-            segments[i - 1]["end_sec"], abs=1e-3
+def _fake_transcription(**overrides) -> dict:
+    payload = {
+        "duration": 180.0,
+        "text": "倒数三秒灯光熄灭",
+        "segments": [
+            {"start": 32.46, "end": 36.86, "text": "倒数三秒灯光熄灭"},
+            {"start": 38.20, "end": 42.36, "text": "让心跳过这座城"},
+        ],
+        "sections": [
+            {
+                "section_type": "Chorus",
+                "start_time": 33.5,
+                "end_time": 59.5,
+                "section_emotion": "defiant",
+            }
+        ],
+        "global_bpm": 128,
+        "genre": "synthwave",
+        "global_emotion": "defiant",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _patch_v1_listen(
+    monkeypatch,
+    *,
+    transcription: dict | None = None,
+    smart_clip_start: float = 32.46,
+    smart_clip_raises: bool = False,
+):
+    transcribe_calls: list[dict] = []
+    smart_calls: list[float] = []
+
+    async def _transcribe(audio_url, **kwargs):
+        transcribe_calls.append({"audio_url": audio_url, **kwargs})
+        return transcription or _fake_transcription()
+
+    async def _smart(audio_url, target, transcription, audio_duration_sec=None):
+        smart_calls.append(float(target))
+        if smart_clip_raises:
+            raise RuntimeError("gemini down")
+        from types import SimpleNamespace
+
+        end = smart_clip_start + float(target)
+        return SimpleNamespace(
+            method="ai_reuse_transcription",
+            fallback_used=False,
+            recommended=SimpleNamespace(
+                start_sec=smart_clip_start,
+                end_sec=end,
+                target_duration_sec=target,
+                actual_duration_sec=target,
+                model_dump=lambda: {
+                    "start_sec": smart_clip_start,
+                    "end_sec": end,
+                    "target_duration_sec": target,
+                    "actual_duration_sec": target,
+                    "reasoning": "chorus",
+                },
+            ),
         )
-    assert all(s["duration_sec"] <= 15.0 + 1e-6 for s in segments)
 
-
-# ─── pure planning edge cases ───────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "duration,target,expected",
-    [
-        (30.0, None, (0.0, 30.0)),
-        (30.0, 30.0, (0.0, 30.0)),
-        (30.0, 45.0, (0.0, 30.0)),  # target longer than track → full
-        (100.0, 20.0, (40.0, 60.0)),
-        (15.0, 15.0, (0.0, 15.0)),
-    ],
-)
-def test_resolve_master_window_matrix(duration, target, expected):
-    assert resolve_master_window(duration, target_duration_sec=target) == expected
-
-
-def test_resolve_master_window_clamps_end_past_duration():
-    start, end = resolve_master_window(50.0, start_sec=40.0, end_sec=999.0)
-    assert (start, end) == (40.0, 50.0)
-
-
-def test_resolve_master_window_start_only_to_end():
-    start, end = resolve_master_window(80.0, start_sec=20.0)
-    assert (start, end) == (20.0, 80.0)
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"start_sec": -1.0},
-        {"start_sec": 10.0, "end_sec": 10.0},
-        {"start_sec": 50.0, "end_sec": 60.0},  # start >= duration(30)
-        {"target_duration_sec": 0.0},
-        {"target_duration_sec": -5.0},
-    ],
-)
-def test_resolve_master_window_rejects_invalid(kwargs):
-    with pytest.raises(ValueError):
-        resolve_master_window(30.0, **kwargs)
-
-
-@pytest.mark.parametrize(
-    "window",
-    [0.5, 4.0, 15.0, 15.001, 16.0, 29.0, 30.0, 45.0, 47.0, 60.0, 61.0, 180.0],
-)
-def test_plan_seedance_segments_invariants_for_many_lengths(window):
-    segs = plan_seedance_segments(window)
-    _assert_segments_cover(0.0, window, segs)
-    if window >= 4.0:
-        # Prefer no sub-4s pieces when the whole window can support it.
-        assert all(s["duration_sec"] >= 4.0 - 1e-6 or len(segs) == 1 for s in segs)
-
-
-def test_plan_seedance_segments_custom_max():
-    segs = plan_seedance_segments(40.0, max_segment_sec=10.0, min_segment_sec=4.0)
-    assert len(segs) == 4
-    assert all(s["duration_sec"] == pytest.approx(10.0) for s in segs)
-
-
-def test_plan_seedance_segments_rejects_bad_bounds():
-    with pytest.raises(ValueError):
-        plan_seedance_segments(10.0, max_segment_sec=3.0, min_segment_sec=5.0)
-    with pytest.raises(ValueError):
-        plan_seedance_segments(0.0)
-    with pytest.raises(ValueError):
-        plan_seedance_segments(-1.0)
-
-
-def test_build_audiomap_shape():
-    segs = plan_seedance_segments(30.0, window_start_sec=10.0)
-    am = build_audiomap(
-        audio_url="http://x/a.mp3",
-        audio_duration_sec=100.0,
-        window_start_sec=10.0,
-        window_end_sec=40.0,
-        segments=segs,
-        method="center_window",
+    monkeypatch.setattr(
+        "app.services.agent.video.smart_clip_flow.transcribe_audio_for_analysis",
+        _transcribe,
     )
-    assert am["segment_count"] == len(segs)
-    assert am["master"]["duration_sec"] == pytest.approx(30.0)
-    assert am["alignment"]["spine"] == "music"
+    monkeypatch.setattr(
+        "app.services.agent.video.smart_clip_flow.run_smart_clip_analysis",
+        _smart,
+    )
+    return transcribe_calls, smart_calls
+
+
+# ─── director clips, no even-split ───────────────────────────────────────────
+
+
+def test_short_window_without_segments_is_one_clip():
+    segs = reference_clips_for_cut(0.0, 12.0)
+    assert len(segs) == 1
+    assert segs[0]["start_sec"] == pytest.approx(0.0)
+    assert segs[0]["duration_sec"] == pytest.approx(12.0)
+
+
+def test_long_window_without_segments_is_rejected():
+    with pytest.raises(ValueError, match="requires segments"):
+        reference_clips_for_cut(0.0, 30.0)
+    with pytest.raises(ValueError, match="requires segments"):
+        reference_clips_for_cut(0.0, 15.001)
+
+
+def test_reference_clips_reject_bad_bounds():
+    with pytest.raises(ValueError):
+        reference_clips_for_cut(0.0, 0.0)
+    with pytest.raises(ValueError):
+        reference_clips_for_cut(0.0, -1.0)
+    with pytest.raises(ValueError):
+        reference_clips_for_cut(0.0, 10.0, max_segment_sec=0.0)
 
 
 # ─── host gateway: analyze ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_analyze_full_track_short_song(monkeypatch):
+async def test_analyze_calls_v1_transcribe_and_smart_clip(monkeypatch):
     async def _info(_url):
-        return {"duration": 12.5}
+        return {"duration": 162.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
+    transcribe_calls, smart_calls = _patch_v1_listen(monkeypatch)
     result = await HostGateway().media_audio_analyze({
-        "audio_url": "http://localhost/files/short.mp3",
+        "audio_url": "http://localhost/files/song.mp3",
+        "target_duration_sec": 30.0,
+        "clip_id": "clip-from-artifact",
     })
-    assert result["method"] == "full_track"
-    assert result["segment_count"] == 1
-    assert result["master"]["duration_sec"] == pytest.approx(12.5)
+    assert transcribe_calls[0]["suno_clip_id"] == "clip-from-artifact"
+    assert smart_calls == [30.0]
+    assert result["sections"][0]["section_type"] == "Chorus"
+    assert result["global_bpm"] == 128
+    assert result["smart_clip"]["recommended"]["start_sec"] == pytest.approx(32.46)
+    assert "master" not in result
 
 
 @pytest.mark.asyncio
-async def test_analyze_explicit_start_end(monkeypatch):
+async def test_analyze_does_not_invent_clip_id_from_the_url(monkeypatch):
     async def _info(_url):
-        return {"duration": 200.0}
+        return {"duration": 162.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
-    result = await HostGateway().media_audio_analyze({
-        "audio_url": "http://localhost/files/long.mp3",
-        "start_sec": 45.0,
-        "end_sec": 75.0,
+    transcribe_calls, _ = _patch_v1_listen(monkeypatch)
+    await HostGateway().media_audio_analyze({
+        "audio_url": (
+            "http://localhost/files/"
+            "suno_task_clip_0_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.mp3"
+        ),
+        "target_duration_sec": 30.0,
     })
-    assert result["master"]["start_sec"] == pytest.approx(45.0)
-    assert result["master"]["end_sec"] == pytest.approx(75.0)
-    assert result["segment_count"] == 2
-    _assert_segments_cover(45.0, 75.0, result["segments"])
+    assert transcribe_calls[0]["suno_clip_id"] is None
 
 
 @pytest.mark.asyncio
-async def test_analyze_custom_max_segment(monkeypatch):
+async def test_analyze_skips_smart_clip_without_target(monkeypatch):
     async def _info(_url):
-        return {"duration": 40.0}
+        return {"duration": 162.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
+    _, smart_calls = _patch_v1_listen(monkeypatch)
     result = await HostGateway().media_audio_analyze({
-        "audio_url": "http://localhost/files/a.mp3",
-        "max_segment_sec": 10,
+        "audio_url": "http://localhost/files/song.mp3",
+        "transcription": _fake_transcription(),
     })
-    assert result["segment_count"] == 4
-    assert all(s["duration_sec"] <= 10.0 + 1e-6 for s in result["segments"])
+    assert smart_calls == []
+    assert result["smart_clip"] is None
+    assert result["segments"][0]["text"] == "倒数三秒灯光熄灭"
 
 
 @pytest.mark.asyncio
@@ -215,40 +224,18 @@ async def test_analyze_zero_duration_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_analyze_smart_clip_failure_falls_back_to_center(monkeypatch):
-    async def _info(_url):
-        return {"duration": 120.0}
-
-    async def _boom(*_a, **_k):
-        raise RuntimeError("gemini down")
-
-    monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
-    monkeypatch.setattr(
-        "app.services.agent.video.music_smart_clip_service.analyze_music_smart_clip",
-        _boom,
-    )
-    result = await HostGateway().media_audio_analyze({
-        "audio_url": "http://localhost/files/a.mp3",
-        "target_duration_sec": 60.0,
-        "transcription": {"sections": []},
-    })
-    assert result["method"] == "center_window_fallback"
-    assert result["master"]["duration_sec"] == pytest.approx(60.0)
-    assert result["master"]["start_sec"] == pytest.approx(30.0)
-
-
-@pytest.mark.asyncio
-async def test_analyze_target_without_transcription_uses_center(monkeypatch):
+async def test_analyze_smart_clip_failure_raises(monkeypatch):
     async def _info(_url):
         return {"duration": 120.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
-    result = await HostGateway().media_audio_analyze({
-        "audio_url": "http://localhost/files/a.mp3",
-        "target_duration_sec": 45.0,
-    })
-    assert result["method"] == "center_window"
-    assert result["smart_clip"] is None
+    _patch_v1_listen(monkeypatch, smart_clip_raises=True)
+    with pytest.raises(HostGatewayError, match="smart_clip failed"):
+        await HostGateway().media_audio_analyze({
+            "audio_url": "http://localhost/files/a.mp3",
+            "target_duration_sec": 30.0,
+            "transcription": _fake_transcription(),
+        })
 
 
 @pytest.mark.asyncio
@@ -257,6 +244,7 @@ async def test_analyze_dispatch_requires_grant(monkeypatch):
         return {"duration": 10.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
+    _patch_v1_listen(monkeypatch)
     with pytest.raises(HostGatewayError, match="not granted"):
         await HostGateway().dispatch(
             "media.audio_analyze",
@@ -268,55 +256,56 @@ async def test_analyze_dispatch_requires_grant(monkeypatch):
         {"audio_url": "http://localhost/files/a.mp3"},
         allowed_capabilities=["media.audio_analyze"],
     )
-    assert ok["segment_count"] == 1
+    assert ok["genre"] == "synthwave"
 
 
-# ─── host gateway: trim ─────────────────────────────────────────────────────
+# ─── host gateway: cut ──────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_trim_rejects_missing_duration():
-    with pytest.raises(HostGatewayError, match="duration"):
-        await HostGateway().media_audio_trim({
+async def test_cut_rejects_missing_window():
+    with pytest.raises(HostGatewayError, match="start_sec and duration"):
+        await HostGateway().media_audio_cut({
             "audio_url": "http://localhost/files/a.mp3",
-            "start": 0,
         })
 
 
 @pytest.mark.asyncio
-async def test_trim_rejects_negative_start():
-    with pytest.raises(HostGatewayError, match="start"):
-        await HostGateway().media_audio_trim({
+async def test_cut_rejects_negative_start():
+    with pytest.raises(HostGatewayError, match="start_sec"):
+        await HostGateway().media_audio_cut({
             "audio_url": "http://localhost/files/a.mp3",
-            "start": -1,
+            "start_sec": -1,
             "duration": 5,
         })
 
 
 @pytest.mark.asyncio
-async def test_trim_rejects_zero_duration():
+async def test_cut_rejects_zero_duration():
     with pytest.raises(HostGatewayError, match="duration"):
-        await HostGateway().media_audio_trim({
+        await HostGateway().media_audio_cut({
             "audio_url": "http://localhost/files/a.mp3",
+            "start_sec": 0,
             "duration": 0,
         })
 
 
 @pytest.mark.asyncio
-async def test_trim_empty_result_url(monkeypatch):
+async def test_cut_empty_result_url(monkeypatch):
     async def _trim(*_a, **_k):
         return {"result_url": None}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
     with pytest.raises(HostGatewayError, match="no result_url"):
-        await HostGateway().media_audio_trim({
+        await HostGateway().media_audio_cut({
             "audio_url": "http://localhost/files/a.mp3",
+            "start_sec": 0,
             "duration": 10,
         })
 
 
 @pytest.mark.asyncio
-async def test_trim_dispatch_alias_uri(monkeypatch):
+async def test_cut_dispatch_alias_uri(monkeypatch):
     calls = {}
 
     async def _trim(audio_url, start, duration, run_id):
@@ -325,12 +314,13 @@ async def test_trim_dispatch_alias_uri(monkeypatch):
 
     monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
     result = await HostGateway().dispatch(
-        "media.audio_trim",
-        {"uri": "http://localhost/files/in.mp3", "duration": 8, "start": 2},
-        allowed_capabilities=["media.audio_trim"],
+        "media.audio_cut",
+        {"uri": "http://localhost/files/in.mp3", "duration": 8, "start_sec": 2},
+        allowed_capabilities=["media.audio_cut"],
     )
     assert calls["audio_url"].endswith("in.mp3")
-    assert result["duration_sec"] == 8
+    assert result["master"]["duration_sec"] == pytest.approx(8.0)
+    assert result["uri"].endswith("out.mp3")
 
 
 # ─── host gateway: mix ──────────────────────────────────────────────────────
@@ -382,9 +372,10 @@ async def test_mix_requires_both_urls():
 @pytest.mark.asyncio
 async def test_executor_audio_analyze_from_selected_music(monkeypatch):
     async def _info(_url):
-        return {"duration": 30.0}
+        return {"duration": 162.0}
 
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
+    transcribe_calls, _ = _patch_v1_listen(monkeypatch)
     registry = build_registry(include_platform=True)
     executor = CapabilityExecutor(object(), registry)
     run = AgentRun(
@@ -394,19 +385,33 @@ async def test_executor_audio_analyze_from_selected_music(monkeypatch):
     task = Task(
         run_id=run.id, revision=1, client_key="analyze",
         capability_id="media.audio_analyze", objective="analyze",
-        parameters={},
+        parameters={"target_duration_sec": 30},
+    )
+    music = ArtifactVersion(
+        id=str(uuid4()),
+        artifact_id=str(uuid4()),
+        project_id="p",
+        type="music",
+        version=1,
+        produced_by_task_id="t-music",
+        title="song",
+        summary="",
+        uri="http://localhost/files/song.mp3",
+        metadata={"lyrics": "倒数三秒灯光熄灭", "clip_id": "clip-from-suno"},
     )
     result = await executor._run_local_service(
-        run, task, [_music()], "idem-analyze",
+        run, task, [music], "idem-analyze",
         registry.get("media.audio_analyze"),
     )
     assert result.status == "completed"
-    assert result.artifact["metadata"]["segment_count"] == 2
-    assert result.artifact["metadata"]["master"]["duration_sec"] == pytest.approx(30.0)
+    assert transcribe_calls[0]["suno_clip_id"] == "clip-from-suno"
+    assert transcribe_calls[0]["generated_lyrics"] == "倒数三秒灯光熄灭"
+    assert result.artifact["metadata"]["smart_clip"]["recommended"]["start_sec"] == pytest.approx(32.46)
+    assert "master" not in result.artifact["metadata"]
 
 
 @pytest.mark.asyncio
-async def test_executor_audio_trim_from_parameters(monkeypatch):
+async def test_executor_audio_cut_from_parameters(monkeypatch):
     async def _trim(audio_url, start, duration, run_id):
         assert start == 15.0
         assert duration == 15.0
@@ -420,23 +425,30 @@ async def test_executor_audio_trim_from_parameters(monkeypatch):
         objective="mv", idempotency_key="k1",
     )
     task = Task(
-        run_id=run.id, revision=1, client_key="trim",
-        capability_id="media.audio_trim", objective="trim",
+        run_id=run.id, revision=1, client_key="cut",
+        capability_id="media.audio_cut", objective="cut",
         parameters={
             "audio_url": "http://localhost/files/song.mp3",
-            "start": 15,
+            "start_sec": 15,
             "duration": 15,
         },
     )
     result = await executor._run_local_service(
-        run, task, [], "idem-trim",
-        registry.get("media.audio_trim"),
+        run, task, [], "idem-cut",
+        registry.get("media.audio_cut"),
     )
     assert result.artifact["uri"].endswith("seg.mp3")
 
 
 @pytest.mark.asyncio
-async def test_executor_audio_trim_requires_duration_or_artifact():
+async def test_executor_audio_cut_forwards_director_segments(monkeypatch):
+    calls = []
+
+    async def _trim(audio_url, start, duration, run_id):
+        calls.append((start, duration))
+        return {"result_url": f"http://localhost/files/seg_{len(calls)}.mp3"}
+
+    monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
     registry = build_registry(include_platform=True)
     executor = CapabilityExecutor(object(), registry)
     run = AgentRun(
@@ -444,14 +456,46 @@ async def test_executor_audio_trim_requires_duration_or_artifact():
         objective="mv", idempotency_key="k1",
     )
     task = Task(
-        run_id=run.id, revision=1, client_key="trim",
-        capability_id="media.audio_trim", objective="trim",
-        parameters={"start": 0},
+        run_id=run.id, revision=1, client_key="cut",
+        capability_id="media.audio_cut", objective="cut",
+        parameters={
+            "audio_url": "http://localhost/files/song.mp3",
+            "start_sec": 0,
+            "duration": 30,
+            "segments": [
+                {"start_sec": 0, "duration": 8},
+                {"start_sec": 8, "duration": 15},
+                {"start_sec": 23, "duration": 7},
+            ],
+        },
+    )
+    result = await executor._run_local_service(
+        run, task, [], "idem-cut-segs",
+        registry.get("media.audio_cut"),
+    )
+    assert calls == [(0.0, 30.0), (0.0, 8.0), (8.0, 15.0), (23.0, 7.0)]
+    assert [s["duration_sec"] for s in result.artifact["metadata"]["segments"]] == [
+        8.0, 15.0, 7.0,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_audio_cut_requires_audio_url():
+    registry = build_registry(include_platform=True)
+    executor = CapabilityExecutor(object(), registry)
+    run = AgentRun(
+        thread_id="t1", project_id="p1", user_id="u1",
+        objective="mv", idempotency_key="k1",
+    )
+    task = Task(
+        run_id=run.id, revision=1, client_key="cut",
+        capability_id="media.audio_cut", objective="cut",
+        parameters={"start_sec": 0, "duration": 10},
     )
     with pytest.raises(ValueError, match="audio_url"):
         await executor._run_local_service(
             run, task, [], "idem",
-            registry.get("media.audio_trim"),
+            registry.get("media.audio_cut"),
         )
 
 
@@ -483,10 +527,10 @@ async def test_executor_mix_audio_from_selected_artifacts(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_executor_analyze_trim_mix_pipeline(monkeypatch):
-    """Simulate MV spine: analyze → trim each segment → mix master."""
+async def test_executor_analyze_cut_mix_pipeline(monkeypatch):
+    """Simulate MV spine: analyze → one cut → mix master."""
     async def _info(_url):
-        return {"duration": 45.0}
+        return {"duration": 162.0}
 
     trims: list[tuple[float, float]] = []
 
@@ -500,33 +544,36 @@ async def test_executor_analyze_trim_mix_pipeline(monkeypatch):
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
     monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
     monkeypatch.setattr("app.utils.media_service_client.video_add_audio", _add)
+    _patch_v1_listen(monkeypatch)
 
     gw = HostGateway()
-    audiomap = await gw.media_audio_analyze({
+    analysis = await gw.media_audio_analyze({
         "audio_url": "http://localhost/files/song.mp3",
+        "target_duration_sec": 30.0,
     })
-    assert audiomap["segment_count"] == 3
-    for seg in audiomap["segments"]:
-        clip = await gw.media_audio_trim({
-            "audio_url": audiomap["audio_url"],
-            "start": seg["start_sec"],
-            "duration": seg["duration_sec"],
-        })
-        assert "seg-" in clip["uri"]
+    assert "master" not in analysis
+    cut = await gw.media_audio_cut({
+        "audio_url": analysis["audio_url"],
+        "analysis": analysis,
+        "start_sec": analysis["smart_clip"]["recommended"]["start_sec"],
+        "duration": 30.0,
+        "segments": [
+            {"start_sec": analysis["smart_clip"]["recommended"]["start_sec"], "duration": 15},
+            {"start_sec": analysis["smart_clip"]["recommended"]["start_sec"] + 15, "duration": 15},
+        ],
+    })
+    assert cut["segment_count"] == 2
+    assert cut["master"]["start_sec"] == pytest.approx(32.46)
+    assert all(start != 0.0 for start, _ in trims)
 
-    master = await gw.media_audio_trim({
-        "audio_url": audiomap["audio_url"],
-        "start": audiomap["master"]["start_sec"],
-        "duration": audiomap["master"]["duration_sec"],
-    })
     final = await gw.media_mix_audio({
         "video_url": "http://localhost/files/concat.mp4",
-        "audio_url": master["uri"],
+        "audio_url": cut["uri"],
         "mode": "replace",
     })
     assert final["uri"].endswith("mv-final.mp4")
-    assert len(trims) == audiomap["segment_count"] + 1
-    assert sum(d for _, d in trims[: audiomap["segment_count"]]) == pytest.approx(45.0)
+    assert len(trims) == cut["segment_count"] + 1
+    assert sum(d for _, d in trims[1:]) == pytest.approx(30.0)
 
 
 # ─── artifact audio collection ───────────────────────────────────────────────
@@ -558,28 +605,101 @@ def test_collect_audio_returns_none_for_video_only():
     assert CapabilityExecutor._collect_artifact_audio_url([_video()]) is None
 
 
+def test_collect_audiomap_ignores_audio_cut():
+    cut = ArtifactVersion(
+        id="v-cut", artifact_id="a", project_id="p", type="audio_cut", version=1,
+        produced_by_task_id="t-cut", title="cut", summary="",
+        uri="http://localhost/files/master.mp3",
+        metadata={
+            "master": {"audio_url": "http://localhost/files/master.mp3"},
+            "segments": [{"audio_url": "http://localhost/files/seg.mp3"}],
+        },
+    )
+    audiomap = ArtifactVersion(
+        id="v-map", artifact_id="b", project_id="p", type="audiomap", version=1,
+        produced_by_task_id="t-map", title="map", summary="",
+        uri="http://localhost/files/song.mp3",
+        metadata={"smart_clip": {"recommended": {"start_sec": 12.0}}, "sections": []},
+    )
+    found = CapabilityExecutor._collect_artifact_audiomap([cut, audiomap])
+    assert found is not None
+    assert found["smart_clip"]["recommended"]["start_sec"] == pytest.approx(12.0)
+    assert CapabilityExecutor._collect_artifact_audiomap([cut]) is None
+
+
+def test_collect_mix_prefers_audio_cut_master_over_music():
+    music = _music("http://localhost/files/full-song.mp3")
+    cut = ArtifactVersion(
+        id="v-cut", artifact_id="a", project_id="p", type="audio_cut", version=1,
+        produced_by_task_id="t-cut", title="cut", summary="",
+        uri="http://localhost/files/full-song.mp3",
+        metadata={
+            "master": {"audio_url": "http://localhost/files/master-window.mp3"},
+        },
+    )
+    url = CapabilityExecutor._collect_artifact_audio_url(
+        [music, cut], prefer_cut=True,
+    )
+    assert url.endswith("master-window.mp3")
+
+
+def test_analyze_and_cut_have_distinct_output_types():
+    registry = build_registry(include_platform=True)
+    assert registry.get("media.audio_analyze").output_type == "audiomap"
+    assert registry.get("media.audio_cut").output_type == "audio_cut"
+    assert "audio_cut" in registry.get("api.provider.generate").inputs.optional
+    assert "music" in registry.get("api.provider.generate").inputs.optional
+
+
 # ─── skill / workflow / registry ─────────────────────────────────────────────
 
 
-def test_seedance_mv_skill_files_and_workflow_contract():
-    root = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance-mv"
+def test_mv_skill_files_and_workflow_contract():
+    root = Path(__file__).resolve().parents[1] / "skills" / "external" / "mv"
     assert (root / "SKILL.md").is_file()
-    assert (root / "references" / "mv-beat-sync.md").is_file()
-    assert (root / "references" / "mv-examples.md").is_file()
+    assert (root / "reference.md").is_file()
 
     catalog = SkillCatalog([root.parent])
     catalog.discover()
-    skill = catalog.load("seedance-mv")
+    skill = catalog.load("mv")
     text = skill.instructions
     for token in (
         "media.audio_analyze",
-        "media.audio_trim",
+        "media.audio_cut",
         "media.mix_audio",
         "media.concat",
+        "hyperframes-captions",
+        "caption_html",
+        "media.hyperframes_caption",
+        "subtitle-authoring",
+        "subtitle.compose",
+        "media.subtitle_burn",
         "Never",
-        "Music spine",
+        "minimax-h3",
+        "suno.generate",
+        "h3",
+        "创意标准",
+        "reference.md",
+        "doubao-seedance-2-0",
     ):
         assert token in text
+    # The song step hands lyrics + Style Box to $suno-song, which opens Bitwize.
+    assert "video_skill_load(\"suno-song\")" in text
+    # duration lands near the ask, so the window stays a judgement on the real
+    # length: cut from 0 when it is close, smart_clip.recommended when it is not.
+    assert "audio_duration_sec" in text
+    assert "smart_clip.recommended" in text
+    # Cast is a brief contract: on-screen person and sung voice are locked once.
+    assert "## 班子" in text
+    assert "画面上的人" in text
+    assert "唱的人" in text
+    assert "vocal_gender" in text
+    assert "tags" in text
+    assert "segments" in text
+    assert "整数秒" in text
+    assert "clip_durations" not in text
+    assert "strip_audio" not in text
+    assert "不传" in text and "audios" in text
 
     configure_workflows(
         SkillCatalog([
@@ -587,27 +707,47 @@ def test_seedance_mv_skill_files_and_workflow_contract():
             Path(__file__).resolve().parents[1] / "skills" / "builtin",
             Path(__file__).resolve().parents[1] / "skills" / "external",
         ]),
-        CapabilityRegistry(),
+        None,
     )
-    assert is_workflow_skill("seedance-mv")
-    assert is_workflow_skill("seedance2")
-    spec = WORKFLOWS["seedance-mv"]
+    assert is_workflow_skill("mv")
+    assert not is_workflow_skill("seedance-mv")
+    seedance2 = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance2" / "SKILL.md"
+    if seedance2.is_file():
+        assert is_workflow_skill("seedance2")
+    spec = WORKFLOWS["mv"]
     assert set(spec.pipeline) <= set(spec.allowed_capabilities or ())
+    # MV 不走短剧 text.generate（配乐用 suno.generate；分镜写进 generate prompt）。
+    assert "atomic.text.generate" not in spec.pipeline
+    assert "atomic.text.generate" not in (spec.allowed_capabilities or ())
+    assert "suno.generate" in spec.pipeline
+    assert "suno.generate" in (spec.allowed_capabilities or ())
+    assert "atomic.music.generate" not in spec.pipeline
+    assert "atomic.music.generate" not in (spec.allowed_capabilities or ())
+    assert "open_montage.tool.invoke" in (spec.allowed_capabilities or ())
+    assert "media.extract_frame" in (spec.allowed_capabilities or ())
+    assert "api.ark_protocol.generate" in (spec.allowed_capabilities or ())
     for cap in (
+        "research.generate",
         "media.audio_analyze",
-        "media.audio_trim",
+        "media.audio_cut",
         "media.mix_audio",
+        "media.transcribe",
+        "media.hyperframes_caption",
         "api.provider.generate",
     ):
-        assert cap in spec.pipeline or cap in (spec.allowed_capabilities or ())
+        assert cap in spec.pipeline
+    assert spec.pipeline[0] == "research.generate"
     params = inject_workflow_parameters({}, spec)
-    assert params["workflow_mode"] == "seedance_mv"
-    assert params["content_category"] == "music_video"
+    assert params["workflow_mode"] == "mv"
+    assert "content_category" not in params
+    skill_text = Path(__file__).resolve().parents[1] / "skills/external/mv/SKILL.md"
+    assert "content_category" not in skill_text.read_text(encoding="utf-8")
+    assert spec.skill_dependencies == ()
 
 
 def test_mv_capabilities_are_workflow_free_and_registered():
     registry = build_registry(include_platform=True)
-    for cap_id in ("media.audio_analyze", "media.audio_trim", "media.mix_audio"):
+    for cap_id in ("media.audio_analyze", "media.audio_cut", "media.mix_audio"):
         manifest = registry.get(cap_id)
         assert manifest.executor == "local.service"
         assert not capability_requires_workflow(cap_id)
@@ -616,6 +756,63 @@ def test_mv_capabilities_are_workflow_free_and_registered():
 
 def test_seedance2_untouched_by_mv_skill():
     root = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance2"
-    text = (root / "SKILL.md").read_text(encoding="utf-8")
+    skill = root / "SKILL.md"
+    if not skill.is_file():
+        pytest.skip("seedance2 Skill is not installed on this checkout")
+    text = skill.read_text(encoding="utf-8")
     assert "media.audio_analyze" not in text
     assert "seedance-mv" not in text
+
+
+def test_h3_skill_is_instruction_helper():
+    root = Path(__file__).resolve().parents[1] / "skills" / "external" / "h3"
+    catalog = SkillCatalog([root.parent])
+    catalog.discover()
+    skill = catalog.load("h3")
+    assert skill.contract is None
+    assert not is_workflow_skill("h3")
+    text = skill.instructions
+    for token in ("minimax-h3", "api.provider.generate"):
+        assert token in text
+    assert "images" in text and "audios" in text
+
+
+def test_hyperframes_captions_skill_is_instruction_helper():
+    root = Path(__file__).resolve().parents[1] / "skills" / "builtin" / "sound" / "hyperframes-captions"
+    catalog = SkillCatalog([Path(__file__).resolve().parents[1] / "skills" / "builtin"])
+    catalog.discover()
+    skill = catalog.load("hyperframes-captions")
+    assert skill.contract is None
+    assert not is_workflow_skill("hyperframes-captions")
+    assert "media.hyperframes_caption" in skill.instructions
+    assert "caption_html" in skill.instructions
+    assert "不要只报一个 registry 组件名" in skill.instructions
+    assert "hyperframes-core" in skill.instructions
+    assert "hyperframes-media" in skill.instructions
+    assert "subtitle-authoring" in skill.instructions
+    assert "never animate" not in skill.instructions.lower()
+    assert not (root / "references" / "styles.md").exists()
+    for name in (
+        "hyperframes-core",
+        "hyperframes-cli",
+        "hyperframes-registry",
+        "hyperframes-media",
+        "hyperframes-creative",
+        "hyperframes-animation",
+        "gsap-core",
+        "gsap-timeline",
+        "media-use",
+    ):
+        loaded = catalog.load(name)
+        assert loaded.contract is None
+        assert not is_workflow_skill(name)
+    assert "references/captions/authoring.md" in catalog.list_resources("hyperframes-media")
+
+
+def test_hyperframes_caption_schema_requires_authored_html():
+    registry = build_registry(include_platform=True)
+    schema = registry.get("media.hyperframes_caption").parameters_schema
+    assert "caption_html" in schema["properties"]
+    assert "composition_html" in schema["properties"]
+    assert "style" not in schema["properties"]
+    assert "caption_html" in schema.get("required", [])

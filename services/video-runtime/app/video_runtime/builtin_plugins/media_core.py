@@ -104,6 +104,9 @@ class MediaCorePlugin(BaseVideoPlugin):
         "media.tts",
         "media.extract_frame",
         "media.audio.analyze",
+        "media.audio_analyze",
+        "media.audio.cut",
+        "media.audio_cut",
         "media.audio.trim",
         "media.probe",
         "media.transcribe",
@@ -112,6 +115,7 @@ class MediaCorePlugin(BaseVideoPlugin):
         "media.mix_audio",
         "media.subtitle.compose",
         "media.subtitle.burn",
+        "media.hyperframes_caption",
         "media.lipsync",
     )
 
@@ -164,15 +168,38 @@ class MediaCorePlugin(BaseVideoPlugin):
                 "position": parameters.get("position", "last"),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
-        elif capability == "media.audio.analyze":
+        elif capability in {"media.audio.analyze", "media.audio_analyze"}:
             from app.chat.v2.host_gateway import HostGateway
             source = self._required(completed, parameters.get("audio_step"))
             result = await HostGateway().media_audio_analyze({
                 "audio_url": source.uri,
                 "target_duration_sec": parameters.get("target_duration_sec"),
-                "start_sec": parameters.get("start_sec"),
-                "end_sec": parameters.get("end_sec"),
-                "max_segment_sec": parameters.get("max_segment_sec", 15),
+                "clip_id": parameters.get("clip_id"),
+                "generated_lyrics": parameters.get("generated_lyrics"),
+                "filename": parameters.get("filename"),
+                "user_input": parameters.get("user_input"),
+                "transcribe": parameters.get("transcribe", True),
+                "transcription": parameters.get("transcription"),
+                "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
+            })
+        elif capability in {"media.audio.cut", "media.audio_cut"}:
+            from app.chat.v2.host_gateway import HostGateway
+            source = self._required(completed, parameters.get("audio_step"))
+            analysis: dict[str, Any] = {}
+            analysis_step = parameters.get("analysis_step")
+            if analysis_step:
+                item = completed.get(str(analysis_step))
+                if item is None:
+                    raise ValueError(f"required media output is unavailable: {analysis_step}")
+                analysis = dict(item.metadata or {})
+            result = await HostGateway().media_audio_cut({
+                "audio_url": source.uri,
+                "analysis": analysis,
+                "start_sec": parameters.get("start_sec", parameters.get("start")),
+                "duration": parameters.get("duration", parameters.get("duration_sec")),
+                "max_segment_sec": parameters.get("max_segment_sec"),
+                "segments": parameters.get("segments"),
+                "transcription": parameters.get("transcription"),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
         elif capability == "media.audio.trim":
@@ -185,13 +212,20 @@ class MediaCorePlugin(BaseVideoPlugin):
                 analysis = completed.get(str(analysis_step))
                 if analysis is None:
                     raise ValueError(f"required media output is unavailable: {analysis_step}")
-                segments = analysis.metadata.get("segments") or []
-                index = int(parameters.get("segment_index") or 0)
-                if index >= len(segments):
-                    raise ValueError(f"audio analysis has no segment {index}")
-                segment = segments[index]
-                start = segment.get("start_sec", segment.get("start"))
-                duration = segment.get("duration_sec", segment.get("duration"))
+                if parameters.get("use_master_window"):
+                    master = analysis.metadata.get("master") or {}
+                    start = master.get("start_sec", 0)
+                    duration = master.get("duration_sec")
+                    if duration is None and master.get("end_sec") is not None:
+                        duration = float(master["end_sec"]) - float(start or 0)
+                else:
+                    segments = analysis.metadata.get("segments") or []
+                    index = int(parameters.get("segment_index") or 0)
+                    if index >= len(segments):
+                        raise ValueError(f"audio analysis has no segment {index}")
+                    segment = segments[index]
+                    start = segment.get("start_sec", segment.get("start"))
+                    duration = segment.get("duration_sec", segment.get("duration"))
             result = await HostGateway().media_audio_trim({
                 "audio_url": source.uri,
                 "start": start or 0,
@@ -249,7 +283,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             audio = self._required(completed, parameters.get("audio_step"))
             result = await HostGateway().media_mix_audio({
                 "video_url": video.uri, "audio_url": audio.uri,
-                "mode": parameters.get("mode", "overlay"),
+                "mode": parameters.get("mode", "replace"),
                 "audio_volume": parameters.get("audio_volume", 0.25),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
@@ -275,6 +309,37 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = await msc.subtitle_burn(
                 str(video.uri), str(subtitle.uri),
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
+            )
+            result = {**result, "uri": result.get("result_url")}
+        elif capability == "media.hyperframes_caption":
+            from app.utils import media_service_client as msc
+            video = self._required(completed, parameters.get("video_step"))
+            transcription_step = parameters.get("transcription_step")
+            transcription = completed.get(str(transcription_step or ""))
+            if transcription is None:
+                raise ValueError(
+                    f"required media output is unavailable: {transcription_step}"
+                )
+            caption_html = parameters.get("caption_html")
+            composition_html = parameters.get("composition_html")
+            if not (
+                (isinstance(caption_html, str) and caption_html.strip())
+                or (isinstance(composition_html, str) and composition_html.strip())
+            ):
+                raise ValueError("media.hyperframes_caption requires caption_html")
+            words = transcription.metadata.get("words") or []
+            cues = transcription.metadata.get("segments") or []
+            result = await msc.hyperframes_caption(
+                str(video.uri),
+                run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
+                words=words,
+                cues=cues,
+                accent_color=str(parameters.get("accent_color") or "#ff1745"),
+                position=str(parameters.get("position") or "bottom-safe"),
+                playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,
+                layers=parameters.get("layers") if isinstance(parameters.get("layers"), list) else None,
+                caption_html=caption_html if isinstance(caption_html, str) else None,
+                composition_html=composition_html if isinstance(composition_html, str) else None,
             )
             result = {**result, "uri": result.get("result_url")}
         elif capability == "media.lipsync":

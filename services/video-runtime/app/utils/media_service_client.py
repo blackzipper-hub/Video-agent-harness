@@ -265,19 +265,30 @@ async def hyperframes_caption(
     *,
     words: list[dict],
     cues: list[dict],
-    style: str = "caption-highlight",
     accent_color: str = "#ff1745",
     position: str = "bottom-safe",
+    playbook: str | None = None,
+    layers: list[dict] | None = None,
+    caption_html: str | None = None,
+    composition_html: str | None = None,
 ) -> dict:
-    return await _post("subtitle/hyperframes", {
+    payload = {
         "video_url": video_url,
         "run_id": run_id,
         "words": words,
         "cues": cues,
-        "style": style,
         "accent_color": accent_color,
         "position": position,
-    })
+    }
+    if playbook:
+        payload["playbook"] = playbook
+    if layers:
+        payload["layers"] = layers
+    if caption_html:
+        payload["caption_html"] = caption_html
+    if composition_html:
+        payload["composition_html"] = composition_html
+    return await _post("subtitle/hyperframes", payload)
 
 
 # ─── Audio ───────────────────────────────────────────────

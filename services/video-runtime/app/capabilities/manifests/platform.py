@@ -46,8 +46,104 @@ def platform_capabilities() -> list[CapabilityManifest]:
     return [
         _manifest("atomic.text.generate", "Generate one text artifact directly from the final prompt. Media model IDs are never used for this language-model call.", "atomic.direct", "text", alias="atomic-text", optional=["text", "image"], parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "llm_model": {"type": "string", "description": "Optional OpenAI language-model override"}, "model": {"type": "string", "description": "Legacy text-model override; media model IDs are ignored"}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
         _manifest("atomic.image.generate", "Generate one image directly from the final prompt and explicit references.", "atomic.direct", "image", alias="atomic-image", optional=["text", "image"], parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "model": {"type": "string"}, "resolution": {"type": "string", "enum": ["480p", "720p", "1080p"]}, "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]}, "images": {"type": "array", "items": {"type": "string"}}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
-        _manifest("atomic.music.generate", "Generate one music artifact directly from the final prompt.", "atomic.direct", "music", alias="atomic-music", parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "has_lyrics": {"type": "boolean"}, "auto_lyrics": {"type": "boolean"}, "target_duration": {"type": "integer", "minimum": 1}, "tags": {"type": "string"}, "vocal_gender": {"type": "string", "enum": ["f", "m"]}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
+        _manifest("atomic.music.generate", "Generate one music artifact directly from the final prompt.", "atomic.direct", "music", alias="atomic-music", parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "has_lyrics": {"type": "boolean"}, "auto_lyrics": {"type": "boolean"}, "target_duration": {"type": "integer", "minimum": 1}, "tags": {"type": "string"}, "vocal_gender": {"type": "string", "enum": ["f", "m"]}, "mv": {"type": "string"}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
         _manifest("atomic.video.generate", "Generate one video directly from the final prompt and explicit references. Use start_image_url for a strict opening frame; generic images remain identity/style references.", "atomic.direct", "video", alias="atomic-video", optional=["image", "music", "video"], parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "provider": {"type": "string"}, "model": {"type": "string"}, "generation_mode": {"type": "string", "enum": ["t2v", "i2v", "image_to_video", "image-to-video"]}, "duration": {"type": "integer"}, "resolution": {"type": "string"}, "aspect_ratio": {"type": "string"}, "generate_audio": {"type": "boolean"}, "start_image_url": {"type": "string", "description": "Strict first-frame input for image-to-video generation"}, "end_image_url": {"type": "string", "description": "Optional strict last-frame input; never inferred from generic references"}, "images": {"type": "array", "items": {"type": "string"}}, "videos": {"type": "array", "items": {"type": "string"}}, "audios": {"type": "array", "items": {"type": "string"}}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
+        _manifest(
+            "suno.generate",
+            "Generate one Suno track with native API fields (lyrics/prompt, tags, custom_mode, make_instrumental, mv, vocal_gender, title). Default is a sung song, not instrumental. Does not go through the music agent.",
+            "local.service",
+            "music",
+            alias="suno-generate",
+            service_target="suno_generate",
+            optional=["text"],
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "custom_mode": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "False = simple mode (prompt is a description, lyrics "
+                            "auto-generated). True = custom mode (prompt is exact "
+                            "lyrics, tags/title required)."
+                        ),
+                    },
+                    "make_instrumental": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "True for instrumental only (no vocals), false for vocals."
+                        ),
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": (
+                            "In simple mode: a description of desired music "
+                            "(max 500 chars). In custom mode: the exact lyrics "
+                            "to sing (max 3000 chars)."
+                        ),
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": (
+                            "Style Box in custom mode (max 200 chars): sung voice "
+                            "first, then mood, genre, instruments, tempo."
+                        ),
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "description": (
+                            "Song title. Used in custom mode only (max 80 chars)."
+                        ),
+                    },
+                    "mv": {
+                        "type": "string",
+                        "default": "chirp-v5-5",
+                        "description": (
+                            "Suno model version. V4 = 4min max, V4_5/V5 = 8min max."
+                        ),
+                    },
+                    "vocal_gender": {
+                        "type": "string",
+                        "enum": ["f", "m"],
+                        "description": (
+                            "The same sung voice as tags, as f or m. chirp-v4-5+."
+                        ),
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "minimum": 10,
+                        "maximum": 360,
+                        "description": (
+                            "Optional target song length in seconds. The track lands "
+                            "close to the request, not exactly on it, so still open a "
+                            "window with media.audio_analyze / media.audio_cut."
+                        ),
+                    },
+                },
+                "additionalProperties": True,
+            },
+        ),
+        _manifest(
+            "research.generate",
+            "Research real references for a brief with web search and return grounded creative directions (research_summary + ≥3 directions + ≥5 source URLs). Any workflow can run this before writing prompts; it produces no media and picks no winner.",
+            "local.service",
+            "research",
+            alias="generate-research",
+            service_target="generate_research_by_request",
+            optional=["text", "image", "music", "video"],
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "user_input": {"type": "string"},
+                    "content_category": {"type": "string"},
+                    "detected_language": {"type": "string"},
+                    "run_id": {"type": "string"},
+                },
+                "additionalProperties": True,
+            },
+        ),
         _manifest("story.generate", "Generate or rewrite a complete story.", "video-agent.delegate", "story", alias="generate-story", target_agent="story", optional=["image", "music"]),
         _manifest("image.generate", "Generate an image using selected project artifacts.", "video-agent.delegate", "image", alias="generate-image", target_agent="image", optional=["story", "music"]),
         _manifest("music.generate", "Generate music using selected project artifacts.", "video-agent.delegate", "music", alias="generate-music", target_agent="music", optional=["story", "image"]),
@@ -93,9 +189,9 @@ def platform_capabilities() -> list[CapabilityManifest]:
         ),
         _manifest(
             "media.audio_analyze",
-            "Analyze a music track into a master window + Seedance-safe segments (≤15s). Optional target_duration_sec center-crops or uses smart_clip when transcription is provided. Music is the timeline spine for MV.",
+            "Listen to a music track with the v1 hybrid/Gemini transcription, then (when target_duration_sec is set) run v1 smart_clip to recommend a window. Returns sections, timed lyrics, mood, and smart_clip.recommended. Typed as audiomap so it does not shadow the music slot. Does not cut files.",
             "local.service",
-            "json",
+            "audiomap",
             alias="media-audio-analyze",
             service_target="media_audio_analyze",
             optional=["music"],
@@ -105,9 +201,49 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "properties": {
                     "audio_url": {"type": "string"},
                     "target_duration_sec": {"type": "number", "exclusiveMinimum": 0},
+                    "clip_id": {"type": "string", "description": "Suno clip_id so hybrid can skip upload."},
+                    "generated_lyrics": {"type": "string"},
+                    "filename": {"type": "string"},
+                    "user_input": {"type": "string"},
+                    "transcribe": {"type": "boolean", "default": True},
+                    "transcription": {"type": "object", "description": "Reuse an existing v1 transcript."},
+                    "run_id": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        ),
+        _manifest(
+            "media.audio_cut",
+            "Trim [start_sec, start_sec+duration) into a master clip. Optional segments[] are the reference clips for generate (start_sec + duration each, ≤15s). Omit segments only when the master window is already ≤15s (one clip). Longer windows require segments. Pass start_sec and duration, or pin the audiomap artifact and omit them to use smart_clip.recommended. Typed as audio_cut so it does not shadow music or audiomap. Does not transcribe or pick a window.",
+            "local.service",
+            "audio_cut",
+            alias="media-audio-cut",
+            service_target="media_audio_cut",
+            optional=["music", "audiomap"],
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "audio_url": {"type": "string"},
                     "start_sec": {"type": "number", "minimum": 0},
-                    "end_sec": {"type": "number", "exclusiveMinimum": 0},
+                    "start": {"type": "number", "minimum": 0},
+                    "duration": {"type": "number", "exclusiveMinimum": 0},
+                    "duration_sec": {"type": "number", "exclusiveMinimum": 0},
                     "max_segment_sec": {"type": "number", "minimum": 1, "maximum": 15, "default": 15},
+                    "segments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "start_sec": {"type": "number", "minimum": 0},
+                                "start": {"type": "number", "minimum": 0},
+                                "duration": {"type": "number", "exclusiveMinimum": 0},
+                                "duration_sec": {"type": "number", "exclusiveMinimum": 0},
+                            },
+                        },
+                        "description": "Director-chosen reference clips. Required when the master window is over 15s.",
+                    },
+                    "analysis": {"type": "object", "description": "media.audio_analyze artifact; used for lyrics and as the default window."},
+                    "audiomap": {"type": "object"},
                     "transcription": {"type": "object"},
                     "run_id": {"type": "string"},
                 },
@@ -122,7 +258,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
             alias="media-mix-audio",
             service_target="media_mix_audio",
             required=["video"],
-            optional=["music"],
+            optional=["music", "audio_cut"],
             parameters_schema={
                 "type": "object",
                 "required": ["video_url", "audio_url"],
@@ -227,7 +363,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
         ),
         _manifest(
             "media.hyperframes_caption",
-            "Render animated, word-synchronized HyperFrames captions over a selected video and persist a new MP4.",
+            "Render LLM-authored HyperFrames HTML (captions / titles) over a selected video. caption_html is required.",
             "local.service",
             "video",
             alias="media-hyperframes-caption",
@@ -235,21 +371,20 @@ def platform_capabilities() -> list[CapabilityManifest]:
             required=["video", "transcript"],
             parameters_schema={
                 "type": "object",
+                "required": ["caption_html"],
                 "properties": {
                     "video_url": {"type": "string"},
-                    "style": {
+                    "caption_html": {
                         "type": "string",
-                        "enum": [
-                            "caption-highlight", "caption-pill-karaoke",
-                            "caption-editorial-emphasis", "caption-glitch-rgb",
-                            "caption-kinetic-slam", "caption-neon-glow",
-                            "caption-neon-accent", "caption-clip-wipe",
-                            "caption-gradient-fill", "caption-matrix-decode",
-                            "caption-emoji-pop", "caption-parallax-layers",
-                            "caption-particle-burst", "caption-texture",
-                            "caption-weight-shift",
-                        ],
-                        "default": "caption-highlight",
+                        "minLength": 1,
+                        "maxLength": 500000,
+                        "description": "Authored caption composition HTML. Put transcript timing in the HTML.",
+                    },
+                    "composition_html": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500000,
+                        "description": "Optional full host index.html. Source footage is staged as assets/source.mp4.",
                     },
                     "accent_color": {
                         "type": "string",
@@ -260,6 +395,24 @@ def platform_capabilities() -> list[CapabilityManifest]:
                         "type": "string",
                         "enum": ["bottom-safe", "lower-middle", "center"],
                         "default": "bottom-safe",
+                    },
+                    "playbook": {
+                        "type": "string",
+                        "description": "Optional visual playbook: clean-professional, flat-motion-graphics, minimalist-diagram, premium-minimalist, anime-ghibli.",
+                    },
+                    "layers": {
+                        "type": "array",
+                        "maxItems": 12,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["title", "kinetic"]},
+                                "text": {"type": "string"},
+                                "start": {"type": "number"},
+                                "end": {"type": "number"},
+                            },
+                            "required": ["text"],
+                        },
                     },
                     "run_id": {"type": "string"},
                 },

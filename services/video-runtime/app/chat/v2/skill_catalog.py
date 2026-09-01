@@ -376,7 +376,7 @@ class SkillCatalog:
     ) -> str:
         skill = self.load(name)
         root = skill.metadata.path.parent.resolve()
-        requested = Path(relative_path)
+        requested = Path(str(relative_path).strip().strip("<>").removeprefix("./"))
         if requested.is_absolute() or ".." in requested.parts:
             raise ValueError("skill resource path must be relative")
         path = (root / requested).resolve()

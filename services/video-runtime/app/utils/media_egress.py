@@ -5,11 +5,13 @@
   - STORAGE_BACKEND=s3（AWS / MinIO 公网 / R2 …）
         媒体 URL 本就是公网 CDN → 直接透传，什么都不做。
 
-  - STORAGE_BACKEND=local（自托管，文件在本机 http://localhost:8000/files/...）
-        远程厂商拉不到 localhost，按 MEDIA_EGRESS_MODE 处理：
+  - STORAGE_BACKEND=local（自托管 / compose 共享盘，文件在 PUBLIC_BASE_URL/files/...）
+        远程厂商拉不到 localhost。磁盘上找得到这份文件时，按 MEDIA_EGRESS_MODE 处理：
           auto / provider_upload（默认）：上传到 WaveSpeed /media/upload/binary 换回公网 URL；
           base64：仅对「声明支持 base64 入参」的调用内联为 data URI（多数厂商不支持，故非默认）；
           public_base：把 /files/<key> 前缀改写成 MEDIA_PUBLIC_BASE_URL（给用隧道/反代暴露服务的人）。
+        磁盘上找不到 → 原样透传，不 HTTP 再拉一遍。本地测走 compose 共享盘，runtime 和
+        media-service 读同一份 LOCAL_STORAGE_DIR。
 
 非本地 URL / 已是 data: / 找不到文件 / 处理失败 → 一律原样返回，绝不阻断主流程（交由厂商自身报错）。
 """
@@ -72,6 +74,21 @@ def _local_path_for(url: str) -> Optional[str]:
     return None
 
 
+def _is_loopback_files_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    host = (parsed.hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"} and parsed.path.startswith("/files/")
+
+
+def reachable_media_url(stored: str | None, original: str | None = None) -> str:
+    """Prefer a non-loopback URL when local storage rewrote a public source."""
+    stored_s = (stored or "").strip()
+    original_s = (original or "").strip()
+    if stored_s and _is_loopback_files_url(stored_s) and original_s and not _is_loopback_files_url(original_s):
+        return original_s
+    return stored_s or original_s
+
+
 async def resolve_outbound_media_url(url: str, *, accepts_base64: bool = False) -> str:
     """把单个媒体 URL 解析成远程厂商可拉取的形态。见模块 docstring。"""
     if not url or not isinstance(url, str):
@@ -82,10 +99,10 @@ async def resolve_outbound_media_url(url: str, *, accepts_base64: bool = False) 
 
     try:
         local_path = _local_path_for(u)
-        if not local_path:
-            return url  # 公网 / 非本机 / 文件缺失 → 透传
-
         mode = _egress_mode()
+        if not local_path:
+            return url  # 公网 / 非本机 / 文件不在这份磁盘 → 透传
+
         if mode == "public_base":
             return _rewrite_public_base(u)
         if mode == "base64" and accepts_base64:
@@ -114,14 +131,15 @@ async def _to_data_uri(local_path: str) -> str:
 
 
 async def _upload_to_wavespeed(local_path: str) -> Optional[str]:
-    """上传本地文件到 WaveSpeed，成功返回公网 URL（data.url），失败返回 None。"""
+    """上传本地磁盘文件到 WaveSpeed，成功返回公网 URL，失败返回 None。"""
+    raw = await asyncio.to_thread(pathlib.Path(local_path).read_bytes)
+    filename = os.path.basename(local_path)
     api_key = os.getenv("WAVESPEED_API_KEY")
     if not api_key:
         logger.warning("media egress provider_upload：未配置 WAVESPEED_API_KEY")
         return None
-    raw = await asyncio.to_thread(pathlib.Path(local_path).read_bytes)
     form = aiohttp.FormData()
-    form.add_field("file", raw, filename=os.path.basename(local_path), content_type=_guess_mime(local_path))
+    form.add_field("file", raw, filename=filename, content_type=_guess_mime(filename))
     timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(
@@ -139,5 +157,5 @@ async def _upload_to_wavespeed(local_path: str) -> Optional[str]:
             if not public_url:
                 logger.warning("media egress WaveSpeed 上传返回无 url: %s", body[:200])
                 return None
-            logger.info("media egress: 已上传 %s → %s", os.path.basename(local_path), public_url)
+            logger.info("media egress: 已上传 %s → %s", filename, public_url)
             return public_url

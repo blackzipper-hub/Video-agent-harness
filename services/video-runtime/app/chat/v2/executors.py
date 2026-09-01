@@ -630,14 +630,48 @@ class CapabilityExecutor:
                     "media.audio_analyze requires parameters.audio_url "
                     "or a selected music artifact"
                 )
+            music_meta = self._collect_artifact_music_metadata(selected)
             result = await gateway.media_audio_analyze({
                 "audio_url": audio_url,
                 "target_duration_sec": parameters.get(
                     "target_duration_sec", parameters.get("target_duration")
                 ),
+                "clip_id": parameters.get("clip_id") or music_meta.get("clip_id"),
+                "generated_lyrics": (
+                    parameters.get("generated_lyrics") or music_meta.get("lyrics")
+                ),
+                "filename": parameters.get("filename") or music_meta.get("filename"),
+                "user_input": parameters.get("user_input"),
+                "transcribe": parameters.get("transcribe", True),
+                "transcription": parameters.get("transcription"),
+                "run_id": remote_run_id,
+            })
+        elif service_target == "media_audio_cut":
+            from app.chat.v2.host_gateway import HostGateway
+
+            gateway = HostGateway()
+            analysis = (
+                parameters.get("analysis")
+                or parameters.get("audiomap")
+                or self._collect_artifact_audiomap(selected)
+            )
+            audio_url = (
+                parameters.get("audio_url")
+                or (analysis or {}).get("audio_url")
+                or self._collect_artifact_audio_url(selected)
+            )
+            if not audio_url:
+                raise ValueError(
+                    "media.audio_cut requires parameters.audio_url, an analysis "
+                    "artifact, or a selected music artifact"
+                )
+            result = await gateway.media_audio_cut({
+                "audio_url": audio_url,
+                "analysis": analysis,
                 "start_sec": parameters.get("start_sec", parameters.get("start")),
-                "end_sec": parameters.get("end_sec", parameters.get("end")),
+                "duration": parameters.get("duration", parameters.get("duration_sec")),
                 "max_segment_sec": parameters.get("max_segment_sec"),
+                "segments": parameters.get("segments"),
                 "transcription": parameters.get("transcription"),
                 "run_id": remote_run_id,
             })
@@ -654,11 +688,13 @@ class CapabilityExecutor:
                 or parameters.get("music_url")
             )
             if not audio_url:
-                audio_url = self._collect_artifact_audio_url(selected)
+                audio_url = self._collect_artifact_audio_url(
+                    selected, prefer_cut=True,
+                )
             if not video_url or not audio_url:
                 raise ValueError(
                     "media.mix_audio requires video_url and audio_url "
-                    "(or selected video + music artifacts)"
+                    "(or selected video + music / audio_cut artifacts)"
                 )
             result = await gateway.media_mix_audio({
                 "video_url": video_url,
@@ -668,6 +704,10 @@ class CapabilityExecutor:
                 "loop_audio": parameters.get("loop_audio", False),
                 "run_id": remote_run_id,
             })
+        elif service_target == "suno_generate":
+            from app.integrations.providers.suno_bridge import generate_suno_native
+
+            result = await generate_suno_native(dict(parameters))
         elif service_target == "media_extract_frame":
             from app.chat.v2.host_gateway import HostGateway
 
@@ -781,27 +821,46 @@ class CapabilityExecutor:
             )
             words = metadata.get("words") or []
             cues = metadata.get("segments") or []
-            if not video_url or not transcript or (not words and not cues):
+            caption_html = (
+                parameters.get("caption_html")
+                if isinstance(parameters.get("caption_html"), str)
+                else None
+            )
+            composition_html = (
+                parameters.get("composition_html")
+                if isinstance(parameters.get("composition_html"), str)
+                else None
+            )
+            authored = bool((caption_html or "").strip() or (composition_html or "").strip())
+            if not video_url or not transcript:
                 raise ValueError(
-                    "media.hyperframes_caption requires selected video and timestamped transcript artifacts"
+                    "media.hyperframes_caption requires selected video and transcript artifacts"
+                )
+            if not authored:
+                raise ValueError(
+                    "media.hyperframes_caption requires caption_html"
                 )
             rendered = await msc.hyperframes_caption(
                 str(video_url),
                 run_id=remote_run_id,
                 words=words,
                 cues=cues,
-                style=str(parameters.get("style") or "caption-highlight"),
                 accent_color=str(parameters.get("accent_color") or "#ff1745"),
                 position=str(parameters.get("position") or "bottom-safe"),
+                playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,
+                layers=parameters.get("layers") if isinstance(parameters.get("layers"), list) else None,
+                caption_html=caption_html,
+                composition_html=composition_html,
             )
+            playbook_name = parameters.get("playbook")
             result = {
                 **rendered,
                 "uri": rendered.get("result_url"),
                 "video_url": rendered.get("result_url"),
                 "title": "HyperFrames captioned video",
                 "summary": (
-                    f"Rendered animated captions with "
-                    f"{parameters.get('style') or 'caption-highlight'}"
+                    "Rendered HyperFrames overlay (authored HTML)"
+                    + (f" / {playbook_name}" if playbook_name else "")
                 ),
                 "source_transcript_artifact_id": transcript.id,
             }
@@ -1051,8 +1110,58 @@ class CapabilityExecutor:
         return urls
 
     @staticmethod
-    def _collect_artifact_audio_url(selected: list[ArtifactVersion]) -> str | None:
+    def _collect_artifact_audiomap(
+        selected: list[ArtifactVersion],
+    ) -> dict[str, Any] | None:
+        typed = [
+            artifact for artifact in selected
+            if str(getattr(artifact, "type", "") or "").lower() == "audiomap"
+        ]
+        for artifact in typed or selected:
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if metadata.get("smart_clip") or metadata.get("sections"):
+                return metadata
+        return None
+
+    @staticmethod
+    def _collect_artifact_music_metadata(
+        selected: list[ArtifactVersion],
+    ) -> dict[str, Any]:
+        for artifact in selected:
+            kind = str(getattr(artifact, "type", "") or "").lower()
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            uri = artifact.uri if isinstance(artifact.uri, str) else ""
+            if kind not in {"music", "audio"} and not uri.lower().endswith(
+                (".mp3", ".wav", ".m4a", ".aac", ".flac")
+            ):
+                continue
+            lyrics = metadata.get("lyrics") or metadata.get("generated_lyrics")
+            return {
+                "lyrics": lyrics if isinstance(lyrics, str) else None,
+                "clip_id": metadata.get("clip_id") or metadata.get("suno_clip_id"),
+                "filename": metadata.get("filename") or metadata.get("title"),
+            }
+        return {}
+
+    @staticmethod
+    def _collect_artifact_audio_url(
+        selected: list[ArtifactVersion],
+        *,
+        prefer_cut: bool = False,
+    ) -> str | None:
         """Prefer music/audio artifacts; fall back to any uri that looks like audio."""
+        if prefer_cut:
+            for artifact in selected:
+                if str(getattr(artifact, "type", "") or "").lower() != "audio_cut":
+                    continue
+                metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+                master = metadata.get("master")
+                master_url = (
+                    master.get("audio_url") if isinstance(master, dict) else None
+                )
+                for candidate in (master_url, artifact.uri, metadata.get("audio_url")):
+                    if isinstance(candidate, str) and candidate.strip():
+                        return candidate.strip()
         for artifact in selected:
             kind = str(getattr(artifact, "type", "") or "").lower()
             metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}

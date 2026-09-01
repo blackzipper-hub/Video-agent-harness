@@ -323,9 +323,10 @@ async def execute_atomic(
             prompt=prompt,
             has_lyrics=bool(params.get("has_lyrics", False)),
             auto_lyrics=bool(params.get("auto_lyrics", False)),
-            target_duration=params.get("target_duration"),
+            target_duration=params.get("target_duration") or params.get("duration"),
             tags=params.get("tags"),
             vocal_gender=params.get("vocal_gender"),
+            mv=str(params.get("mv") or "") or None,
         )
         if not result.success or not result.clips:
             raise RuntimeError(result.error or result.message or "atomic music generation failed")
@@ -338,6 +339,7 @@ async def execute_atomic(
         from app.integrations.providers.provider_bridge import generate_video
 
         profile = dict(params)
+        profile.pop("workflow_parameters", None)
         profile["prompt"] = prompt
         profile["idempotency_key"] = idempotency_key
         selected_images = _selected_urls(selected, _IMAGE_ARTIFACT_TYPES)

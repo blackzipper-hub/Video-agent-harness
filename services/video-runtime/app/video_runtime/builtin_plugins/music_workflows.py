@@ -16,8 +16,9 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             mode="seedance_mv",
             parameters={"workflow_mode": "music_video", "content_category": "music_video"},
             pipeline=(
-                "atomic.music.generate", "media.audio.analyze", "media.audio.trim",
-                "atomic.video.generate", "media.concat", "media.mix_audio",
+                "suno.generate", "media.audio_analyze", "media.audio_cut",
+                "atomic.image.generate", "api.provider.generate",
+                "media.concat", "media.mix_audio",
             ),
             requires_keyframe=False,
         )

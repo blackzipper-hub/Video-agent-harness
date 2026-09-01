@@ -341,6 +341,13 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
     return sorted(workflows, key=lambda item: item["id"])
 
 
+def _canonical_skill_resource_path(path: str) -> str:
+    parsed = urlsplit(path.strip().strip("<>"))
+    if parsed.scheme or parsed.netloc:
+        raise HTTPException(status_code=400, detail="skill resource path must be relative")
+    return unquote(parsed.path).removeprefix("./")
+
+
 def _skill_resources(
     build_runtime: VideoBuildRuntime,
     skill_id: str,
@@ -377,6 +384,26 @@ def _skill_resources(
         readable.append({"path": path, "content": content})
         remaining_bytes -= encoded_size
     return resources, readable
+
+
+@router.get("/skills/{skill_id}/resources")
+async def get_skill_resource(
+    skill_id: str,
+    path: Annotated[str, Query(min_length=1)],
+    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    if not build_runtime.skills.catalog.has(skill_id):
+        raise HTTPException(status_code=404, detail="skill not found")
+    path = _canonical_skill_resource_path(path)
+    resources = build_runtime.skills.catalog.list_resources(skill_id)
+    if path not in resources:
+        raise HTTPException(status_code=404, detail="skill resource not found")
+    try:
+        content = build_runtime.skills.catalog.read_resource(skill_id, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    return {"data": {"id": skill_id, "path": path, "content": content}}
 
 
 @router.get("/workflows")

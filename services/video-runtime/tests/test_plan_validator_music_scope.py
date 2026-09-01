@@ -21,7 +21,7 @@ def _music_patch(base_revision: int = 0) -> PlanPatch:
         reason="music spine",
         add_tasks=[
             PlannedTask(
-                capability_id="atomic.music.generate",
+                capability_id="suno.generate",
                 objective="generate 30s original BGM",
                 parameters={
                     "prompt": "original instrumental score",
@@ -38,9 +38,9 @@ def test_mv_goal_allows_music_generate_with_seedance_mv():
         thread_id="t",
         project_id="t",
         user_id="u",
-        objective="$seedance-mv\n\n生成个30s mv",
+        objective="$mv\n\n生成个30s mv",
         idempotency_key="k-mv",
-        activated_skills=["seedance-mv"],
+        activated_skills=["mv"],
     )
     snapshot = RunSnapshot(
         run=run,
@@ -57,7 +57,7 @@ def test_confirm_original_score_not_wiped_by_continuation_marker():
         user_id="u",
         objective="做个30秒视频",
         idempotency_key="k-confirm",
-        activated_skills=["seedance-mv"],
+        activated_skills=["mv"],
         current_revision=2,
         goal_started_revision=0,
     )

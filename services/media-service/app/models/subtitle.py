@@ -49,32 +49,38 @@ class SubtitleBurnResponse(MediaResult):
     style: dict
 
 
-HYPERFRAMES_CAPTION_STYLES = Literal[
-    "caption-highlight",
-    "caption-pill-karaoke",
-    "caption-editorial-emphasis",
-    "caption-glitch-rgb",
-    "caption-kinetic-slam",
-    "caption-neon-glow",
-    "caption-neon-accent",
-    "caption-clip-wipe",
-    "caption-gradient-fill",
-    "caption-matrix-decode",
-    "caption-emoji-pop",
-    "caption-parallax-layers",
-    "caption-particle-burst",
-    "caption-texture",
-    "caption-weight-shift",
-]
+class OverlayLayer(BaseModel):
+    type: Literal["title", "kinetic"] = "title"
+    text: str = Field(min_length=1, max_length=200)
+    start: float = Field(default=0, ge=0)
+    end: float = Field(default=3.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.end <= self.start:
+            raise ValueError("overlay layer end must be greater than start")
+        self.text = self.text.strip()
+        if not self.text:
+            raise ValueError("overlay layer text cannot be blank")
+        return self
 
 
 class HyperframesCaptionRequest(RunIdMixin):
     video_url: str
     words: list[dict] = Field(default_factory=list)
     cues: list[dict] = Field(default_factory=list)
-    style: HYPERFRAMES_CAPTION_STYLES = "caption-highlight"
     accent_color: str = Field(default="#ff1745", pattern=r"^#[0-9A-Fa-f]{6}$")
     position: Literal["bottom-safe", "lower-middle", "center"] = "bottom-safe"
+    playbook: Optional[str] = Field(default=None, max_length=80)
+    layers: list[OverlayLayer] = Field(default_factory=list, max_length=12)
+    caption_html: Optional[str] = Field(default=None, max_length=500_000)
+    composition_html: Optional[str] = Field(default=None, max_length=500_000)
+
+    @model_validator(mode="after")
+    def require_authored_html(self):
+        if not (self.caption_html or "").strip() and not (self.composition_html or "").strip():
+            raise ValueError("caption_html or composition_html is required")
+        return self
 
 
 class HyperframesCaptionResponse(MediaResult):

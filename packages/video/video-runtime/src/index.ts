@@ -19,6 +19,7 @@ import type {
   WorkflowSummary,
   WorkflowDetail,
   SkillDetail,
+  SkillResourceDetail,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -41,6 +42,7 @@ export abstract class VideoRuntime extends Service {
   abstract listWorkflows(identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowSummary[]>
   abstract loadWorkflow(workflowId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowDetail>
   abstract loadSkill(skillId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillDetail>
+  abstract loadSkillResource(skillId: string, path: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillResourceDetail>
   abstract previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview>
   abstract previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract planProject(request: BuildPlanRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>

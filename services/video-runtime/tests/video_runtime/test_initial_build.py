@@ -137,7 +137,12 @@ class FakePlanExecutor:
 
 class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
     async def test_music_workflow_uses_independent_music_timeline(self):
-        spec = video_spec().model_copy(update={"workflow_id": "cuti.music-video"})
+        spec = video_spec()
+        spec = spec.model_copy(update={
+            "workflow_id": "cuti.music-video",
+            "providers": spec.providers.model_copy(update={"video": "minimax-h3"}),
+            "audio": spec.audio.model_copy(update={"subtitles": False}),
+        })
         plan = await MusicVideoWorkflowPlugin().compile_build_plan(
             PluginContext(project_id="project-1", values={"base_project_version_id": "version-1"}),
             spec,
@@ -147,16 +152,28 @@ class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
         step_ids = [item.step_id for item in ordered]
         self.assertIn("music", step_ids)
         self.assertIn("music-analysis", step_ids)
-        self.assertNotIn("character-reference", step_ids)
-        mv_clip = next(item for item in plan.items if item.step_id.endswith("-video") and item.step_id != "final-video")
-        self.assertIn("@audio1", mv_clip.parameters["prompt"])
+        self.assertIn("music-cut", step_ids)
+        self.assertNotIn("research", step_ids)
+        self.assertNotIn("character-hero-reference", step_ids)
+        self.assertNotIn("look", step_ids)
+        self.assertNotIn("shot-one-tail", step_ids)
+        music = next(item for item in plan.items if item.step_id == "music")
+        self.assertEqual(music.capability, "suno.generate")
+        mv_clip = next(
+            item for item in plan.items
+            if item.step_id.endswith("-video")
+            and item.capability == "api.provider.generate"
+        )
+        self.assertEqual(mv_clip.parameters["model"], "minimax-h3")
+        self.assertEqual(mv_clip.parameters["prompt"], "Hero arrives at a station")
         self.assertNotIn("@音频1", mv_clip.parameters["prompt"])
         self.assertFalse(mv_clip.parameters["generate_audio"])
-        mv_audio = next(item for item in plan.items if item.step_id.endswith("-audio"))
-        self.assertEqual(mv_audio.parameters["fade_in_sec"], 0.0)
+        self.assertEqual(mv_clip.parameters["audio_reference_from_step"], "music-cut")
+        mixed = next(item for item in plan.items if item.capability == "media.mix_audio")
+        self.assertEqual(mixed.parameters["mode"], "replace")
+        self.assertEqual(mixed.parameters["audio_step"], "music-cut")
         final = next(item for item in plan.items if item.step_id == "final-video")
         self.assertEqual(final.capability, "media.mix_audio")
-        self.assertEqual(final.parameters["mode"], "replace")
         self.assertEqual(len(ordered), len(plan.items))
 
     async def test_lipsync_workflow_rewires_final_media_steps(self):

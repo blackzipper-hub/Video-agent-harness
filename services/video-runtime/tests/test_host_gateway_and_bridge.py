@@ -158,6 +158,66 @@ def test_model_family_routes_seedance_15_20_and_25():
     assert _model_family("wavespeed") == "seedance_2"
 
 
+def test_model_family_routes_minimax_h3():
+    assert _model_family("minimax-h3") == "minimax_h3"
+    assert _model_family("h3") == "minimax_h3"
+    assert _model_family("minimax/h3/reference-to-video") == "minimax_h3"
+    assert _model_family("wavespeed-ai/minimax-h3/reference-to-video") == "minimax_h3"
+
+
+@pytest.mark.asyncio
+async def test_wavespeed_generate_dispatches_minimax_h3(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    calls = {}
+
+    async def _fake_resolve(urls):
+        return list(urls)
+
+    class _Svc:
+        @staticmethod
+        def normalize_h3_resolution(resolution):
+            return "2k" if str(resolution).lower() in {"2k", "1080p"} else "768p"
+
+        async def create_minimax_h3_r2v_task(self, **kwargs):
+            calls["create"] = kwargs
+            return "task-h3"
+
+        async def create_seedance_2_t2v_task(self, **kwargs):
+            raise AssertionError("H3 must not fall through to Seedance T2V")
+
+        async def create_seedance_2_i2v_task(self, **kwargs):
+            raise AssertionError("H3 must not use Seedance I2V lock-frame")
+
+        async def poll_seedance_video_task_until_complete(self, *args, **kwargs):
+            calls["poll"] = (args, kwargs)
+            return SimpleNamespace(
+                video_url="http://cdn/h3.mp4",
+                model_dump=lambda: {"video_url": "http://cdn/h3.mp4"},
+            )
+
+    monkeypatch.setattr(bridge, "_resolve_media_urls", _fake_resolve)
+    monkeypatch.setattr(
+        "app.llm.wavespeed_service.get_wavespeed_service",
+        lambda: _Svc(),
+    )
+    out = await bridge._wavespeed_generate({
+        "prompt": "a dancer on the drop",
+        "model": "minimax-h3",
+        "images": ["http://localhost/files/cast.png"],
+        "audios": ["http://localhost/files/seg.mp3"],
+        "duration": 8,
+        "resolution": "1080p",
+        "aspect_ratio": "9:16",
+        "generate_audio": False,
+    })
+    assert out["video_url"].endswith("/h3.mp4")
+    assert out["model_family"] == "minimax_h3"
+    assert calls["create"]["reference_images"] == ["http://localhost/files/cast.png"]
+    assert calls["create"]["reference_audios"] == ["http://localhost/files/seg.mp3"]
+    assert "create_seedance" not in calls
+
+
 def test_model_family_rejects_unknown_seedance_label():
     with pytest.raises(ValueError, match="unsupported Seedance model"):
         _model_family("doubao-seedance-3-0-experimental")
@@ -379,20 +439,21 @@ def test_system_skills_register_provider_and_media_concat():
     assert registry.get("media.concat").service_target == "media_concat"
     assert registry.get("media.audio_trim").service_target == "media_audio_trim"
     assert registry.get("media.audio_analyze").service_target == "media_audio_analyze"
+    assert registry.get("media.audio_cut").service_target == "media_audio_cut"
     assert registry.get("media.mix_audio").service_target == "media_mix_audio"
 
 
-def test_seedance_mv_skill_is_instruction_only_workflow():
+def test_mv_skill_is_instruction_only_workflow():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "skills" / "external"
     catalog = SkillCatalog([root])
     catalog.discover()
-    skill = catalog.load("seedance-mv")
+    skill = catalog.load("mv")
     assert skill.contract is None
     assert "media.audio_analyze" in skill.instructions
-    assert "media.mix_audio" in skill.instructions
-    assert (root / "seedance-mv" / "references" / "mv-beat-sync.md").is_file()
+    assert "media.hyperframes_caption" in skill.instructions
+    assert (root / "mv" / "reference.md").is_file()
 
 
 def test_collect_artifact_urls_prefers_uri_over_nested_history():
@@ -443,6 +504,8 @@ def test_seedance2_skill_remains_instruction_only_without_sandbox_bundle():
         / "skills"
         / "external"
     )
+    if not (root / "seedance2" / "SKILL.md").is_file():
+        pytest.skip("seedance2 Skill is not installed in this checkout")
     catalog = SkillCatalog([root])
     catalog.discover()
     skill = catalog.load("seedance2")

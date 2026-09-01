@@ -9,6 +9,8 @@ contributions:
     - atomic.image.generate
     - atomic.music.generate
     - atomic.video.generate
+    - suno.generate
+    - api.provider.generate
 permissions:
   network_domains:
     - api.sunoapi.com

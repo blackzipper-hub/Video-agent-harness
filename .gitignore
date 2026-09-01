@@ -47,7 +47,15 @@ apps/web/dist/
 .dsh-build/
 .playwright-mcp/
 .orig
-services/video-runtime/skills/external/
+# Keep vendor/C++ bundles out of git, but track dest product Skills we compile.
+services/video-runtime/skills/external/*
+!services/video-runtime/skills/external/mv/
+!services/video-runtime/skills/external/mv/**
+!services/video-runtime/skills/external/h3/
+!services/video-runtime/skills/external/h3/**
+!services/video-runtime/skills/external/suno-song/
+!services/video-runtime/skills/external/suno-song/**
+
 services/video-runtime/ee/
 .worktrees/
 worktrees/

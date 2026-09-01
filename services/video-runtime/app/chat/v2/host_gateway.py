@@ -2,7 +2,7 @@
 
 Platform-stable surface: http.request, artifact.read/write, media.concat,
 media.extract_frame, media.trim, media.speed_adjust, media.audio_trim,
-media.audio_analyze, media.mix_audio, provider.generate.
+media.audio_analyze, media.audio_cut, media.mix_audio, provider.generate.
 No vendor-specific branching belongs here.
 """
 from __future__ import annotations
@@ -31,6 +31,7 @@ SUPPORTED_HOST_CAPABILITIES = frozenset({
     "media.speed_adjust",
     "media.audio_trim",
     "media.audio_analyze",
+    "media.audio_cut",
     "media.mix_audio",
     "provider.generate",
 })
@@ -101,6 +102,8 @@ class HostGateway:
             return await self.media_audio_trim(payload)
         if capability == "media.audio_analyze":
             return await self.media_audio_analyze(payload)
+        if capability == "media.audio_cut":
+            return await self.media_audio_cut(payload)
         if capability == "media.mix_audio":
             return await self.media_mix_audio(payload)
         if capability == "provider.generate":
@@ -421,11 +424,11 @@ class HostGateway:
         }
 
     async def media_audio_analyze(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """v1 listen-to-the-song: transcribe (hybrid/Gemini) + smart_clip window."""
         from app.chat.v2.mv_audio import (
-            SEEDANCE_MAX_AUDIO_SEC,
-            build_audiomap,
-            plan_seedance_segments,
-            resolve_master_window,
+            as_smart_clip_transcription,
+            smart_clip_public_view,
+            transcription_public_view,
         )
         from app.utils import media_service_client as msc
 
@@ -437,9 +440,10 @@ class HostGateway:
         )
         if not isinstance(audio_url, str) or not audio_url.strip():
             raise HostGatewayError("media.audio_analyze requires audio_url")
+        audio_url = audio_url.strip()
 
         run_id = str(payload.get("run_id") or f"host-audio-analyze-{uuid4().hex[:12]}")
-        info = await msc.audio_info(audio_url.strip())
+        info = await msc.audio_info(audio_url)
         try:
             audio_duration = float(info.get("duration") or 0.0)
         except (TypeError, ValueError) as exc:
@@ -447,88 +451,192 @@ class HostGateway:
         if audio_duration <= 0:
             raise HostGatewayError("media.audio_analyze: audio duration must be > 0")
 
-        start = payload.get("start_sec", payload.get("start"))
-        end = payload.get("end_sec", payload.get("end"))
         target = payload.get("target_duration_sec", payload.get("target_duration"))
         try:
-            start_f = float(start) if start is not None else None
-            end_f = float(end) if end is not None else None
             target_f = float(target) if target is not None else None
         except (TypeError, ValueError) as exc:
             raise HostGatewayError(
-                "media.audio_analyze start/end/target_duration must be numeric"
+                "media.audio_analyze target_duration must be numeric"
             ) from exc
 
-        method = "full_track"
-        smart_clip_payload: dict[str, Any] | None = None
         transcription = payload.get("transcription")
-        if (
-            target_f is not None
-            and transcription is not None
-            and audio_duration > target_f + 1.0
-        ):
-            try:
-                from app.services.agent.video.music_smart_clip_service import (
-                    analyze_music_smart_clip,
-                )
+        if transcription is None and payload.get("transcribe", True):
+            from app.services.agent.video.smart_clip_flow import (
+                transcribe_audio_for_analysis,
+            )
 
-                analysis = await analyze_music_smart_clip(
-                    audio_url.strip(),
+            clip_id = payload.get("clip_id") or payload.get("suno_clip_id")
+            try:
+                transcription = await transcribe_audio_for_analysis(
+                    audio_url,
+                    filename=payload.get("filename"),
+                    suno_clip_id=str(clip_id) if clip_id else None,
+                    generated_lyrics=payload.get("generated_lyrics"),
+                    user_input=payload.get("user_input"),
+                )
+            except Exception as exc:
+                raise HostGatewayError(
+                    f"media.audio_analyze transcription failed: {exc}"
+                ) from exc
+            if transcription is None:
+                raise HostGatewayError("media.audio_analyze transcription returned nothing")
+
+        if transcription is None:
+            raise HostGatewayError(
+                "media.audio_analyze needs a transcription "
+                "(omit transcribe=false, or pass transcription)"
+            )
+        transcription = as_smart_clip_transcription(transcription)
+
+        view = transcription_public_view(
+            transcription,
+            audio_url=audio_url,
+            audio_duration_sec=audio_duration,
+        )
+        smart_clip = None
+        if target_f is not None and target_f > 0:
+            from app.services.agent.video.smart_clip_flow import run_smart_clip_analysis
+
+            try:
+                analysis = await run_smart_clip_analysis(
+                    audio_url,
                     target_f,
                     transcription,
                     audio_duration_sec=audio_duration,
                 )
-                start_f = float(analysis.recommended.start_sec)
-                end_f = float(analysis.recommended.end_sec)
-                method = f"smart_clip:{analysis.method}"
-                smart_clip_payload = analysis.model_dump()
-            except Exception as exc:  # noqa: BLE001 — fall back to center window
-                logger.warning("media.audio_analyze smart_clip failed: %s", exc)
-                method = "center_window_fallback"
+            except Exception as exc:
+                raise HostGatewayError(
+                    f"media.audio_analyze smart_clip failed: {exc}"
+                ) from exc
+            smart_clip = smart_clip_public_view(analysis)
+
+        recommended = (smart_clip or {}).get("recommended") or {}
+        rec_start = recommended.get("start_sec")
+        summary_bits = [f"{audio_duration:.1f}s"]
+        if view.get("genre"):
+            summary_bits.append(str(view["genre"]))
+        if view.get("global_bpm"):
+            summary_bits.append(f"{view['global_bpm']} BPM")
+        if rec_start is not None:
+            summary_bits.append(f"recommended {float(rec_start):.2f}s+{target_f:.0f}s")
+        return {
+            **view,
+            "run_id": run_id,
+            "smart_clip": smart_clip,
+            "title": "MV audiomap",
+            "summary": " · ".join(summary_bits),
+        }
+
+    async def media_audio_cut(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Trim [start, start+duration) into a master clip plus ≤15s reference clips."""
+        from app.chat.v2.mv_audio import (
+            MAX_CLIP_SEC,
+            lyrics_in_window,
+            normalize_vocal_lines,
+            reference_clips_for_cut,
+        )
+
+        analysis = payload.get("analysis") or payload.get("audiomap")
+        if not isinstance(analysis, dict):
+            analysis = {}
+
+        audio_url = str(
+            payload.get("audio_url")
+            or payload.get("uri")
+            or payload.get("url")
+            or analysis.get("audio_url")
+            or ""
+        ).strip()
+        if not audio_url:
+            raise HostGatewayError("media.audio_cut requires audio_url")
+
+        start = payload.get("start_sec", payload.get("start"))
+        duration = payload.get("duration", payload.get("duration_sec"))
+        recommended = (analysis.get("smart_clip") or {}).get("recommended") or {}
+        if start is None:
+            start = recommended.get("start_sec")
+        if duration is None:
+            try:
+                duration = float(recommended["end_sec"]) - float(recommended["start_sec"])
+            except (KeyError, TypeError, ValueError):
+                duration = recommended.get("actual_duration_sec") or recommended.get(
+                    "target_duration_sec"
+                )
+        try:
+            start_f = float(start)
+            duration_f = float(duration)
+        except (TypeError, ValueError) as exc:
+            raise HostGatewayError(
+                "media.audio_cut requires start_sec and duration "
+                "(or analysis.smart_clip.recommended)"
+            ) from exc
+        if start_f < 0:
+            raise HostGatewayError("media.audio_cut start_sec must be >= 0")
+        if duration_f <= 0:
+            raise HostGatewayError("media.audio_cut duration must be > 0")
 
         try:
-            window_start, window_end = resolve_master_window(
-                audio_duration,
-                start_sec=start_f,
-                end_sec=end_f,
-                target_duration_sec=target_f if start_f is None and end_f is None else None,
-            )
-        except ValueError as exc:
-            raise HostGatewayError(str(exc)) from exc
-
-        if method == "full_track" and target_f is not None and (window_end - window_start) < audio_duration - 1e-6:
-            method = "center_window"
-
-        try:
-            max_seg = float(payload.get("max_segment_sec") or SEEDANCE_MAX_AUDIO_SEC)
+            max_seg = float(payload.get("max_segment_sec") or MAX_CLIP_SEC)
         except (TypeError, ValueError) as exc:
             raise HostGatewayError("max_segment_sec must be numeric") from exc
 
         try:
-            segments = plan_seedance_segments(
-                window_end - window_start,
-                window_start_sec=window_start,
+            planned = reference_clips_for_cut(
+                start_f,
+                duration_f,
+                segments=payload.get("segments"),
                 max_segment_sec=max_seg,
             )
         except ValueError as exc:
             raise HostGatewayError(str(exc)) from exc
 
-        audiomap = build_audiomap(
-            audio_url=audio_url.strip(),
-            audio_duration_sec=audio_duration,
-            window_start_sec=window_start,
-            window_end_sec=window_end,
-            segments=segments,
-            method=method,
-            smart_clip=smart_clip_payload,
+        lines = normalize_vocal_lines(
+            payload.get("transcription")
+            or {"segments": analysis.get("segments") or []}
         )
-        audiomap["run_id"] = run_id
-        audiomap["summary"] = (
-            f"Analyzed audio into {len(segments)} Seedance segment(s); "
-            f"master {audiomap['master']['duration_sec']:.2f}s"
-        )
-        audiomap["title"] = "MV audiomap"
-        return audiomap
+        run_id = str(payload.get("run_id") or f"host-audio-cut-{uuid4().hex[:12]}")
+        master_clip = await self.media_audio_trim({
+            "audio_url": audio_url,
+            "start": start_f,
+            "duration": duration_f,
+            "run_id": run_id,
+        })
+
+        segments: list[dict[str, Any]] = []
+        for segment in planned:
+            clip = await self.media_audio_trim({
+                "audio_url": audio_url,
+                "start": float(segment["start_sec"]),
+                "duration": float(segment["duration_sec"]),
+                "run_id": run_id,
+            })
+            segments.append({
+                **segment,
+                "lyrics": lyrics_in_window(
+                    lines, float(segment["start_sec"]), float(segment["duration_sec"])
+                ),
+                "audio_url": clip["result_url"],
+            })
+
+        return {
+            "title": "MV audio cut",
+            "uri": master_clip["result_url"],
+            "run_id": run_id,
+            "source_audio_url": audio_url,
+            "master": {
+                "start_sec": round(start_f, 3),
+                "end_sec": round(start_f + duration_f, 3),
+                "duration_sec": round(duration_f, 3),
+                "lyrics": lyrics_in_window(lines, start_f, duration_f),
+                "audio_url": master_clip["result_url"],
+            },
+            "segments": segments,
+            "segment_count": len(segments),
+            "summary": (
+                f"Cut master {duration_f:.2f}s @{start_f:.2f}s "
+                f"+ {len(segments)} reference clip(s)"
+            ),
+        }
 
     async def media_mix_audio(self, payload: dict[str, Any]) -> dict[str, Any]:
         video_url = (

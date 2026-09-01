@@ -2191,6 +2191,134 @@ class WaveSpeedService:
             logger.error(f"🎬 未预期的错误: {e}")
             raise WaveSpeedFinalException(f"Unexpected error: {e}")
 
+    # ==================== MiniMax H3 Reference-to-Video (WaveSpeed) ====================
+    # API: minimax/h3/reference-to-video
+    # Docs: https://wavespeed.ai/models/minimax/h3/reference-to-video
+    # Resolution 768p|2k; duration 4–15s; ≥1 image or video;
+    # reference_audios 2–15s each, cannot be alone. Aspect default 16:9 if omitted.
+
+    @staticmethod
+    def normalize_h3_resolution(resolution: Optional[str]) -> str:
+        raw = (resolution or "").strip().lower()
+        if raw in {"2k", "1080p", "1440p", "2160p", "4k"}:
+            return "2k"
+        return "768p"
+
+    async def create_minimax_h3_r2v_task(
+        self,
+        prompt: str,
+        duration: int = 5,
+        resolution: str = "768p",
+        aspect_ratio: Optional[str] = None,
+        reference_images: Optional[List[str]] = None,
+        reference_videos: Optional[List[str]] = None,
+        reference_audios: Optional[List[str]] = None,
+    ) -> str:
+        """创建 MiniMax H3 reference-to-video 任务。"""
+        if not self.api_key:
+            raise Exception("WaveSpeed API key 未配置")
+        duration = max(4, min(15, int(duration)))
+        resolution = self.normalize_h3_resolution(resolution)
+        images = [u for u in (reference_images or []) if isinstance(u, str) and u.strip()]
+        videos = [u for u in (reference_videos or []) if isinstance(u, str) and u.strip()]
+        audios = [u for u in (reference_audios or []) if isinstance(u, str) and u.strip()]
+        if not images and not videos:
+            raise ValueError(
+                "MiniMax H3 reference-to-video requires at least one reference image or video"
+            )
+        if len(images) > 9:
+            images = images[:9]
+        if len(videos) > 3:
+            videos = videos[:3]
+        if len(audios) > 3:
+            audios = audios[:3]
+        url = f"{self.base_url}/minimax/h3/reference-to-video"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        payload: Dict[str, Any] = {
+            "prompt": prompt,
+            "duration": duration,
+            "resolution": resolution,
+        }
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        if images:
+            payload["reference_images"] = images
+        if videos:
+            payload["reference_videos"] = videos
+        if audios:
+            payload["reference_audios"] = audios
+        logger.info(
+            "🎬 MiniMax H3 R2V 创建任务: %s..., duration=%ss, res=%s, images=%s videos=%s audios=%s",
+            prompt[:50], duration, resolution, len(images), len(videos), len(audios),
+        )
+        payload = await self._resolve_payload_media(payload)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get("code") is not None and result.get("code") != 200:
+                        raise Exception(result.get("message", "Unknown error"))
+                    request_id = self._parse_wavespeed_submit_task_id(result)
+                    logger.info(f"🎬 MiniMax H3 R2V 任务创建成功: {request_id}")
+                    return request_id
+                error_text = await response.text()
+                logger.error(f"🎬 MiniMax H3 R2V 任务创建失败: {response.status}, {error_text}")
+                raise Exception(f"MiniMax H3 R2V 任务创建失败: {response.status}, {error_text}")
+
+    async def generate_minimax_h3_r2v(
+        self,
+        prompt: str,
+        duration: int = 5,
+        resolution: str = "768p",
+        aspect_ratio: Optional[str] = None,
+        reference_images: Optional[List[str]] = None,
+        reference_videos: Optional[List[str]] = None,
+        reference_audios: Optional[List[str]] = None,
+        seed: int = 0,
+        target_width: Optional[int] = None,
+        target_height: Optional[int] = None,
+        strip_audio: bool = False,
+    ) -> VideoGenerationResult:
+        """MiniMax H3 R2V：创建 + 轮询（复用 WaveSpeed predictions 轮询）。"""
+        request_id = None
+        try:
+            request_id = await self.create_minimax_h3_r2v_task(
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                reference_images=reference_images,
+                reference_videos=reference_videos,
+                reference_audios=reference_audios,
+            )
+            return await self.poll_seedance_video_task_until_complete(
+                request_id, "", prompt, duration, self.normalize_h3_resolution(resolution),
+                seed, end_image=None,
+                target_width=target_width, target_height=target_height,
+                strip_audio=strip_audio,
+            )
+        except RetryError:
+            logger.error(
+                "🎬 MiniMax H3 R2V 仍在 processing，本地轮询超时 remote_task_id=%s",
+                request_id,
+            )
+            return VideoGenerationResult.error_result(
+                error_message=(
+                    "provider_pending_timeout: MiniMax H3 R2V still processing "
+                    f"after poll limit; remote_task_id={request_id}; retryable=true"
+                ),
+                provider=VideoProvider.WAVESPEED,
+            )
+        except Exception as e:
+            logger.error(f"🎬 MiniMax H3 R2V 视频生成失败: {e}")
+            return VideoGenerationResult.error_result(
+                error_message=f"MiniMax H3 R2V 视频生成失败: {str(e)}",
+                provider=VideoProvider.WAVESPEED,
+            )
+
     # ==================== Kling v3.0 Std Image-to-Video (WaveSpeed) ====================
     # API: kwaivgi/kling-v3.0-std/image-to-video; Cost: $0.90/5s, sound 1.5x
 

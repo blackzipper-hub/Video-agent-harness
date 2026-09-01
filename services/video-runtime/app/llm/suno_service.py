@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from tenacity import retry, stop_after_delay, wait_fixed, retry_if_exception_type, retry_if_result
 from app.models.image_result import MusicGenerationResult, MusicProvider
 from app.utils.s3_utils import s3_utils
+from app.utils.media_egress import reachable_media_url
 from app.services.agent.utils.cancellation import raise_if_cancelled
 import os
 
@@ -89,9 +90,11 @@ class SunoService:
         custom_mode: bool = False,
         make_instrumental: bool = True,
         lyrics: Optional[str] = None,
-        mv: str = "chirp-v4-5",
+        mv: str = "chirp-v5-5",
         tags: Optional[str] = None,
         vocal_gender: Optional[str] = None,
+        title: Optional[str] = None,
+        duration: Optional[int] = None,
         generation_params: Optional[dict] = None
     ) -> MusicGenerationResult:
         """总的生成音乐方法 - 包含创建和轮询
@@ -101,9 +104,10 @@ class SunoService:
             custom_mode: 是否使用自定义模式
             make_instrumental: 是否生成纯音乐
             lyrics: 歌词内容（custom_mode=True且make_instrumental=False时使用，需包含结构标签，最多5000字符）
-            mv: model version，默认 "chirp-v4-5"
+            mv: model version，默认 "chirp-v5-5"
             tags: 歌曲风格标签（如 "Fast 160BPM, Brief"），v4及以下最多200字符，v4.5及以上最多1000字符
             vocal_gender: 人声性别（可选，仅 v4-5+）：'f' 女声，'m' 男声
+            duration: 目标时长秒数（10–360）。落在附近，不精确
             generation_params: 生成参数（用于记录）
         """
         task_id = await self.create_music_task(
@@ -113,7 +117,9 @@ class SunoService:
             lyrics=lyrics,
             mv=mv,
             tags=tags,
-            vocal_gender=vocal_gender
+            vocal_gender=vocal_gender,
+            title=title,
+            duration=duration,
         )
         original_prompt = prompt or lyrics or "Custom music"
         return await self.poll_task_until_complete(
@@ -128,9 +134,11 @@ class SunoService:
         custom_mode: bool = False,
         make_instrumental: bool = True,
         lyrics: Optional[str] = None,
-        mv: str = "chirp-v4-5",
+        mv: str = "chirp-v5-5",
         tags: Optional[str] = None,
-        vocal_gender: Optional[str] = None
+        vocal_gender: Optional[str] = None,
+        title: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> str:
         """创建音乐任务
         
@@ -139,9 +147,10 @@ class SunoService:
             custom_mode: 是否使用自定义模式
             make_instrumental: 是否生成纯音乐
             lyrics: 歌词内容（custom_mode=True且make_instrumental=False时使用，需包含结构标签，最多5000字符）
-            mv: model version，默认 "chirp-v4-5"
+            mv: model version，默认 "chirp-v5-5"
             tags: 歌曲风格标签（如 "Fast 160BPM, Brief"），v4及以下最多200字符，v4.5及以上最多1000字符
             vocal_gender: 人声性别（可选，仅 v4-5+）：'f' 女声，'m' 男声
+            duration: 目标时长秒数（10–360）。落在附近，不精确
         """
         # 构建请求 payload（SunoAPI 现要求任意模式均带 mv；此前仅 custom_mode 传 mv 会导致 GPT/auto_lyrics 400）
         payload = {
@@ -151,14 +160,17 @@ class SunoService:
         }
         if vocal_gender in ("f", "m"):
             payload["vocal_gender"] = vocal_gender
+        if isinstance(duration, int) and 10 <= duration <= 360:
+            payload["duration"] = duration
 
         if custom_mode:
-            # 自定义模式：传递 lyrics、tags（mv 已在根上）
-            if lyrics and not make_instrumental:
-                payload["prompt"] = lyrics  # Suno API 使用 "prompt" 字段存储歌词
-            # tags 字段用于传递风格描述
+            # 自定义模式：prompt 字段存歌词或结构标签（器乐轨也可以带 [Intro]/[End]）
+            if lyrics:
+                payload["prompt"] = lyrics
             if tags:
                 payload["tags"] = tags
+            if isinstance(title, str) and title.strip():
+                payload["title"] = title.strip()[:80]
         else:
             # GPT描述模式：使用 gpt_description_prompt
             if prompt:
@@ -297,7 +309,7 @@ class SunoService:
                             
                             processed_clips.append({
                                 "clip_id": clip_id,
-                                "audio_url": local_audio_url,  # 使用本地URL
+                                "audio_url": reachable_media_url(local_audio_url, original_audio_url),
                                 "video_url": clip.get("video_url"),
                                 "title": clip.get("title"),
                                 "tags": clip.get("tags"),

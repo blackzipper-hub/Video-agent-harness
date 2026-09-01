@@ -61,7 +61,7 @@ const videoSpecParameters = {
     activated_skill_ids: {
       type: 'array' as const,
       items: { type: 'string' as const },
-      description: 'Optional installed helper Skills to freeze into matching video build steps.',
+      description: 'Optional helper Skills the user or a project lock explicitly pinned. Do not list helpers that a workflow named via video_skill_load.',
     },
     source_asset_ids: {
       type: 'array' as const,
@@ -127,6 +127,18 @@ function identityOf(agent: { session: { header: { id: unknown } } } | undefined)
   return agent === undefined ? {} : { sessionId: String(agent.session.header.id) }
 }
 
+function withoutInjectedResources(
+  value: Record<string, import('@cuti-ai/video-runtime').JsonValue>,
+): Record<string, import('@cuti-ai/video-runtime').JsonValue> {
+  const { resourceContents: _ignored, ...rest } = value
+  return rest
+}
+
+function bundledResourceText(value: Record<string, import('@cuti-ai/video-runtime').JsonValue>): string {
+  const resources = Array.isArray(value.resources) ? value.resources.map(item => String(item)) : []
+  return resources.length === 0 ? '' : `\n\nResources:\n${resources.join('\n')}`
+}
+
 function projectText(value: { projectId: string; currentVersionId: string; artifactCount: number; summary: string }): string {
   return `Video project ${value.projectId} at ${value.currentVersionId}: ${value.artifactCount} artifacts. ${value.summary}`
 }
@@ -154,29 +166,48 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_workflow_load',
-    description: 'Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec.',
+    description: 'Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec. Follow any video_skill_load names in those instructions.',
     parameters: { workflow_id: { type: 'string', required: true } },
     output: {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.title)}\nMode: ${String(value.mode)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n\n${String(value.instructions ?? '')}`,
+        text: `${String(value.title)}\nMode: ${String(value.mode)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n\n${String(value.instructions ?? '')}${bundledResourceText(value)}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadWorkflow(args.workflow_id, identityOf(exec.agent), exec.signal)
-      .then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
+      .then(value => withoutInjectedResources(value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'video_skill_load',
-    description: 'Load an explicitly activated non-workflow video Skill before applying it to VideoSpec or build steps.',
+    description: "Load one installed Skill's full Markdown instructions after it is selected, named by another Skill, or explicitly requested. Returns bundled resource paths; read those files with video_skill_read_resource when the instructions require them.",
     parameters: { skill_id: { type: 'string', required: true } },
     output: {
       schema: { type: 'object', additionalProperties: true },
-      render: (_args, value) => [{ type: 'text', text: `${value.id}\n${value.instructions}` }],
+      render: (_args, value) => [{
+        type: 'text',
+        text: `${String(value.id)}\n${String(value.instructions ?? '')}${bundledResourceText(value)}`,
+      }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadSkill(args.skill_id, identityOf(exec.agent), exec.signal)
-      .then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
+      .then(value => withoutInjectedResources(value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>)),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_skill_read_resource',
+    description: 'Read one bundled text file from an installed Skill when its instructions require that file.',
+    parameters: {
+      skill_id: { type: 'string', required: true },
+      path: { type: 'string', required: true },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: `${value.path}\n\n${value.content}` }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.loadSkillResource(
+      args.skill_id, args.path, identityOf(exec.agent), exec.signal,
+    ).then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
   }))
 
   ctx.tools.register(defineTool({

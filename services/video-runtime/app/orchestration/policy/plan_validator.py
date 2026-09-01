@@ -50,7 +50,7 @@ MEDIA_TERMS["keyframe"] += ("关键帧",)
 
 # Workflows whose spine is music — allow music.generate even when the latest
 # short confirmation message does not restate "配乐/歌曲".
-MUSIC_SPINE_WORKFLOWS = frozenset({"seedance-mv"})
+MUSIC_SPINE_WORKFLOWS = frozenset({"mv", "seedance-mv"})
 
 # Keep these source-safe because this module still contains legacy mojibake.
 # Explicit video deliverables must win over the type of an uploaded reference

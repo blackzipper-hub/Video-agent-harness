@@ -200,3 +200,9 @@ export interface SkillDetail {
   resources: string[]
   resourceContents: Array<{ path: string; content: string }>
 }
+
+export interface SkillResourceDetail {
+  id: string
+  path: string
+  content: string
+}

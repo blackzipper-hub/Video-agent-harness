@@ -137,6 +137,13 @@ def _model_family(model: str | None) -> str:
     raw = (model or "").strip().lower()
     if not raw or raw in {"ark", "wavespeed", "wavespeed-seedance-2"}:
         return "seedance_2"
+    if (
+        raw in {"h3", "minimax-h3", "minimax_h3", "minimax-h3-r2v"}
+        or "minimax/h3" in raw
+        or "h3/reference-to-video" in raw
+        or ("minimax" in raw and "h3" in raw)
+    ):
+        return "minimax_h3"
     if any(token in raw for token in ("2.5", "2-5", "seedance_2_5")):
         return "seedance_2_5"
     if any(token in raw for token in ("1.5", "1-5", "v1.5", "seedance-v1.5", "seedance_v1_5")):
@@ -412,12 +419,21 @@ async def _wavespeed_generate(
     i2v_requested = _is_i2v_mode(profile) or bool(explicit_start_image)
     start_image = explicit_start_image
     end_image = explicit_end_image
-    if i2v_requested and not start_image and images:
+    if family == "minimax_h3":
+        # Dest H3: 定妆/上一镜 are references, never a locked opening frame.
+        i2v_requested = False
+        start_image = None
+        end_image = None
+        if explicit_start_image and explicit_start_image not in images:
+            images.insert(0, explicit_start_image)
+        if explicit_end_image and explicit_end_image not in images:
+            images.append(explicit_end_image)
+    elif i2v_requested and not start_image and images:
         # Backward compatibility for legacy ``generation_mode=i2v`` calls.
         start_image = images.pop(0)
         if not end_image and images:
             end_image = images.pop(0)
-    if i2v_requested and not start_image:
+    if family != "minimax_h3" and i2v_requested and not start_image:
         raise ValueError(
             "image-to-video generation requires start_image_url (or a legacy first images entry)"
         )
@@ -442,7 +458,28 @@ async def _wavespeed_generate(
     request_id = str(profile.get("remote_operation_id") or "").strip() or None
     created_remote = request_id is None
     try:
-        if family == "seedance_2_5":
+        if family == "minimax_h3":
+            if not images and not videos:
+                raise ValueError(
+                    "MiniMax H3 reference-to-video requires at least one image or video"
+                )
+            request_id = request_id or await svc.create_minimax_h3_r2v_task(
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                reference_images=images or None,
+                reference_videos=videos or None,
+                reference_audios=audios or None,
+            )
+            if created_remote and on_remote_submitted:
+                await on_remote_submitted(request_id, "wavespeed")
+            result = await svc.poll_seedance_video_task_until_complete(
+                request_id, "", prompt, duration,
+                svc.normalize_h3_resolution(resolution), 0,
+                end_image=None, strip_audio=not generate_audio,
+            )
+        elif family == "seedance_2_5":
             if i2v_requested:
                 request_id = request_id or await svc.create_seedance_2_5_i2v_task(
                     image=start_image,
@@ -577,6 +614,8 @@ async def generate_video(
     provider_hint = str(profile.get("provider") or "ark")
     if not profile.get("provider") and str(profile.get("model") or "").startswith("doubao"):
         provider_hint = "ark"
+    if not profile.get("provider") and _model_family(str(profile.get("model") or "")) == "minimax_h3":
+        provider_hint = "wavespeed"
     provider = resolve_provider(provider_hint, fallbacks_json=fallbacks_json)
     logger.info(
         "api-provider-bridge: requested=%s resolved=%s model=%s",

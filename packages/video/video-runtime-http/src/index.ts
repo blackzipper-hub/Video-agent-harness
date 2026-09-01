@@ -21,6 +21,7 @@ import type {
   WorkflowSummary,
   WorkflowDetail,
   SkillDetail,
+  SkillResourceDetail,
 } from '@cuti-ai/video-runtime'
 
 export interface Config {
@@ -105,6 +106,11 @@ export class HttpVideoRuntime extends VideoRuntime {
 
   loadSkill(skillId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillDetail> {
     return this.request(`/api/video/skills/${encodeURIComponent(skillId)}`, identity, { signal })
+  }
+
+  loadSkillResource(skillId: string, path: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillResourceDetail> {
+    const query = new URLSearchParams({ path }).toString()
+    return this.request(`/api/video/skills/${encodeURIComponent(skillId)}/resources?${query}`, identity, { signal })
   }
 
   previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview> {

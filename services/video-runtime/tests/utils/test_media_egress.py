@@ -47,6 +47,32 @@ def test_rewrite_public_base_missing_env_returns_original(monkeypatch):
     assert me._rewrite_public_base(url) == url
 
 
+def test_local_path_for_finds_shared_disk_file(monkeypatch, tmp_path):
+    from app.utils.s3_utils import s3_utils
+
+    root = tmp_path / "media"
+    (root / "audios").mkdir(parents=True)
+    target = root / "audios" / "cut.mp3"
+    target.write_bytes(b"audio")
+    monkeypatch.setattr(s3_utils, "_local_dir", str(root), raising=False)
+    assert me._local_path_for("http://localhost:8001/files/audios/cut.mp3") == str(target.resolve())
+
+
+def test_local_path_for_missing_file_is_none(monkeypatch, tmp_path):
+    from app.utils.s3_utils import s3_utils
+
+    monkeypatch.setattr(s3_utils, "_local_dir", str(tmp_path), raising=False)
+    assert me._local_path_for("http://localhost:8001/files/audios/missing.mp3") is None
+
+
+def test_reachable_media_url_prefers_public_original():
+    stored = "http://localhost:8000/files/audios/suno.mp3"
+    original = "https://files.aimusicapi.ai/stems/clip.mp3"
+    assert me.reachable_media_url(stored, original) == original
+    assert me.reachable_media_url("https://cdn.example.com/a.mp3", original) == "https://cdn.example.com/a.mp3"
+    assert me.reachable_media_url("", original) == original
+
+
 # ----------------------- passthrough -----------------------
 
 @pytest.mark.parametrize("val", ["", None, "   ", "data:image/png;base64,AAAA"])
@@ -58,6 +84,19 @@ async def test_non_local_url_passthrough(monkeypatch):
     """_local_path_for 返回 None（对象存储/外部公网）→ 原样透传。"""
     monkeypatch.setattr(me, "_local_path_for", lambda u: None)
     url = "https://cdn.example.com/files/a.webp"
+    assert await me.resolve_outbound_media_url(url) == url
+
+
+async def test_loopback_files_url_without_disk_file_passthrough(monkeypatch):
+    """磁盘上没有这份文件时不 HTTP 再拉，原样透传。本地测靠 compose 共享盘命中 _local_path_for。"""
+    monkeypatch.setenv("MEDIA_EGRESS_MODE", "auto")
+    monkeypatch.setattr(me, "_local_path_for", lambda u: None)
+
+    async def boom(_path):
+        raise AssertionError("must not upload when the file is not on this disk")
+
+    monkeypatch.setattr(me, "_upload_to_wavespeed", boom)
+    url = "http://127.0.0.1:8001/files/cut.mp3"
     assert await me.resolve_outbound_media_url(url) == url
 
 
