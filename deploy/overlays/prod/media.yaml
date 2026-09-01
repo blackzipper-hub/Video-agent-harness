@@ -32,6 +32,14 @@ autoscaling:
 
 replicaCount: 1
 
+# Same packing as dest: live prod Media + vda-prod already fill both media nodes.
+# In-place replace until the media ASG can actually scale (currently OutOfResource).
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
 nodeSelector:
   workload: media-processing
 

@@ -30,6 +30,16 @@ autoscaling:
 
 replicaCount: 1
 
+# Two media-processing nodes are already full: live `dev`/`prod` Media (2 CPU)
+# plus vda-dev/vda-prod (1 CPU). ASG cannot add a third instance (OutOfResource).
+# Rolling with maxSurge: 1 therefore stays Pending and hits the progress deadline.
+# Replace in place so GitHub dest deploys do not wait on a new node.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
 nodeSelector:
   workload: media-processing
 
