@@ -74,6 +74,8 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         strict_start_step = parameters.pop("strict_start_frame_from_step", None)
         character_step = parameters.pop("character_reference_from_step", None)
         character_steps = parameters.pop("character_reference_from_steps", None) or []
+        reference_steps = parameters.pop("reference_from_steps", None) or []
+        audio_reference_step = parameters.pop("audio_reference_from_step", None)
         start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
         if start_artifact and start_artifact.uri:
             parameters.setdefault("start_image_url", start_artifact.uri)
@@ -88,6 +90,18 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         ]
         if character_urls:
             parameters.setdefault("image_urls", character_urls)
+        reference_urls = [
+            completed_by_step[str(step)].uri
+            for step in reference_steps
+            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+        ]
+        if reference_urls:
+            parameters.setdefault("reference_urls", reference_urls)
+            parameters.setdefault("image_urls", reference_urls)
+        audio_reference = completed_by_step.get(str(audio_reference_step or ""))
+        if audio_reference and audio_reference.uri:
+            parameters.setdefault("audio_url", audio_reference.uri)
+            parameters.setdefault("audio_urls", [audio_reference.uri])
         prompt = str(
             parameters.get("prompt")
             or metadata.get("rebuild_prompt")

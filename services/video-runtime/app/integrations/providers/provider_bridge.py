@@ -545,6 +545,8 @@ async def _wavespeed_generate(
             or getattr(result, "message", None)
             or "WaveSpeed generate failed"
         )
+        if request_id and "remote_task_id=" not in str(err):
+            err = f"{err}; remote_task_id={request_id}"
         raise _classify_wavespeed_failure(
             str(err),
             provider="wavespeed",

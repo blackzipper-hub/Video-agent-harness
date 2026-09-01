@@ -126,6 +126,7 @@ class VideoShotSpec(BaseModel):
     visual_prompt: str = Field(min_length=1)
     narration: str = ""
     character_ids: list[str] = Field(default_factory=list)
+    reference_asset_ids: list[str] = Field(default_factory=list)
     transition: str = "cut"
 
 
@@ -165,6 +166,8 @@ class VideoSpec(BaseModel):
     workflow_id: str = "cuti.seedance-story"
     style_id: str = "cuti.cinematic"
     activated_skill_ids: list[str] = Field(default_factory=list)
+    source_asset_ids: list[str] = Field(default_factory=list)
+    workflow_parameters: dict[str, Any] = Field(default_factory=dict)
     characters: list[VideoCharacterSpec] = Field(default_factory=list)
     shots: list[VideoShotSpec] = Field(min_length=1)
     audio: VideoAudioSpec = Field(default_factory=VideoAudioSpec)

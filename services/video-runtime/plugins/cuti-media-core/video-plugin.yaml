@@ -8,6 +8,10 @@ contributions:
     - runtime.artifact.persist
     - media.tts
     - media.extract_frame
+    - media.audio.analyze
+    - media.audio.trim
+    - media.probe
+    - media.transcribe
     - media.timeline.compose
     - media.concat
     - media.mix_audio

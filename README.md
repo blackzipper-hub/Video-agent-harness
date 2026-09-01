@@ -90,7 +90,7 @@ export OPENAI_API_KEY="your-openai-key"
 export VIDEO_AGENT_MODEL="gpt-5.6-terra"
 export VIDEO_RUNTIME_URL="http://127.0.0.1:8001"
 export VIDEO_RUNTIME_SERVICE_TOKEN="video-harness-runtime-local"
-pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
+pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
 ```
 
 On Windows PowerShell:
@@ -100,7 +100,7 @@ $env:OPENAI_API_KEY = "your-openai-key"
 $env:VIDEO_AGENT_MODEL = "gpt-5.6-terra"
 $env:VIDEO_RUNTIME_URL = "http://127.0.0.1:8001"
 $env:VIDEO_RUNTIME_SERVICE_TOKEN = "video-harness-runtime-local"
-pnpm dsh web --no-open --patch packages/bundle/video-agent/cordis.patch.yml
+pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
 ```
 
 Keep this terminal running. DeepSeek Harness listens at `http://127.0.0.1:3080` by default.

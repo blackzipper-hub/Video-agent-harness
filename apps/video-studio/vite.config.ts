@@ -103,14 +103,15 @@ export default defineConfig(({ mode, command }) => {
             });
           },
         },
-        // VideoChatAgent（Cuti-VideoChatAgent）：/chat-v1/* 含 /chat-v1/service；默认本地 9004，可用 VITE_VIDEOCHAT_URL 覆盖
+        // Migrated DeepSeek BFF is mounted by Video Runtime on port 8001.
+        // Legacy deployments can still override this with VITE_VIDEOCHAT_URL.
         '/chat-v1': {
-          target: (env.VITE_VIDEOCHAT_URL || 'http://127.0.0.1:9004').trim(),
+          target: (env.VITE_VIDEOCHAT_URL || 'http://127.0.0.1:8001').trim(),
           changeOrigin: true,
           secure: false,
         },
         '/api/video': {
-          target: (env.VITE_VIDEO_RUNTIME_URL || env.VITE_CUTI_BACKEND_URL || 'http://127.0.0.1:8000').trim(),
+          target: (env.VITE_VIDEO_RUNTIME_URL || env.VITE_CUTI_BACKEND_URL || 'http://127.0.0.1:8001').trim(),
           changeOrigin: true,
           secure: false,
         },

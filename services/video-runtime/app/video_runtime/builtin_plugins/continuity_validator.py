@@ -54,13 +54,16 @@ class ContinuityValidatorPlugin(BaseVideoPlugin):
             and os.getenv("VIDEO_CONTINUITY_LLM_ENABLED", "").lower() in {"1", "true", "yes"}
         ):
             parameters = artifact.metadata.get("generation_parameters") or {}
-            start_image_url = parameters.get("start_image_url")
-            if start_image_url:
+            image_urls = list(parameters.get("image_urls") or [])
+            continuity_image_url = parameters.get("start_image_url") or (
+                image_urls[0] if image_urls else None
+            )
+            if continuity_image_url:
                 from app.tools.video.video_consistency import check_video_consistency_llm
                 checked = await check_video_consistency_llm(
-                    str(start_image_url), str(artifact.uri),
+                    str(continuity_image_url), str(artifact.uri),
                     str(parameters.get("prompt") or ""),
-                    character_ref_image_urls=list(parameters.get("image_urls") or []),
+                    character_ref_image_urls=image_urls,
                 )
                 metadata = {"mode": "cuti-video-consistency", "result": checked.model_dump(mode="json")}
                 if not checked.passed:

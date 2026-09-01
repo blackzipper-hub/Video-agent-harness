@@ -415,6 +415,7 @@ class SkillCatalog:
         extra_metadata = values.get("metadata") or {}
         if not isinstance(extra_metadata, dict):
             raise ValueError(f"skill metadata must be a YAML object: {path}")
+        declared_kind = extra_metadata.get("kind")
         # Keep third-party Skill instructions byte-for-byte upstream compatible.
         # A Cuti-owned sidecar may classify and route the Skill without changing
         # its identity, trust level, instructions, or executable contract.
@@ -431,6 +432,22 @@ class SkillCatalog:
                     f".cuti-metadata.yaml metadata must be a YAML object: {path}"
                 )
             extra_metadata = _merge_metadata(extra_metadata, sidecar_metadata)
+            # A sidecar may enrich routing metadata, but executable Workflow
+            # identity must be declared by the installed SKILL.md itself. This
+            # prevents a prompt-only helper bundle from becoming a user-facing
+            # Workflow merely because a stale local adapter says so.
+            if (
+                sidecar_metadata.get("kind") == "workflow"
+                and declared_kind != "workflow"
+            ):
+                extra_metadata["kind"] = declared_kind or "helper"
+                extra_metadata.pop("workflow", None)
+                extra_metadata.pop("selectors", None)
+                extra_metadata.pop("hooks", None)
+                extra_metadata["roles"] = [
+                    role for role in extra_metadata.get("roles", [])
+                    if role not in {"workflow", "stage_supervisor"}
+                ] or ["guidance"]
         # Version is platform metadata, not prompt content. Preserve a top-level
         # declaration so project SkillLocks can reproduce the selected package.
         if "version" in values:

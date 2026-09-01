@@ -18,6 +18,9 @@ import type {
   RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  WorkflowSummary,
+  WorkflowDetail,
+  SkillDetail,
 } from '@cuti-ai/video-runtime'
 
 export interface Config {
@@ -90,6 +93,18 @@ export class HttpVideoRuntime extends VideoRuntime {
 
   inspectProject(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot> {
     return this.openProject(projectId, identity, signal)
+  }
+
+  listWorkflows(identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowSummary[]> {
+    return this.request('/api/video/workflows', identity, { signal })
+  }
+
+  loadWorkflow(workflowId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowDetail> {
+    return this.request(`/api/video/workflows/${encodeURIComponent(workflowId)}`, identity, { signal })
+  }
+
+  loadSkill(skillId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillDetail> {
+    return this.request(`/api/video/skills/${encodeURIComponent(skillId)}`, identity, { signal })
   }
 
   previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview> {

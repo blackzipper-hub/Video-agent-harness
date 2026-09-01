@@ -13,7 +13,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.video_runtime.api import set_runtime
-from app.video_runtime.deepseek_bff import _compat_event, router, set_deepseek_client, studio_router
+from app.video_runtime.deepseek_bff import (
+    _compat_event,
+    _sign_uploaded_file,
+    router,
+    set_deepseek_client,
+    studio_router,
+)
 from app.video_runtime.deepseek_client import DeepSeekHarnessError
 from app.video_runtime.runtime import VideoBuildRuntime
 from app.video_runtime.skills import VideoSkillRuntime
@@ -84,6 +90,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         set_deepseek_client(None)
 
     def test_old_v2_paths_drive_deepseek_session_and_video_project(self) -> None:
+        uploaded_url = "https://example.test/hero.png"
         created = self.client.post(
             "/chat-v1/service/v2/runs",
             json={
@@ -95,7 +102,13 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                     "resolution": "720p",
                     "video_generation_tool": "seedance_2_i2v",
                 },
-                "input_files": [{"type": "image", "url": "https://example.test/hero.png"}],
+                "input_files": [{
+                    "type": "image",
+                    "url": uploaded_url,
+                    "metadata": {
+                        "upload_receipt": _sign_uploaded_file("local-user", "image", uploaded_url),
+                    },
+                }],
             },
         )
         self.assertEqual(created.status_code, 200)
@@ -105,9 +118,13 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         prompt = self.deepseek.prompts[0][1]
         self.assertIn("video_project_plan", prompt)
         self.assertIn("video_project_build", prompt)
+        self.assertIn("video_workflow_list", prompt)
+        self.assertIn("video_workflow_load", prompt)
+        self.assertNotIn("Set VideoSpec.workflow_id exactly to \"cuti.seedance-story\"", prompt)
         self.assertIn("Do not create another project", prompt)
         self.assertIn('"duration": 15', prompt)
-        self.assertIn("https://example.test/hero.png", prompt)
+        self.assertNotIn(uploaded_url, prompt)
+        self.assertIn("source:", prompt)
 
         snapshot = self.client.get(
             f"/chat-v1/service/v2/runs/{run['id']}",
@@ -191,7 +208,8 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             },
         ).json()["data"]
         prompt = self.deepseek.prompts[-1][1]
-        self.assertIn('VideoSpec.workflow_id exactly to "product-ad-video"', prompt)
+        self.assertIn('"product-ad-video"', prompt)
+        self.assertIn("Call video_workflow_load", prompt)
         self.assertIn('VideoSpec.activated_skill_ids exactly to ["character-director"]', prompt)
         self.assertNotIn("$product-ad-video", prompt)
 
@@ -233,16 +251,46 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         run = created.json()["data"]
         self.assertEqual(run["workflow_id"], "seedance2")
         prompt = self.deepseek.prompts[-1][1]
-        self.assertIn('VideoSpec.workflow_id exactly to "seedance2"', prompt)
-        self.assertIn("BEGIN seedance2/SKILL.md", prompt)
-        self.assertIn("你不是模板填充器", prompt)
-        self.assertIn("BEGIN seedance2/reference.md", prompt)
-        self.assertNotIn("do not infer Skill activation from '$' text", prompt)
+        self.assertIn('"seedance2"', prompt)
+        self.assertIn("Call video_workflow_load", prompt)
+        self.assertNotIn("BEGIN seedance2/SKILL.md", prompt)
 
         snapshot = self.client.get(
             f"/chat-v1/service/v2/runs/{run['id']}",
         ).json()["data"]
         self.assertEqual(snapshot["run"]["workflow_id"], "seedance2")
+
+    def test_workflow_selection_priority_and_unavailable_rejection(self) -> None:
+        explicit = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "$seedance2 make a product spot",
+                "idempotency_key": "workflow-priority-1",
+                "workflow_id": "product-ad-video",
+            },
+        )
+        self.assertEqual(explicit.status_code, 200, explicit.text)
+        self.assertEqual(explicit.json()["data"]["workflow_id"], "product-ad-video")
+
+        unavailable = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Use the Ink Press template",
+                "idempotency_key": "workflow-unavailable-1",
+                "workflow_id": "ink-press-product-workflow",
+            },
+        )
+        self.assertEqual(unavailable.status_code, 409, unavailable.text)
+        self.assertIn("unavailable", unavailable.json()["detail"].lower())
+
+        ambiguous = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "$seedance2 or $workflow-direct-video",
+                "idempotency_key": "workflow-ambiguous-1",
+            },
+        )
+        self.assertEqual(ambiguous.status_code, 422, ambiguous.text)
 
     def test_empty_project_follow_up_reapplies_create_contract(self) -> None:
         created = self.client.post(

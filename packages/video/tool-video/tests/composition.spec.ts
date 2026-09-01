@@ -10,6 +10,7 @@ import type {
   ChangePreviewRequest, ExportRequest, ExportResult, ProjectSnapshot, RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  WorkflowSummary, WorkflowDetail, SkillDetail,
 } from '@cuti-ai/video-runtime'
 import * as videoTools from '../src/index.ts'
 
@@ -22,6 +23,11 @@ class FakeVideoRuntime extends VideoRuntime {
   createProject(_request: CreateProjectRequest, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
   openProject(_id: string, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
   inspectProject(_id: string, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
+  listWorkflows(): Promise<WorkflowSummary[]> { return Promise.resolve([]) }
+  loadWorkflow(workflowId: string): Promise<WorkflowDetail> {
+    return Promise.resolve({ id: workflowId, title: workflowId, description: '', mode: 'test', available: true, requiredCapabilities: [], missingCapabilities: [], userSelectable: true, executionKind: 'adapter', entrypoints: [], parameters: {}, pipeline: [], skillDependencies: [], instructions: '', resources: [], resourceContents: [] })
+  }
+  loadSkill(skillId: string): Promise<SkillDetail> { return Promise.resolve({ id: skillId, description: '', kind: 'helper', instructions: '', resources: [], resourceContents: [] }) }
   previewChange(request: ChangePreviewRequest): Promise<ChangePreview> {
     return Promise.resolve({ planId: 'plan-1', projectId: request.projectId, baseProjectVersionId: 'version-1', staleArtifactIds: [], validationArtifactIds: [], reusedArtifactIds: [], rebuildOrder: [], estimatedCost: 0 })
   }
@@ -58,6 +64,7 @@ describe('video tool composition', () => {
     await ctx.plugin(videoTools)
 
     const names = [
+      'video_workflow_list', 'video_workflow_load', 'video_skill_load',
       'video_project_create', 'video_project_plan', 'video_project_build',
       'video_project_open', 'video_project_inspect', 'video_change_preview', 'video_edit_preview', 'video_rebuild_apply',
       'video_build_status', 'video_build_cancel', 'video_artifact_select', 'video_export',

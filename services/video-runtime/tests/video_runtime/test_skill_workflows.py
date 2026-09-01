@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.video_runtime.api import router, set_runtime
-from app.video_runtime.models import VideoSpec
+from app.video_runtime.models import MediaArtifactVersion, VideoSpec
 from app.video_runtime.plugins import PluginContext, VideoPluginRegistry
 from app.video_runtime.runtime import VideoBuildRuntime
 from app.video_runtime.skill_workflows import load_workflow_skills
@@ -48,6 +48,20 @@ def _video_spec(workflow_id: str) -> VideoSpec:
             },
         ],
     })
+
+
+async def _add_product_source(
+    runtime: VideoBuildRuntime,
+    project_id: str,
+) -> MediaArtifactVersion:
+    return await runtime.add_artifact(MediaArtifactVersion(
+        artifact_id=f"{project_id}:source:product",
+        project_id=project_id,
+        type="source_image",
+        uri="https://example.test/product.png",
+        title="Product source image",
+        provenance={"source": "test_upload"},
+    ))
 
 
 class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
@@ -207,10 +221,14 @@ instructions
             user_id="user-1",
             title="Product film",
         )
+        source = await _add_product_source(runtime, project.id)
+        project = await runtime.repo.get_project(project.id)
         plan = await runtime.plan_project(
             project_id=project.id,
-            base_project_version_id=version.id,
-            video_spec=_video_spec("product-ad-video"),
+            base_project_version_id=project.current_version_id,
+            video_spec=_video_spec("product-ad-video").model_copy(
+                update={"source_asset_ids": [source.artifact_id]},
+            ),
             idempotency_key="product-plan",
         )
         video = next(
@@ -233,6 +251,7 @@ instructions
             user_id="user-1",
             title="Locked direction",
         )
+        source = await _add_product_source(runtime, project.id)
         lock = await runtime.set_project_skill_enabled(
             project_id=project.id,
             skill_id="character-director",
@@ -243,15 +262,41 @@ instructions
 
         plan = await runtime.plan_project(
             project_id=project.id,
-            base_project_version_id=version.id,
-            video_spec=_video_spec("product-ad-video"),
+            base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
+            video_spec=_video_spec("product-ad-video").model_copy(
+                update={"source_asset_ids": [source.artifact_id]},
+            ),
             idempotency_key="locked-skill-plan",
         )
         persisted = await runtime.list_project_skill_locks(project.id)
-        self.assertEqual([item.skill_id for item in persisted], ["character-director"])
+        self.assertEqual(
+            [item.skill_id for item in persisted],
+            ["character-director", "product-ad-video"],
+        )
         character_step = next(item for item in plan.items if item.step_id == "characters")
         resolved = {item.skill_id: item for item in character_step.resolved_skills}
         self.assertEqual(resolved["character-director"].source, "project_lock")
+
+        continued = await runtime.plan_project(
+            project_id=project.id,
+            base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
+            video_spec=_video_spec("cuti.seedance-story").model_copy(
+                update={"source_asset_ids": [source.artifact_id]},
+            ),
+            idempotency_key="locked-workflow-continued",
+        )
+        self.assertEqual(continued.workflow_id, "product-ad-video")
+
+        switched = await runtime.plan_project(
+            project_id=project.id,
+            base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
+            video_spec=_video_spec("seedance2"),
+            idempotency_key="explicit-workflow-switch",
+        )
+        self.assertEqual(switched.workflow_id, "seedance2")
+        locks = {item.skill_id: item.enabled for item in await runtime.list_project_skill_locks(project.id)}
+        self.assertFalse(locks["product-ad-video"])
+        self.assertTrue(locks["seedance2"])
 
 
 class SkillWorkflowApiTest(unittest.TestCase):
@@ -277,3 +322,31 @@ class SkillWorkflowApiTest(unittest.TestCase):
             workflows["workflow-keyframe-pipeline"]["source"],
             "skill",
         )
+        self.assertFalse(workflows["open-montage"]["available"])
+        self.assertEqual(
+            workflows["open-montage"]["missingCapabilities"],
+            ["open_montage.tool.invoke"],
+        )
+        with TestClient(app) as client:
+            detail = client.get(
+                "/api/video/workflows/seedance2",
+                headers={"X-Video-User-Id": "user-1"},
+            ).json()["data"]
+        self.assertIn("你不是模板填充器", detail["instructions"])
+        resources = {item["path"]: item["content"] for item in detail["resourceContents"]}
+        self.assertIn("reference.md", resources)
+
+        with TestClient(app) as client:
+            helper_response = client.get(
+                "/api/video/skills/seedance-20",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+        self.assertEqual(helper_response.status_code, 200, helper_response.text)
+        helper = helper_response.json()["data"]
+        self.assertEqual(helper["kind"], "helper")
+        self.assertGreater(len(helper["resources"]), len(helper["resourceContents"]))
+        self.assertTrue(all(isinstance(item["content"], str) for item in helper["resourceContents"]))
+
+        catalog = {item["name"]: item for item in skills.prompt_view()}
+        self.assertEqual(catalog["seedance2"]["kind"], "workflow")
+        self.assertEqual(catalog["seedance-20"]["kind"], "helper")

@@ -30,6 +30,7 @@ export interface VideoShotSpec {
   visual_prompt: string
   narration?: string
   character_ids?: string[]
+  reference_asset_ids?: string[]
   transition?: string
 }
 
@@ -43,6 +44,8 @@ export interface VideoSpec {
   workflow_id: string
   style_id: string
   activated_skill_ids?: string[]
+  source_asset_ids?: string[]
+  workflow_parameters?: Record<string, JsonValue>
   characters: VideoCharacterSpec[]
   shots: VideoShotSpec[]
   audio: { narration_voice: string; bgm_prompt: string; subtitles: boolean }
@@ -164,4 +167,36 @@ export interface ExportResult {
 export interface RequestIdentity {
   sessionId?: string
   userId?: string
+}
+
+export interface WorkflowSummary {
+  id: string
+  title: string
+  description: string
+  mode: string
+  available: boolean
+  unavailableReason?: string
+  requiredCapabilities: string[]
+  missingCapabilities: string[]
+  userSelectable: boolean
+  executionKind: string
+  entrypoints: string[]
+}
+
+export interface WorkflowDetail extends WorkflowSummary {
+  parameters: Record<string, JsonValue>
+  pipeline: string[]
+  skillDependencies: string[]
+  instructions: string
+  resources: string[]
+  resourceContents: Array<{ path: string; content: string }>
+}
+
+export interface SkillDetail {
+  id: string
+  description: string
+  kind: string
+  instructions: string
+  resources: string[]
+  resourceContents: Array<{ path: string; content: string }>
 }

@@ -146,6 +146,7 @@ class SeedanceStoryWorkflow:
                 parameters={
                     "prompt": spec.audio.bgm_prompt,
                     "duration": spec.target_duration_seconds,
+                    "target_duration": spec.target_duration_seconds,
                     "model": spec.providers.music,
                 },
                 depends_on=[spec_step], cost=0.10,

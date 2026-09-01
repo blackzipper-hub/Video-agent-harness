@@ -103,6 +103,10 @@ class MediaCorePlugin(BaseVideoPlugin):
         "runtime.artifact.persist",
         "media.tts",
         "media.extract_frame",
+        "media.audio.analyze",
+        "media.audio.trim",
+        "media.probe",
+        "media.transcribe",
         "media.timeline.compose",
         "media.concat",
         "media.mix_audio",
@@ -160,6 +164,63 @@ class MediaCorePlugin(BaseVideoPlugin):
                 "position": parameters.get("position", "last"),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
+        elif capability == "media.audio.analyze":
+            from app.chat.v2.host_gateway import HostGateway
+            source = self._required(completed, parameters.get("audio_step"))
+            result = await HostGateway().media_audio_analyze({
+                "audio_url": source.uri,
+                "target_duration_sec": parameters.get("target_duration_sec"),
+                "start_sec": parameters.get("start_sec"),
+                "end_sec": parameters.get("end_sec"),
+                "max_segment_sec": parameters.get("max_segment_sec", 15),
+                "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
+            })
+        elif capability == "media.audio.trim":
+            from app.chat.v2.host_gateway import HostGateway
+            source = self._required(completed, parameters.get("audio_step"))
+            start = parameters.get("start", parameters.get("start_sec"))
+            duration = parameters.get("duration", parameters.get("duration_sec"))
+            analysis_step = parameters.get("analysis_step")
+            if analysis_step:
+                analysis = completed.get(str(analysis_step))
+                if analysis is None:
+                    raise ValueError(f"required media output is unavailable: {analysis_step}")
+                segments = analysis.metadata.get("segments") or []
+                index = int(parameters.get("segment_index") or 0)
+                if index >= len(segments):
+                    raise ValueError(f"audio analysis has no segment {index}")
+                segment = segments[index]
+                start = segment.get("start_sec", segment.get("start"))
+                duration = segment.get("duration_sec", segment.get("duration"))
+            result = await HostGateway().media_audio_trim({
+                "audio_url": source.uri,
+                "start": start or 0,
+                "duration": duration,
+                **{
+                    key: parameters[key]
+                    for key in ("fade_in_sec", "fade_out_sec")
+                    if key in parameters
+                },
+                "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
+            })
+        elif capability == "media.probe":
+            from app.utils import media_service_client as msc
+            source = self._required(completed, parameters.get("media_step"))
+            media_type = str(parameters.get("media_type") or "video")
+            result = (
+                await msc.audio_info(str(source.uri))
+                if media_type == "audio"
+                else await msc.video_info(str(source.uri))
+            )
+        elif capability == "media.transcribe":
+            from app.services.subtitle_transcription_service import transcribe_video
+            source = self._required(completed, parameters.get("video_step"))
+            result = await transcribe_video(
+                str(source.uri),
+                run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
+                language=parameters.get("language"),
+                model=parameters.get("model"),
+            )
         elif capability == "media.timeline.compose":
             items, cursor = [], 0.0
             for shot, source_step in zip(
@@ -194,8 +255,15 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability == "media.subtitle.compose":
             from app.utils import media_service_client as msc
+            cues = parameters.get("cues", [])
+            transcription_step = parameters.get("transcription_step")
+            if transcription_step:
+                transcription = completed.get(str(transcription_step))
+                if transcription is None:
+                    raise ValueError(f"required media output is unavailable: {transcription_step}")
+                cues = transcription.metadata.get("segments") or []
             result = await msc.subtitle_compose(
-                parameters.get("cues", []),
+                cues,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 subtitle_format=str(parameters.get("format") or "srt"),
             )

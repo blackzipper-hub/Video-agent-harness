@@ -673,9 +673,25 @@ class VideoBuildRuntime:
             from .repository import ProjectVersionConflict
             raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
         video_spec = await self._apply_project_skill_locks(project_id, video_spec)
+        current_artifacts = await self.repo.current_artifacts(project_id)
+        source_by_logical_id = {item.artifact_id: item for item in current_artifacts}
+        referenced_source_ids = {
+            *video_spec.source_asset_ids,
+            *(asset_id for shot in video_spec.shots for asset_id in shot.reference_asset_ids),
+        }
+        missing_source_ids = sorted(referenced_source_ids - set(source_by_logical_id))
+        if missing_source_ids:
+            raise LookupError(
+                "VideoSpec references project source assets that do not exist: "
+                + ", ".join(missing_source_ids)
+            )
         context = PluginContext(project_id=project_id, values={
             "video_spec": video_spec,
             "base_project_version_id": base_project_version_id,
+            "source_artifacts": {
+                key: value for key, value in source_by_logical_id.items()
+                if key in referenced_source_ids
+            },
         })
         for loaded in self.plugins.loaded:
             await loaded.implementation.before_plan(context)
@@ -684,7 +700,16 @@ class VideoBuildRuntime:
             plan = await loaded.implementation.after_plan(context, plan)
         topological_steps(plan.items)
         await self._resolve_plan_skills(plan)
-        return await self.repo.save_plan(plan, idempotency_key)
+        saved = await self.repo.save_plan(plan, idempotency_key)
+        if self.skills.catalog.has(saved.workflow_id):
+            metadata = self.skills.catalog.load(saved.workflow_id).metadata
+            if (metadata.metadata or {}).get("kind") == "workflow":
+                await self.set_project_skill_enabled(
+                    project_id=project_id,
+                    skill_id=saved.workflow_id,
+                    enabled=True,
+                )
+        return saved
 
     async def _compile_workflow_plan(
         self,
@@ -1109,6 +1134,11 @@ class VideoBuildRuntime:
                 completed[item.plan_step_id] = await self.repo.get_artifact(
                     build.project_id, item.result_artifact_version_id,
                 )
+        for planned in ordered:
+            if planned.action == "reuse" and planned.artifact_version_id:
+                completed[planned.step_id] = await self.repo.get_artifact(
+                    build.project_id, planned.artifact_version_id,
+                )
 
         build.status = "running"
         build.message = "Executing initial video build"
@@ -1139,6 +1169,10 @@ class VideoBuildRuntime:
                 state.completed_at = now()
                 await self.repo.update_build_step(state)
             elif planned.action == "reuse":
+                if planned.artifact_version_id:
+                    completed[planned.step_id] = await self.repo.get_artifact(
+                        build.project_id, planned.artifact_version_id,
+                    )
                 state.status = "completed"
                 state.completed_at = now()
                 await self.repo.update_build_step(state)

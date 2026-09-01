@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from collections.abc import AsyncIterator
 from typing import Annotated, Literal
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -305,11 +307,7 @@ async def list_plugins(
     ]}
 
 
-@router.get("/workflows")
-async def list_workflows(
-    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
-    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
-) -> dict:
+def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
     workflows: list[dict] = []
     for loaded in build_runtime.plugins.loaded:
         describe = getattr(loaded.implementation, "describe_workflows", None)
@@ -327,8 +325,112 @@ async def list_workflows(
             "skillDependencies": list(loaded.manifest.skills),
             "source": "plugin",
             "pluginId": loaded.manifest.id,
+            "available": True,
+            "unavailableReason": None,
+            "requiredCapabilities": [],
+            "missingCapabilities": [],
+            "userSelectable": True,
+            "executionKind": "plugin",
         } for workflow_id in loaded.manifest.contributions.workflows)
-    return {"data": sorted(workflows, key=lambda item: item["id"])}
+    for item in workflows:
+        if build_runtime.skills.catalog.has(item["id"]):
+            metadata = build_runtime.skills.catalog.load(item["id"]).metadata
+            item["description"] = metadata.description
+        else:
+            item.setdefault("description", item["title"])
+    return sorted(workflows, key=lambda item: item["id"])
+
+
+def _skill_resources(
+    build_runtime: VideoBuildRuntime,
+    skill_id: str,
+) -> tuple[list[str], list[dict]]:
+    resources = build_runtime.skills.catalog.list_resources(skill_id)
+    instructions = build_runtime.skills.catalog.load(skill_id).instructions
+    resource_set = set(resources)
+    # A large Skill bundle can contain fonts, screenshots, tests, and hundreds
+    # of unrelated documents.  Load only files linked directly by SKILL.md;
+    # return the complete resource inventory separately for audit/discovery.
+    linked: list[str] = []
+    for target in re.findall(r"\]\(([^)]+)\)", instructions):
+        parsed = urlsplit(target.strip().strip("<>"))
+        if parsed.scheme or parsed.netloc:
+            continue
+        path = unquote(parsed.path).removeprefix("./")
+        if path in resource_set and path not in linked:
+            linked.append(path)
+    readable: list[dict] = []
+    remaining_bytes = 64 * 1024
+    for path in linked:
+        try:
+            content = build_runtime.skills.catalog.read_resource(
+                skill_id, path, max_bytes=32 * 1024,
+            )
+        except ValueError:
+            # Images, archives, fonts, and other binary assets remain visible
+            # in the manifest but must never be injected into the LLM context
+            # as if they were UTF-8 instructions.
+            continue
+        encoded_size = len(content.encode("utf-8"))
+        if encoded_size > remaining_bytes:
+            continue
+        readable.append({"path": path, "content": content})
+        remaining_bytes -= encoded_size
+    return resources, readable
+
+
+@router.get("/workflows")
+async def list_workflows(
+    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    return {"data": _workflow_views(build_runtime)}
+
+
+@router.get("/workflows/{workflow_id}")
+async def get_workflow(
+    workflow_id: str,
+    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    view = next((item for item in _workflow_views(build_runtime) if item["id"] == workflow_id), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    instructions = ""
+    resources: list[str] = []
+    if build_runtime.skills.catalog.has(workflow_id):
+        loaded = build_runtime.skills.catalog.load(workflow_id)
+        instructions = loaded.instructions
+        resources, resource_contents = _skill_resources(build_runtime, workflow_id)
+    else:
+        resource_contents = []
+    return {"data": {
+        **view,
+        "instructions": instructions,
+        "resources": resources,
+        "resourceContents": resource_contents,
+    }}
+
+
+@router.get("/skills/{skill_id}")
+async def get_skill(
+    skill_id: str,
+    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    if not build_runtime.skills.catalog.has(skill_id):
+        raise HTTPException(status_code=404, detail="skill not found")
+    loaded = build_runtime.skills.catalog.load(skill_id)
+    raw = dict(loaded.metadata.metadata or {})
+    resources, resource_contents = _skill_resources(build_runtime, skill_id)
+    return {"data": {
+        "id": skill_id,
+        "description": loaded.metadata.description,
+        "kind": str(raw.get("kind") or "helper"),
+        "instructions": loaded.instructions,
+        "resources": resources,
+        "resourceContents": resource_contents,
+    }}
 
 
 @router.post("/plugins/{plugin_id}/enable")

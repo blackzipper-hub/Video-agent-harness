@@ -17,6 +17,19 @@ from app.chat.config import get_settings
 from .models import AgentRun, ArtifactVersion, Task
 
 
+_IMAGE_ARTIFACT_TYPES = {
+    "image", "source_image", "keyframe", "character", "character_reference",
+    "product_setting", "continuity_frame",
+}
+_AUDIO_ARTIFACT_TYPES = {
+    "audio", "source_audio", "music", "audio_bgm", "audio_narration",
+    "audio_segment",
+}
+_VIDEO_ARTIFACT_TYPES = {
+    "video", "source_video", "video_clip", "video_segment", "final_video",
+}
+
+
 def _final_prompt(task: Task) -> str:
     prompt = task.parameters.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
@@ -99,7 +112,7 @@ def _selected_continuity_frame(selected: list[ArtifactVersion]) -> str | None:
     a continuation frame separate from character/scene reference sheets.
     """
     for item in reversed(selected):
-        if item.type not in {"image", "keyframe"}:
+        if item.type not in _IMAGE_ARTIFACT_TYPES:
             continue
         metadata = item.metadata if isinstance(item.metadata, dict) else {}
         role = str(metadata.get("artifact_role") or "").strip().lower()
@@ -143,15 +156,18 @@ def _atomic_input_images(
     not first materialize them as artifacts.
     """
     images: list[str] = []
-    for key in ("images", "reference_images", "input_image_urls"):
+    for key in (
+        "images", "image_urls", "reference_images", "reference_urls",
+        "input_image_urls",
+    ):
         images = _merge_urls(
             _resolve_artifact_media_values(
-                params.get(key), selected, {"image", "keyframe", "character"},
+                params.get(key), selected, _IMAGE_ARTIFACT_TYPES,
             ),
             images,
         )
     images = _merge_urls(
-        _selected_urls(selected, {"image", "keyframe", "character"}), images,
+        _selected_urls(selected, _IMAGE_ARTIFACT_TYPES), images,
     )
     images = _merge_urls(
         [
@@ -324,7 +340,7 @@ async def execute_atomic(
         profile = dict(params)
         profile["prompt"] = prompt
         profile["idempotency_key"] = idempotency_key
-        selected_images = _selected_urls(selected, {"image", "keyframe", "character"})
+        selected_images = _selected_urls(selected, _IMAGE_ARTIFACT_TYPES)
         start_image = _resolve_artifact_media_value(
             _first_url(
                 profile,
@@ -335,7 +351,7 @@ async def execute_atomic(
                 "continuity_frame_url",
             ),
             selected,
-            {"image", "keyframe", "character"},
+            _IMAGE_ARTIFACT_TYPES,
         ) or _selected_continuity_frame(selected)
         end_image = _resolve_artifact_media_value(
             _first_url(
@@ -346,7 +362,7 @@ async def execute_atomic(
                 "last_image",
             ),
             selected,
-            {"image", "keyframe", "character"},
+            _IMAGE_ARTIFACT_TYPES,
         )
         if start_image:
             # An explicit continuity frame has stronger semantics than a
@@ -360,21 +376,26 @@ async def execute_atomic(
             url for url in _merge_urls(
                 _resolve_artifact_media_values(
                     profile.get("images"), selected,
-                    {"image", "keyframe", "character"},
+                    _IMAGE_ARTIFACT_TYPES,
                 ),
                 selected_images,
             )
             if url not in excluded_frames
         ]
         profile["videos"] = _merge_urls(
-            _resolve_artifact_media_values(profile.get("videos"), selected, {"video"}),
-            _selected_urls(selected, {"video"}),
+            _resolve_artifact_media_values(
+                profile.get("videos"), selected, _VIDEO_ARTIFACT_TYPES,
+            ),
+            _selected_urls(selected, _VIDEO_ARTIFACT_TYPES),
         )
+        explicit_audios = profile.get("audios") or profile.get("audio_urls") or []
+        if profile.get("audio_url"):
+            explicit_audios = [*explicit_audios, profile["audio_url"]]
         profile["audios"] = _merge_urls(
             _resolve_artifact_media_values(
-                profile.get("audios"), selected, {"audio", "music"},
+                explicit_audios, selected, _AUDIO_ARTIFACT_TYPES,
             ),
-            _selected_urls(selected, {"audio", "music"}),
+            _selected_urls(selected, _AUDIO_ARTIFACT_TYPES),
         )
         result = await generate_video(profile, on_remote_submitted=on_remote_submitted)
         uri = result.get("video_url") or result.get("uri")

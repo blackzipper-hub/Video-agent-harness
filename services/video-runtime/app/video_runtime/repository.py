@@ -414,8 +414,9 @@ class InMemoryVideoProjectRepository:
             self._assert_version(project, build.base_project_version_id)
             if any(not item.passed for item in validation_results):
                 raise ValueError("all initial build validations must pass before commit")
-            selections: dict[str, str] = {}
-            timeline_id = None
+            current = self.versions[project.current_version_id]
+            selections: dict[str, str] = dict(current.selections)
+            timeline_id = current.timeline_version_id
             for artifact in artifacts:
                 stored = self.artifacts[project.id].get(artifact.id)
                 if stored is None:

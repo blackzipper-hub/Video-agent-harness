@@ -16,6 +16,9 @@ import type {
   RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  WorkflowSummary,
+  WorkflowDetail,
+  SkillDetail,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -35,6 +38,9 @@ export abstract class VideoRuntime extends Service {
   abstract openProject(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>
   abstract createProject(request: CreateProjectRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>
   abstract inspectProject(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>
+  abstract listWorkflows(identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowSummary[]>
+  abstract loadWorkflow(workflowId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowDetail>
+  abstract loadSkill(skillId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillDetail>
   abstract previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview>
   abstract previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract planProject(request: BuildPlanRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>

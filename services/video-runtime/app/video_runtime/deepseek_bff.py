@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -16,13 +20,9 @@ from pydantic import BaseModel, Field
 from .api import get_runtime
 from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
-from app.chat.v2.workflows import parse_explicit_skill_names
-from app.chat.v2.skill_install import (
-    MAX_BUNDLE_BYTES,
-    SkillInstallError,
-    extract_skill_archive,
-    install_skill_directory,
-)
+from .models import MediaArtifactVersion
+from .workflow_plans import SUPPORTED_WORKFLOW_MODES, UNAVAILABLE_WORKFLOW_MODES
+from app.chat.utils.file_utils import process_uploaded_files
 
 
 router = APIRouter(prefix="/v2", tags=["deepseek-compatibility-bff"])
@@ -81,6 +81,62 @@ class StudioSkillEnableBody(BaseModel):
 
 def success(data: Any) -> dict[str, Any]:
     return {"code": 0, "message": "success", "data": data}
+
+
+def _sign_uploaded_file(user_id: str, kind: str, url: str) -> str:
+    secret = os.getenv("VIDEO_CAPABILITY_GRANT_SECRET", "local-video-upload-receipt-secret-32b").encode()
+    return hmac.new(secret, f"{user_id}\n{kind}\n{url}".encode(), hashlib.sha256).hexdigest()
+
+
+def _prompt_input_files(input_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose project Artifact identities to the model without storage URLs or receipts."""
+    return [{
+        "artifact_id": item.get("artifact_id"),
+        "type": item.get("type"),
+        "filename": item.get("filename"),
+    } for item in input_files]
+
+
+async def _import_input_files(
+    runtime: VideoBuildRuntime,
+    project_id: str,
+    user_id: str,
+    input_files: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Commit verified uploads as project-owned immutable source artifacts."""
+    current = {item.artifact_id: item for item in await runtime.repo.current_artifacts(project_id)}
+    imported: list[dict[str, Any]] = []
+    for item in input_files:
+        kind = str(item.get("type") or "").strip().lower()
+        url = str(item.get("url") or "").strip()
+        metadata = dict(item.get("metadata") or {})
+        receipt = str(metadata.get("upload_receipt") or "")
+        if kind not in {"image", "audio", "video"} or not url:
+            raise HTTPException(status_code=422, detail="Uploaded media has an invalid type or URL")
+        if not hmac.compare_digest(receipt, _sign_uploaded_file(user_id, kind, url)):
+            raise HTTPException(status_code=422, detail="Uploaded media receipt is missing or invalid")
+        logical_id = str(metadata.get("artifact_id") or f"source:{hashlib.sha256(url.encode()).hexdigest()[:24]}")
+        artifact = current.get(logical_id)
+        if artifact is None:
+            artifact = await runtime.repo.add_artifact(MediaArtifactVersion(
+                artifact_id=logical_id,
+                project_id=project_id,
+                type=f"source_{kind}",
+                uri=url,
+                title=str(item.get("filename") or f"Uploaded {kind}"),
+                summary="Project-owned uploaded source media",
+                content_digest=hashlib.sha256(url.encode()).hexdigest(),
+                provider_id="cuti-upload",
+                provenance={"uploaded_by": user_id},
+                metadata={**metadata, "media_type": kind, "source": "upload"},
+            ))
+            current[logical_id] = artifact
+        imported.append({
+            **item,
+            "artifact_id": logical_id,
+            "metadata": {**metadata, "artifact_id": logical_id},
+        })
+    return imported
 
 
 async def _project_and_binding(
@@ -177,41 +233,52 @@ _RUN_CONTEXT_KEY = "initial"
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
 
 
-def _requested_workflow_id(requested: str | None, text: str) -> str | None:
-    """Restore the original Cuti `$seedance2` activation syntax."""
-    if requested:
-        return requested
-    return "seedance2" if "seedance2" in parse_explicit_skill_names(text) else None
+_EXPLICIT_SKILL = re.compile(r"(?<![A-Za-z0-9_-])[$/]([A-Za-z0-9][A-Za-z0-9_-]{0,63})")
 
 
-def _seedance2_planning_context(
+def _requested_skill_selection(
     runtime: VideoBuildRuntime,
-    workflow_id: str | None,
-) -> str:
-    """Load the original Cuti instructions for DeepSeek's sole planning loop."""
-    if workflow_id != "seedance2":
-        return ""
-    loaded = runtime.skills.catalog.load("seedance2")
-    sections = [
-        "The following original Cuti workflow instructions are authoritative for creative planning.",
-        "Apply their creative decisions while expressing the executable result as VideoSpec. "
-        "The Video Runtime, not the model, performs provider calls, persistence, tail-frame "
-        "chaining, concatenation, recovery, and audit.",
-        "--- BEGIN seedance2/SKILL.md ---",
-        loaded.instructions.strip(),
-        "--- END seedance2/SKILL.md ---",
+    requested_workflow: str | None,
+    requested_activated: list[str],
+    text: str,
+) -> tuple[str | None, list[str]]:
+    """Resolve explicit UI and `$skill` choices from the unified Runtime catalog."""
+    explicit = [
+        match.group(1) for match in _EXPLICIT_SKILL.finditer(text)
+        if runtime.skills.catalog.has(match.group(1))
     ]
-    try:
-        reference = runtime.skills.catalog.read_resource("seedance2", "reference.md")
-    except (LookupError, OSError):
-        reference = ""
-    if reference.strip():
-        sections.extend([
-            "--- BEGIN seedance2/reference.md ---",
-            reference.strip(),
-            "--- END seedance2/reference.md ---",
-        ])
-    return "\n".join(sections)
+    explicit_workflows = []
+    helpers = list(requested_activated)
+    for skill_id in explicit:
+        metadata = runtime.skills.catalog.load(skill_id).metadata
+        if (metadata.metadata or {}).get("kind") == "workflow":
+            explicit_workflows.append(skill_id)
+        elif skill_id not in helpers:
+            helpers.append(skill_id)
+    if requested_workflow:
+        return requested_workflow, helpers
+    unique_workflows = list(dict.fromkeys(explicit_workflows))
+    if len(unique_workflows) > 1:
+        raise HTTPException(status_code=422, detail="Only one Workflow Skill can be selected per request")
+    return (unique_workflows[0] if unique_workflows else None), helpers
+
+
+def _validate_workflow_selection(
+    runtime: VideoBuildRuntime,
+    workflow: str | None,
+) -> None:
+    if not workflow or workflow == "cuti.seedance-story":
+        return
+    if not runtime.skills.catalog.has(workflow):
+        raise HTTPException(status_code=422, detail=f"Workflow Skill is not installed: {workflow}")
+    metadata = runtime.skills.catalog.load(workflow).metadata
+    if (metadata.metadata or {}).get("kind") != "workflow":
+        raise HTTPException(status_code=422, detail=f"Skill is not a workflow: {workflow}")
+    spec = runtime.skills.workflows.get(workflow)
+    mode = spec.mode if spec is not None else ""
+    if mode not in SUPPORTED_WORKFLOW_MODES:
+        reason = UNAVAILABLE_WORKFLOW_MODES.get(mode) or f"No installed compiler for workflow mode {mode}"
+        raise HTTPException(status_code=409, detail=f"Workflow is unavailable: {workflow}: {reason}")
 
 
 def _visible_user_text(value: str) -> str:
@@ -244,12 +311,11 @@ def _initial_video_build_prompt(
     input_files: list[dict[str, Any]],
     workflow_id: str | None = None,
     activated_skill_ids: list[str] | None = None,
-    workflow_instructions: str = "",
 ) -> str:
     """Give DeepSeek a deterministic product-flow contract for `/create`."""
     options = user_option or {}
-    selected_workflow = workflow_id or "cuti.seedance-story"
     activated = list(dict.fromkeys(activated_skill_ids or []))
+    safe_inputs = _prompt_input_files(input_files)
     lines = [
         _CREATE_PROMPT_MARKER,
         f"VISIBLE_USER_REQUEST_JSON: {json.dumps(objective, ensure_ascii=False)}",
@@ -260,13 +326,15 @@ def _initial_video_build_prompt(
         ),
         f"The required base_project_version_id is {base_project_version_id}.",
         f"Creation controls: {json.dumps(options, ensure_ascii=False, sort_keys=True)}",
-        f"Uploaded inputs: {json.dumps(input_files, ensure_ascii=False, sort_keys=True)}",
+        f"Uploaded project Source Artifacts: {json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True)}",
+        (
+            "Use only the uploaded artifact_id values as VideoSpec.source_asset_ids and shot "
+            "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
+        ),
         "Turn the visible user request and creation controls into one complete, valid VideoSpec.",
         (
-            f"Set VideoSpec.workflow_id exactly to {json.dumps(selected_workflow)} and "
-            f"VideoSpec.activated_skill_ids exactly to {json.dumps(activated, ensure_ascii=False)}. "
-            "These values were resolved by the server from explicit UI selection, supported '$' "
-            "activation syntax, and project locks. Always use automation.mode automatic."
+            f"Set VideoSpec.activated_skill_ids exactly to {json.dumps(activated, ensure_ascii=False)}. "
+            "Always use automation.mode automatic."
         ),
         "Respect duration, aspect ratio, resolution, selected image/video providers, and attachments when present.",
         (
@@ -275,8 +343,22 @@ def _initial_video_build_prompt(
             "use providers.music suno unless the user explicitly requests another installed provider."
         ),
     ]
-    if workflow_instructions:
-        lines.extend(["", workflow_instructions, ""])
+    if workflow_id:
+        lines.append(
+            f"The workflow is explicitly selected or project-locked: {json.dumps(workflow_id)}. "
+            "Call video_workflow_load for it, then set VideoSpec.workflow_id exactly to that id."
+        )
+    else:
+        lines.append(
+            "No workflow was explicitly selected. Call video_workflow_list, choose the best "
+            "available user-selectable workflow from its descriptions, call video_workflow_load "
+            "for that workflow, and set VideoSpec.workflow_id to its exact id. Never choose an "
+            "unavailable workflow and never silently substitute another workflow after a failure."
+        )
+    if activated:
+        lines.append(
+            "Call video_skill_load for every activated_skill_id before constructing VideoSpec."
+        )
     lines.extend([
         "Then perform these tool calls in order without asking for confirmation:",
         (
@@ -313,12 +395,7 @@ async def _effective_skill_selection(
             activated.append(lock.skill_id)
 
     workflow = requested_workflow or locked_workflow
-    if workflow and workflow != "cuti.seedance-story":
-        if not runtime.skills.catalog.has(workflow):
-            raise HTTPException(status_code=422, detail=f"Workflow Skill is not installed: {workflow}")
-        metadata = runtime.skills.catalog.load(workflow).metadata
-        if (metadata.metadata or {}).get("kind") != "workflow":
-            raise HTTPException(status_code=422, detail=f"Skill is not a workflow: {workflow}")
+    _validate_workflow_selection(runtime, workflow)
     for skill_id in requested_activated:
         if not runtime.skills.catalog.has(skill_id):
             raise HTTPException(status_code=422, detail=f"Skill is not installed: {skill_id}")
@@ -331,9 +408,12 @@ async def _effective_skill_selection(
 
 def _selection_context(workflow_id: str | None, activated_skill_ids: list[str]) -> str:
     return _SKILL_SELECTION_SEPARATOR + json.dumps({
-        "workflow_id": workflow_id or "cuti.seedance-story",
+        "workflow_id": workflow_id,
         "activated_skill_ids": activated_skill_ids,
-        "instruction": "Preserve these fields in every VideoSpec or edit/rebuild tool call.",
+        "instruction": (
+            "Preserve non-null workflow_id and activated_skill_ids in every VideoSpec or edit/rebuild "
+            "tool call. If workflow_id is null, inspect the existing project instead of changing it."
+        ),
     }, ensure_ascii=False, sort_keys=True)
 
 
@@ -441,10 +521,16 @@ async def _run_with_context(
         except json.JSONDecodeError:
             pass
     result = _run(project, session_id, events, context)
-    result["skill_locks"] = [
-        item.model_dump(mode="json")
-        for item in await runtime.list_project_skill_locks(project.id)
-    ]
+    locks = await runtime.list_project_skill_locks(project.id)
+    result["skill_locks"] = [item.model_dump(mode="json") for item in locks]
+    locked_workflow = next((
+        item.skill_id for item in locks
+        if item.enabled
+        and runtime.skills.catalog.has(item.skill_id)
+        and (runtime.skills.catalog.load(item.skill_id).metadata.metadata or {}).get("kind") == "workflow"
+    ), None)
+    if locked_workflow:
+        result["workflow_id"] = locked_workflow
     return result
 
 
@@ -529,6 +615,10 @@ async def create_run(
         return success(await _run_with_context(
             runtime, project, session_id, await _history(dsh, session_id),
         ))
+    requested_workflow, requested_activated = _requested_skill_selection(
+        runtime, body.workflow_id, body.activated_skill_ids, body.objective,
+    )
+    _validate_workflow_selection(runtime, requested_workflow)
     try:
         session_id = await dsh.create_session(session_id=body.thread_id)
         project, initial_version = await runtime.create_project(
@@ -536,15 +626,20 @@ async def create_run(
             title=body.objective[:200],
         )
         await runtime.bind_session(project_id=project.id, session_id=session_id, user_id=user_id)
+        imported_input_files = await _import_input_files(
+            runtime, project.id, user_id, body.input_files,
+        )
+        if imported_input_files:
+            project = await runtime.repo.get_project(project.id)
+            initial_version = await runtime.repo.get_project_version(project.current_version_id)
         await runtime.repo.remember_compatibility_run(
             user_id=user_id,
             idempotency_key=body.idempotency_key,
             project_id=project.id,
             session_id=session_id,
         )
-        requested_workflow = _requested_workflow_id(body.workflow_id, body.objective)
         workflow_id, activated_skill_ids = await _effective_skill_selection(
-            runtime, project.id, requested_workflow, body.activated_skill_ids,
+            runtime, project.id, requested_workflow, requested_activated,
         )
         await runtime.repo.remember_operation_result(
             project.id,
@@ -552,7 +647,7 @@ async def create_run(
             _RUN_CONTEXT_KEY,
             json.dumps({
                 "user_option": body.user_option,
-                "input_files": body.input_files,
+                "input_files": imported_input_files,
                 "workflow_id": workflow_id,
                 "activated_skill_ids": activated_skill_ids,
             }, ensure_ascii=False, sort_keys=True),
@@ -565,15 +660,14 @@ async def create_run(
                 base_project_version_id=initial_version.id,
                 idempotency_key=body.idempotency_key,
                 user_option=body.user_option,
-                input_files=body.input_files,
+                input_files=imported_input_files,
                 workflow_id=workflow_id,
                 activated_skill_ids=activated_skill_ids,
-                workflow_instructions=_seedance2_planning_context(runtime, workflow_id),
             ),
         )
         return success(_run(project, session_id, [], {
             "user_option": body.user_option,
-            "input_files": body.input_files,
+            "input_files": imported_input_files,
             "workflow_id": workflow_id,
             "activated_skill_ids": activated_skill_ids,
         }))
@@ -632,18 +726,28 @@ async def add_message(
             runtime, project, binding.session_id, await _history(dsh, binding.session_id),
         ))
     try:
+        imported_input_files = await _import_input_files(
+            runtime, project_id, user_id, body.input_files,
+        )
+        if imported_input_files:
+            project = await runtime.repo.get_project(project_id)
         # A draft `/create` project may reuse an existing DeepSeek Session whose
         # earlier conversation was only an inspection or acceptance test.  A raw
         # follow-up can then inherit that stale instruction and stop before plan
         # and build.  Re-apply the product-flow contract only while the project is
         # genuinely empty; established projects keep normal conversational edits.
         is_empty_creation = (
-            not await runtime.repo.current_artifacts(project_id)
+            not [
+                item for item in await runtime.repo.current_artifacts(project_id)
+                if not item.type.startswith("source_")
+            ]
             and not await runtime.repo.list_builds(project_id)
         )
-        requested_workflow = _requested_workflow_id(body.workflow_id, body.content)
+        requested_workflow, requested_activated = _requested_skill_selection(
+            runtime, body.workflow_id, body.activated_skill_ids, body.content,
+        )
         workflow_id, activated_skill_ids = await _effective_skill_selection(
-            runtime, project_id, requested_workflow, body.activated_skill_ids,
+            runtime, project_id, requested_workflow, requested_activated,
         )
         prompt = (
             _initial_video_build_prompt(
@@ -652,18 +756,17 @@ async def add_message(
                 base_project_version_id=project.current_version_id,
                 idempotency_key=body.idempotency_key,
                 user_option=body.user_option,
-                input_files=body.input_files,
+                input_files=imported_input_files,
                 workflow_id=workflow_id,
                 activated_skill_ids=activated_skill_ids,
-                workflow_instructions=_seedance2_planning_context(runtime, workflow_id),
             )
             if is_empty_creation
             else body.content
         )
-        if not is_empty_creation and (body.user_option or body.input_files):
+        if not is_empty_creation and (body.user_option or imported_input_files):
             prompt += (
                 "\n\nCurrent creation controls and inputs:\n"
-                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': body.input_files}, ensure_ascii=False, sort_keys=True)}"
+                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
             )
         if not is_empty_creation:
             prompt += _selection_context(workflow_id, activated_skill_ids)
@@ -960,6 +1063,26 @@ async def list_skills(
     return success(runtime.skills.prompt_view())
 
 
+@router.post("/uploads")
+async def upload_files(
+    user_id: Annotated[str, Depends(identity)],
+    files: list[UploadFile] = File(...),
+) -> dict[str, Any]:
+    images, audio_files, video_files = await process_uploaded_files(files)
+    uploaded = []
+    for kind, items in (("image", images), ("audio", audio_files), ("video", video_files)):
+        for item in items:
+            metadata = item.model_dump(mode="json")
+            metadata["upload_receipt"] = _sign_uploaded_file(user_id, kind, item.url)
+            uploaded.append({
+                "type": kind,
+                "url": item.url,
+                "filename": getattr(item, "filename", None),
+                "metadata": metadata,
+            })
+    return success({"files": uploaded})
+
+
 async def _studio_project(
     runtime: VideoBuildRuntime,
     session_id: str,
@@ -1015,14 +1138,27 @@ async def studio_add_command(
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
 ) -> dict[str, Any]:
     project, binding = await _studio_project(runtime, session_id, user_id)
-    requested_workflow = _requested_workflow_id(body.workflow_id, body.objective)
+    imported_input_files = await _import_input_files(
+        runtime, project.id, user_id, body.input_files,
+    )
+    if imported_input_files:
+        project = await runtime.repo.get_project(project.id)
+    requested_workflow, requested_activated = _requested_skill_selection(
+        runtime, body.workflow_id, body.activated_skill_ids, body.objective,
+    )
     workflow_id, activated_skill_ids = await _effective_skill_selection(
-        runtime, project.id, requested_workflow, body.activated_skill_ids,
+        runtime, project.id, requested_workflow, requested_activated,
     )
     try:
+        prompt = body.objective
+        if body.user_option or imported_input_files:
+            prompt += (
+                "\n\nCurrent creation controls and inputs:\n"
+                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
+            )
         await dsh.prompt(
             binding.session_id,
-            body.objective + _selection_context(workflow_id, activated_skill_ids),
+            prompt + _selection_context(workflow_id, activated_skill_ids),
         )
     except DeepSeekHarnessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -1107,6 +1243,13 @@ async def studio_install_skill(
     bundle: Annotated[UploadFile, File()],
     overwrite: Annotated[bool, Form()] = False,
 ) -> dict[str, Any]:
+    from app.chat.v2.skill_install import (
+        MAX_BUNDLE_BYTES,
+        SkillInstallError,
+        extract_skill_archive,
+        install_skill_directory,
+    )
+
     data = await bundle.read(MAX_BUNDLE_BYTES + 1)
     try:
         with tempfile.TemporaryDirectory(prefix="cuti-skill-upload-") as directory:

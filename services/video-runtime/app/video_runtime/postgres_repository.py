@@ -534,15 +534,27 @@ class PostgresVideoProjectRepository:
             self._assert_version(project, build.base_project_version_id)
             if any(not item.passed for item in validation_results):
                 raise ValueError("all initial build validations must pass before commit")
-            selections, timeline_id = {}, None
+            current = await self._get_version(connection, project.current_version_id)
+            selections = dict(current.selections)
+            timeline_id = current.timeline_version_id
             for artifact in artifacts:
-                result = await connection.execute(
-                    f"""UPDATE {self.schema}.artifact_versions SET status='ready'
-                    WHERE id=$1 AND project_id=$2 AND status='draft'""",
+                row = await connection.fetchrow(
+                    f"""SELECT status FROM {self.schema}.artifact_versions
+                    WHERE id=$1 AND project_id=$2 FOR UPDATE""",
                     artifact.id, project.id,
                 )
-                if result == "UPDATE 0":
-                    raise LookupError(f"draft artifact not found: {artifact.id}")
+                if row is None:
+                    raise LookupError(f"artifact not found: {artifact.id}")
+                if row["status"] == "draft":
+                    await connection.execute(
+                        f"""UPDATE {self.schema}.artifact_versions SET status='ready'
+                        WHERE id=$1 AND project_id=$2""",
+                        artifact.id, project.id,
+                    )
+                elif row["status"] not in {"ready", "approved"}:
+                    raise ValueError(
+                        f"artifact cannot be selected by initial build: {artifact.id} ({row['status']})"
+                    )
                 selections[artifact.artifact_id] = artifact.id
                 if artifact.type == "timeline":
                     timeline_id = artifact.id

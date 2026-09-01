@@ -136,7 +136,7 @@ class FakePlanExecutor:
 
 
 class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_music_workflow_reuses_seedance_graph(self):
+    async def test_music_workflow_uses_independent_music_timeline(self):
         spec = video_spec().model_copy(update={"workflow_id": "cuti.music-video"})
         plan = await MusicVideoWorkflowPlugin().compile_build_plan(
             PluginContext(project_id="project-1", values={"base_project_version_id": "version-1"}),
@@ -144,7 +144,19 @@ class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
         )
         ordered = topological_steps(plan.items)
         self.assertEqual(plan.workflow_id, "cuti.music-video")
-        self.assertIn("bgm", [item.step_id for item in ordered])
+        step_ids = [item.step_id for item in ordered]
+        self.assertIn("music", step_ids)
+        self.assertIn("music-analysis", step_ids)
+        self.assertNotIn("character-reference", step_ids)
+        mv_clip = next(item for item in plan.items if item.step_id.endswith("-video") and item.step_id != "final-video")
+        self.assertIn("@audio1", mv_clip.parameters["prompt"])
+        self.assertNotIn("@音频1", mv_clip.parameters["prompt"])
+        self.assertFalse(mv_clip.parameters["generate_audio"])
+        mv_audio = next(item for item in plan.items if item.step_id.endswith("-audio"))
+        self.assertEqual(mv_audio.parameters["fade_in_sec"], 0.0)
+        final = next(item for item in plan.items if item.step_id == "final-video")
+        self.assertEqual(final.capability, "media.mix_audio")
+        self.assertEqual(final.parameters["mode"], "replace")
         self.assertEqual(len(ordered), len(plan.items))
 
     async def test_lipsync_workflow_rewires_final_media_steps(self):
@@ -155,10 +167,11 @@ class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
         )
         ordered = topological_steps(plan.items)
         positions = {item.step_id: index for index, item in enumerate(ordered)}
-        self.assertLess(positions["assembled-video"], positions["lipsync-video"])
-        self.assertLess(positions["lipsync-video"], positions["final-video"])
-        mix_narration = next(item for item in plan.items if item.step_id == "mix-narration")
-        self.assertEqual(mix_narration.parameters["video_step"], "lipsync-video")
+        self.assertLess(positions["assembled-video"], positions["music-video"])
+        self.assertLess(positions["music-video"], positions["final-video"])
+        final = next(item for item in plan.items if item.step_id == "final-video")
+        self.assertEqual(final.capability, "media.lipsync")
+        self.assertEqual(final.parameters["video_step"], "music-video")
 
 
 class FakeRebuildExecutor:

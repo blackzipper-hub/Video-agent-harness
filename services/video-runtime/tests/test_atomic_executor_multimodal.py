@@ -380,3 +380,69 @@ async def test_atomic_video_resolves_artifact_ids_to_urls_without_duplicates(mon
         "https://cdn.example/apartment.webp",
     ]
     assert artifact["uri"] == "https://cdn.example/segment.mp4"
+
+
+@pytest.mark.asyncio
+async def test_atomic_video_forwards_runtime_source_and_audio_artifact_types(monkeypatch):
+    captured = {}
+
+    async def fake_generate(profile, on_remote_submitted=None):
+        captured.update(profile)
+        return {
+            "video_url": "https://cdn.example/product-mv.mp4",
+            "raw_task_id": "remote-product-mv",
+        }
+
+    monkeypatch.setattr(
+        "app.integrations.providers.provider_bridge.generate_video", fake_generate,
+    )
+    run = AgentRun(
+        thread_id="thread-runtime-sources",
+        project_id="project-runtime-sources",
+        user_id="user-1",
+        objective="generate from project sources",
+        idempotency_key="request-runtime-sources",
+    )
+    selected = [
+        ArtifactVersion(
+            id="product-version",
+            artifact_id="source:product",
+            project_id=run.project_id,
+            type="source_image",
+            produced_by_task_id="upload-product",
+            uri="https://cdn.example/product.webp",
+        ),
+        ArtifactVersion(
+            id="music-window-version",
+            artifact_id="audio:window",
+            project_id=run.project_id,
+            type="audio_segment",
+            produced_by_task_id="trim-music",
+            uri="https://cdn.example/music-window.mp3",
+        ),
+    ]
+    task = Task(
+        run_id=run.id,
+        revision=1,
+        client_key="product-mv-shot",
+        capability_id="atomic.video.generate",
+        objective="generate product MV shot",
+        parameters={
+            "prompt": "Keep the exact product identity and follow the beat.",
+            "provider": "wavespeed",
+            "model": "doubao-seedance-2-0",
+            "generation_mode": "t2v",
+            "reference_urls": ["source:product"],
+            "audio_urls": ["audio:window"],
+        },
+    )
+
+    await execute_atomic(
+        run=run,
+        task=task,
+        selected=selected,
+        idempotency_key="attempt-runtime-sources",
+    )
+
+    assert captured["images"] == ["https://cdn.example/product.webp"]
+    assert captured["audios"] == ["https://cdn.example/music-window.mp3"]

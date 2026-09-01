@@ -63,6 +63,16 @@ const videoSpecParameters = {
       items: { type: 'string' as const },
       description: 'Optional installed helper Skills to freeze into matching video build steps.',
     },
+    source_asset_ids: {
+      type: 'array' as const,
+      items: { type: 'string' as const },
+      description: 'Project-owned uploaded source artifact ids. Never invent ids or pass arbitrary URLs.',
+    },
+    workflow_parameters: {
+      type: 'object' as const,
+      additionalProperties: true,
+      description: 'Workflow-specific structured parameters returned by video_workflow_load.',
+    },
     characters: {
       type: 'array' as const, required: true, items: {
         type: 'object' as const, additionalProperties: false, properties: {
@@ -85,6 +95,7 @@ const videoSpecParameters = {
           visual_prompt: { type: 'string' as const, required: true },
           narration: { type: 'string' as const },
           character_ids: { type: 'array' as const, items: { type: 'string' as const } },
+          reference_asset_ids: { type: 'array' as const, items: { type: 'string' as const } },
           transition: { type: 'string' as const },
         },
       },
@@ -126,6 +137,48 @@ function buildText(value: { buildId: string; status: string; progress: number; m
 
 /** Register the stable high-level tool surface; provider-specific operations stay behind the runtime. */
 export function apply(ctx: Context): void {
+  ctx.tools.register(defineTool({
+    name: 'video_workflow_list',
+    description: 'List Video Runtime workflows before planning. In automatic mode choose only an available user-selectable workflow whose description matches the user request.',
+    parameters: {},
+    output: {
+      schema: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.map(item => `${item.id}: ${item.available ? 'available' : `unavailable (${item.unavailableReason})`} — ${item.description}`).join('\n'),
+      }],
+    },
+    execute: (_args, exec) => ctx.videoRuntime.listWorkflows(identityOf(exec.agent), exec.signal)
+      .then(value => value as unknown as Array<Record<string, import('@cuti-ai/video-runtime').JsonValue>>),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_workflow_load',
+    description: 'Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec.',
+    parameters: { workflow_id: { type: 'string', required: true } },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `${String(value.title)}\nMode: ${String(value.mode)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n\n${String(value.instructions ?? '')}`,
+      }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.loadWorkflow(args.workflow_id, identityOf(exec.agent), exec.signal)
+      .then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_skill_load',
+    description: 'Load an explicitly activated non-workflow video Skill before applying it to VideoSpec or build steps.',
+    parameters: { skill_id: { type: 'string', required: true } },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: `${value.id}\n${value.instructions}` }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.loadSkill(args.skill_id, identityOf(exec.agent), exec.signal)
+      .then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
+  }))
+
   ctx.tools.register(defineTool({
     name: 'video_project_create',
     description: 'Create a durable empty video project and bind it to the current session.',
