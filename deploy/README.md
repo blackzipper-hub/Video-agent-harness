@@ -37,8 +37,7 @@ cuti-video-agent
   deploy/overlays/prod           正式 prod values
   deploy/local/compose.yml       叠在 compose.video.yml 上；不要单独 -f 这一份
   deploy/harness-test            旧测试，正式不用
-  .github/workflows/vda-images.yml
-  .github/workflows/vda-deploy.yml
+  .github/workflows/vda.yml
 
 Cuti-backend-go
   Dockerfile
@@ -47,16 +46,9 @@ Cuti-backend-go
   helm/values-prod.yaml
 ```
 
-GitHub **不在 push 时 helm**。DeepSeek 原来的 `ci.yml` / `e2e.yml` **不要删**。我们的是：
+每个仓只留一个 **VDA** workflow：Helm 检查 → 编镜像进 ECR → helm upgrade。推 `dev` 会上 `vda-dev`（镜像 tag `dev`），推 `main` 会上 `vda-prod`（镜像 tag `main`）。也可以在 Actions 里手动 Run，选 dev 或 prod（Video Agent 还可勾服务，默认全勾）。
 
-| 仓 | 文件 | 干什么 |
-|----|------|--------|
-| cuti-video-agent | `Build images` | 推代码（或手动 Run）把 Studio / Runtime / Media / DSH 编进 ECR |
-| cuti-video-agent | `Deploy` | **手动** Run：选 dev 或 prod，勾要上的服务（默认全勾） |
-| Cuti-backend-go | `Build Go image` | 把 Go API 编进 ECR |
-| Cuti-backend-go | `Deploy Go` | **手动** Run：只上 Go |
-
-日常跟 EC2 Deployment Console 同一思路：选 **dev** 或 **prod** → 勾服务 → Run。不用选手动分支。镜像 tag 写死：**dev 环境 = `dev`，prod 环境 = `main`**。两个仓要分别点：**Deploy**（Studio / Runtime / Media / DSH）和 **Deploy Go**。prod 建议 GitHub Environment `vda-prod` 开 required reviewers。GitHub 托管 runner 需要仓库 Secret `AWS_ROLE_ARN`（OIDC）；EC2 上的 instance role 只给那台机器用，GitHub 的虚机用不了。没配好之前镜像和 helm 仍走跳板机。GitHub Deploy 调用的是 `deploy/vda-upgrade.sh`，**不会**跑 `vda-apply.sh`（那是第一次装 namespace 用的，不要删）。
+两个仓要分别点一次 **VDA**（Video Agent 的 Studio / Runtime / Media / DSH，和 Go 仓的 API）。prod 建议 GitHub Environment `vda-prod` 开 required reviewers。GitHub 托管 runner 需要仓库 Secret `AWS_ROLE_ARN`（OIDC）；EC2 上的 instance role 只给那台机器用，GitHub 的虚机用不了。没配好之前镜像和 helm 仍走跳板机。GitHub 调用的是 `deploy/vda-upgrade.sh`，**不会**跑 `vda-apply.sh`（那是第一次装 namespace 用的，不要删）。DeepSeek 自带的 CI / Release / Issue / 文档那些 workflow 已去掉。
 
 本地点一次（和 Actions 同一脚本）：
 
