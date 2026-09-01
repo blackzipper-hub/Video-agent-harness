@@ -99,6 +99,7 @@ describe('video tool composition', () => {
       signal: new AbortController().signal,
     })
     expect(legacyWorkflowPlan.isError).toBe(false)
-    expect((legacyWorkflowPlan.value as BuildPlanSnapshot).workflowId).toBe('workflow-short-drama')
+    expect((legacyWorkflowPlan.value as unknown as BuildPlanSnapshot).workflowId)
+      .toBe('workflow-short-drama')
   })
 })
