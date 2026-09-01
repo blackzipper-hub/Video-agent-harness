@@ -93,15 +93,18 @@ class DeepSeekHarnessClient:
 
     async def rpc(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         rpc_id = str(uuid4())
-        response = await self._client.post(
-            f"/api/{method}",
-            json={
-                "type": "client-request",
-                "rpcId": rpc_id,
-                "method": method,
-                "payload": payload,
-            },
-        )
+        try:
+            response = await self._client.post(
+                f"/api/{method}",
+                json={
+                    "type": "client-request",
+                    "rpcId": rpc_id,
+                    "method": method,
+                    "payload": payload,
+                },
+            )
+        except httpx.RequestError as exc:
+            raise DeepSeekHarnessError(f"{method} transport failed: {exc}") from exc
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict) or body.get("rpcId") != rpc_id:

@@ -1,7 +1,14 @@
 CLAUDE.local.md
 .env
+.env.*
+!.env.example
+*.pem
+cookies.txt
 node_modules/
-lib/
+# Compiled package output only. Do not ignore apps/*/src/lib.
+/lib/
+packages/**/lib/
+vendor/**/lib/
 *.tsbuildinfo
 pnpm-debug.log
 .pnpm-store/
@@ -47,4 +54,12 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 .runtime-deps/
-data/media/
+*.egg-info/
+
+# Local runtime artifacts (Cuti video services). Never source.
+logs/
+*.log
+data/
+tmp-*.png
+deploy/.env.__probe__
+deploy/harness-test/

@@ -1,0 +1,19 @@
+image: postgres:16-alpine
+auth:
+  existingSecret: cuti-postgres
+  # secret keys: POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClassName: gp2
+  accessModes:
+    - ReadWriteOnce
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi

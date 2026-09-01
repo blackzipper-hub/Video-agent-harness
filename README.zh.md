@@ -127,11 +127,14 @@ cp .env.example .env.local
 Windows PowerShell 同样可以使用 `Copy-Item .env.example .env.local`。在 `apps/video-studio/.env.local` 中设置：
 
 ```dotenv
+VITE_LOCAL_SINGLE_USER_MODE=true
 VITE_VIDEO_RUNTIME_URL=http://127.0.0.1:8001
 VITE_VIDEOCHAT_URL=http://127.0.0.1:8001
 VITE_CUTI_BACKEND_URL=http://127.0.0.1:8001
 VITE_BACKEND_URL=http://127.0.0.1:8001
 ```
+
+本地不要设登录模式。`VITE_LOCAL_SINGLE_USER_MODE=true` 时前端写死 `local@cuti.dev`，不调 Go。Dev / 集群镜像构建时这个开关是 `false`。
 
 回到仓库根目录启动 Vite：
 

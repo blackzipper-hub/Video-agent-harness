@@ -10,6 +10,7 @@ import NotFound from "./pages/NotFound";
 import DeepAgentWorkspacePage from "./pages/DeepAgentWorkspacePage";
 import IncrementalVideoWorkspacePage from "./pages/IncrementalVideoWorkspacePage";
 import StudioWorkspacePage from "./pages/StudioWorkspacePage";
+import AuthPage from "./pages/AuthPage";
 import { AuthProvider } from "./contexts/AuthContext";
 const App = () => {
   // ✅ 使用 HashRouter - URL 格式: /cuti/new/#/en/pricing 或 /cuti/new/#/zh/pricing
@@ -37,6 +38,7 @@ const App = () => {
                 <LanguageRoute>
                   <Routes>
                     <Route path="/" element={<SelectionHub />} />
+                    <Route path="/auth" element={<AuthPage />} />
                     <Route path="/create" element={<DeepAgentWorkspacePage />} />
                     <Route path="/create/:threadId" element={<DeepAgentWorkspacePage />} />
                     <Route path="/deep-agent-v2" element={<DeepAgentWorkspacePage />} />

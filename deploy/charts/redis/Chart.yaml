@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cuti-redis
+description: Redis with AOF + PVC (in-cluster; alternative to ElastiCache). Required by Go.
+type: application
+version: 0.1.0
+appVersion: "7"

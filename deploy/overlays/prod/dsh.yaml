@@ -1,0 +1,14 @@
+image:
+  tag: main
+
+env:
+  VIDEO_RUNTIME_URL: http://cuti-videoagent:8001
+  VIDEO_RUNTIME_USER_ID: cuti-prod-user
+
+persistence:
+  enabled: true
+  storageClassName: gp2
+  size: 10Gi
+
+nodeSelector:
+  workload-type: agent

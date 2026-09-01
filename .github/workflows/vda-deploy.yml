@@ -1,0 +1,74 @@
+name: Deploy
+
+# Like EC2 admin starter: pick env, tick services, Run.
+# image tag is fixed: prod → main, dev → dev. No branch picker.
+# Uses deploy/vda-upgrade.sh (not vda-apply.sh).
+# Does not run on push. Does not touch live namespaces dev/prod. Does not touch Postgres/Redis.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 部署到哪（dev 用镜像 tag dev，prod 用镜像 tag main）
+        type: choice
+        required: true
+        options: [dev, prod]
+      studio:
+        description: 前端 Video Studio
+        type: boolean
+        default: true
+      runtime:
+        description: Video Runtime（生成视频的后端）
+        type: boolean
+        default: true
+      media:
+        description: Media Service（媒体存储/转码）
+        type: boolean
+        default: true
+      dsh:
+        description: DeepSeek Harness（对话 agent）
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: vda-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  EKS_CLUSTER: cuti-cluster
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: vda-${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+      - name: helm upgrade selected services
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.environment }}" = "prod" ]; then tag=main; else tag=dev; fi
+          echo "deploying tag $tag to vda-${{ inputs.environment }}"
+          chmod +x deploy/vda-upgrade.sh
+          args=( "${{ inputs.environment }}" --tag "$tag" )
+          if [ "${{ inputs.studio }}" = "true" ]; then args+=(--studio); fi
+          if [ "${{ inputs.runtime }}" = "true" ]; then args+=(--runtime); fi
+          if [ "${{ inputs.media }}" = "true" ]; then args+=(--media); fi
+          if [ "${{ inputs.dsh }}" = "true" ]; then args+=(--dsh); fi
+          ./deploy/vda-upgrade.sh "${args[@]}"

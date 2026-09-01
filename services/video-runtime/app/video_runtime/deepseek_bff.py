@@ -44,7 +44,7 @@ def get_deepseek_client() -> DeepSeekHarnessClient:
 async def identity(
     user_id: str | None = Header(default=None, alias="X-Video-User-Id"),
 ) -> str:
-    return user_id or "local-user"
+    return user_id or os.getenv("VIDEO_RUNTIME_LOCAL_USER_ID", "local-user")
 
 
 class CreateRunBody(BaseModel):

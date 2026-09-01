@@ -1,0 +1,14 @@
+image: redis:7-alpine
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: gp2
+  accessModes:
+    - ReadWriteOnce
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

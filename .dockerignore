@@ -3,7 +3,9 @@
 .agents
 .pnpm-store
 **/node_modules
-**/lib
+# Compiled package outputs only. Do not ignore apps/*/src/lib.
+packages/**/lib
+vendor/**/lib
 **/dist
 **/__pycache__
 **/.pytest_cache

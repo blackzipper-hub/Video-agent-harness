@@ -1,0 +1,100 @@
+# Overlay on top of compose.video.yml. Do not use this file alone.
+#
+# Colleague (do not break):
+#   docker compose --env-file .env -f compose.video.yml up --build -d
+#
+# Ours (full stack: Go login + DSH in compose + Redis):
+#   docker compose --env-file .env -f compose.video.yml -f deploy/local/compose.yml up --build -d
+#
+# Paths are relative to compose.video.yml (repo root). Cuti-backend-go must be a sibling clone.
+
+services:
+  video-runtime:
+    environment:
+      DEEPSEEK_HARNESS_URL: http://deepseek-harness:8080
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - cuti-local-redis:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  go-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: video_harness_local
+    command:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U video_harness -d video_harness -tc \
+          "SELECT 1 FROM pg_database WHERE datname='storybook_dev'" | grep -q 1 \
+          || psql -h postgres -U video_harness -d postgres -c "CREATE DATABASE storybook_dev"
+
+  cuti-api-go:
+    build:
+      context: ../Cuti-backend-go
+      dockerfile: Dockerfile
+    command: ["-env", "cuti-api-go.dev", "-logDir", "/tmp/cuti-logs", "-v=false"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      go-db-init:
+        condition: service_completed_successfully
+    environment:
+      CUTI_DATABASE_DSN: postgres://video_harness:video_harness_local@postgres:5432/storybook_dev?sslmode=disable
+      CUTI_REDIS_ADDR: redis:6379
+    volumes:
+      - ./deploy/local/go-env:/home/nonroot/.cuti-api-go:ro
+    ports:
+      - "8443:8443"
+
+  deepseek-harness:
+    build:
+      context: .
+      dockerfile: apps/dsh/Dockerfile
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VIDEO_AGENT_MODEL: ${VIDEO_AGENT_MODEL:-gpt-5.6-terra}
+      VIDEO_RUNTIME_URL: http://video-runtime:8001
+      VIDEO_RUNTIME_SERVICE_TOKEN: video-harness-runtime-local
+      VIDEO_RUNTIME_USER_ID: local-user
+    depends_on:
+      video-runtime:
+        condition: service_healthy
+    ports:
+      - "3080:8080"
+
+  dsh-proxy:
+    image: nginx:1.27-alpine
+    network_mode: service:deepseek-harness
+    volumes:
+      - ./deploy/local/dsh-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - deepseek-harness
+
+  video-studio:
+    build:
+      context: .
+      dockerfile: apps/video-studio/Dockerfile
+      args:
+        VITE_LOCAL_SINGLE_USER_MODE: "false"
+        VITE_API_BASE_URL: /api/v1
+    depends_on:
+      video-runtime:
+        condition: service_healthy
+      cuti-api-go:
+        condition: service_started
+
+volumes:
+  cuti-local-redis:

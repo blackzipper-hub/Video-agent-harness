@@ -1,0 +1,17 @@
+image:
+  tag: dev
+
+ingress:
+  enabled: true
+  scheme: internet-facing
+  # Same Sydney ACM cert as prod (covers *.newai.land). Not the us-east-1 CloudFront cert.
+  sslRedirect: false
+  certificateArn: arn:aws:acm:ap-southeast-2:699475938168:certificate/35b92a6f-1b52-4cd9-9843-4246bb5d9b1b
+  hosts: []
+
+nodeSelector:
+  workload-type: agent
+
+backends:
+  videoRuntime: http://cuti-videoagent:8001
+  cutiApiGo: http://cuti-api-go:8443

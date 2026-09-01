@@ -7,6 +7,8 @@ RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 COPY services/video-runtime/app ./app
 COPY services/video-runtime/plugins ./plugins
+COPY services/video-runtime/skills ./skills
+COPY services/video-runtime/kit ./kit
 
 ENV PYTHONPATH=/srv/video-runtime \
     VIDEO_RUNTIME_DATABASE_SCHEMA=cuti_video_runtime

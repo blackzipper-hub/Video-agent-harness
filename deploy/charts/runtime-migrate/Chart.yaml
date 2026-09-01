@@ -1,0 +1,6 @@
+apiVersion: v2
+name: runtime-migrate
+description: One-shot psql of services/video-runtime/migrations/video_runtime (keep sql/ in sync)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,4 @@
+# Keep in sync with services/video-runtime/migrations/video_runtime/*.sql
+postgres:
+  existingSecret: cuti-postgres
+  database: storybook_dev

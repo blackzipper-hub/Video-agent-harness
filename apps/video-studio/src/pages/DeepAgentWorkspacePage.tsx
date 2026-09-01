@@ -542,7 +542,7 @@ export default function DeepAgentWorkspacePage() {
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
-      navigate('/auth', { replace: true, state: { returnTo: `/${language}/create` } })
+      navigate(`/${language}/auth`, { replace: true, state: { returnTo: `/${language}/create` } })
     }
   }, [isLoading, isLoggedIn, language, navigate])
 

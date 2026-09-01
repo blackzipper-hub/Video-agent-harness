@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: 699475938168.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-deepseek-harness
+  tag: main
+  pullPolicy: Always
+
+proxyImage: nginx:1.27-alpine
+
+env:
+  VIDEO_RUNTIME_URL: http://cuti-videoagent:8001
+  VIDEO_RUNTIME_USER_ID: harness-test-user
+  VIDEO_AGENT_MODEL: gpt-5.6-terra
+
+secretEnvFrom: cuti-videoagent-secrets
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: gp2
+  accessModes:
+    - ReadWriteOnce
+
+resources:
+  dsh:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  proxy:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+nodeSelector: {}

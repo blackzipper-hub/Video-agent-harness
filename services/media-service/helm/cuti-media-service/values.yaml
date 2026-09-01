@@ -1,5 +1,11 @@
 replicaCount: 2
 
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
 image:
   repository: ""  # e.g. 123456789.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service
   tag: latest

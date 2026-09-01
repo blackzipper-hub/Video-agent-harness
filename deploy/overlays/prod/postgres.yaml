@@ -1,0 +1,7 @@
+persistence:
+  enabled: true
+  storageClassName: gp2
+  size: 50Gi
+
+auth:
+  existingSecret: cuti-postgres

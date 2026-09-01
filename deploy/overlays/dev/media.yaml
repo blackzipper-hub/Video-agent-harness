@@ -1,0 +1,36 @@
+image:
+  repository: 699475938168.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service
+  tag: dev
+  pullPolicy: Always
+
+env:
+  ENVIRONMENT: development
+  STORAGE_BACKEND: s3
+  AWS_REGION: ap-southeast-2
+
+createSecret: false
+secretEnvFrom: cuti-media-service-secrets
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+  scaleUp:
+    stabilizationWindowSeconds: 30
+    maxPods: 4
+    periodSeconds: 60
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    maxPods: 1
+    periodSeconds: 120
+
+replicaCount: 1
+
+nodeSelector:
+  workload: media-processing
+
+serviceAccountName: default
