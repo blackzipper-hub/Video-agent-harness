@@ -9,6 +9,7 @@ node_modules/
 /lib/
 packages/**/lib/
 vendor/**/lib/
+apps/*/lib/
 *.tsbuildinfo
 pnpm-debug.log
 .pnpm-store/
