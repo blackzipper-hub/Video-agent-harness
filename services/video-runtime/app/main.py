@@ -106,6 +106,7 @@ async def lifespan(app: FastAPI):
     global _global_worker
     video_runtime_repository = None
     deepseek_harness_client = None
+    checkpoint_coordinator = None
     
     # ==================== 启动流程 ====================
     
@@ -215,6 +216,12 @@ async def lifespan(app: FastAPI):
                 authorization=os.getenv("DEEPSEEK_HARNESS_AUTHORIZATION") or None,
             )
             set_deepseek_client(deepseek_harness_client)
+            if getattr(settings, "VIDEO_INCREMENTAL_ENGINE_ENABLED", False):
+                from .video_runtime.checkpoint_coordinator import CheckpointCoordinator
+                checkpoint_coordinator = CheckpointCoordinator(
+                    get_runtime(), deepseek_harness_client,
+                )
+                checkpoint_coordinator.start()
             logger.info("✅ DeepSeek compatibility BFF 已初始化")
         except Exception as e:
             logger.error(f"❌ DeepSeek compatibility BFF 初始化失败: {e}", exc_info=True)
@@ -223,6 +230,9 @@ async def lifespan(app: FastAPI):
     yield  # 应用运行期间
     
     # ==================== 关闭流程 ====================
+
+    if checkpoint_coordinator is not None:
+        await checkpoint_coordinator.close()
 
     if deepseek_harness_client is not None:
         from .video_runtime.deepseek_bff import set_deepseek_client

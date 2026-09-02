@@ -8,7 +8,7 @@ from app.orchestration.workflow_compiler.registry import (
     WorkflowSpec,
 )
 
-from .models import RebuildPlan, VideoSpec
+from .models import CheckpointResolution, PlanCheckpoint, ProjectIntent, RebuildPlan, VideoSpec
 from .plugins import BaseVideoPlugin, PluginContext, VideoPluginRegistry
 from .plugins.models import (
     PluginContributions,
@@ -22,6 +22,12 @@ from .workflow_plans import (
     UNAVAILABLE_WORKFLOW_MODES,
     compile_skill_workflow,
 )
+from .staged_planning import (
+    append_phase,
+    compile_initial_phase,
+    copy_plan_with_appended_phase,
+    effective_planning_mode,
+)
 
 
 SKILL_WORKFLOW_PLUGIN_ID = "cuti.skill-workflows"
@@ -32,6 +38,12 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
 
     def __init__(self, workflows: dict[str, WorkflowSpec]) -> None:
         self._workflows = dict(workflows)
+
+    def planning_mode(self, workflow_id: str) -> str:
+        workflow = self._workflows.get(workflow_id)
+        if workflow is None:
+            raise LookupError(f"workflow Skill is not installed: {workflow_id}")
+        return effective_planning_mode(workflow, workflow_id)
 
     def describe_workflows(self) -> list[dict[str, Any]]:
         return [
@@ -57,6 +69,19 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
                 ),
                 "userSelectable": True,
                 "executionKind": "adapter",
+                "planning": {
+                    "mode": spec.planning.mode,
+                    "checkpoints": [
+                        {
+                            "id": item.id,
+                            "afterPhase": item.after_phase,
+                            "nextPhase": item.next_phase,
+                            "requiredArtifacts": list(item.required_artifacts),
+                            "resolves": list(item.resolves),
+                        }
+                        for item in spec.planning.checkpoints
+                    ],
+                },
             }
             for spec in self._workflows.values()
         ]
@@ -72,6 +97,40 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
         if not context.project_id:
             raise ValueError("workflow Skill requires a project")
         return compile_skill_workflow(workflow, context, video_spec)
+
+    async def compile_initial(
+        self, context: PluginContext, intent: ProjectIntent,
+    ) -> RebuildPlan:
+        workflow = self._workflows.get(intent.workflow_id)
+        if workflow is None:
+            raise LookupError(f"workflow Skill is not installed: {intent.workflow_id}")
+        return compile_initial_phase(workflow=workflow, context=context, intent=intent)
+
+    async def compile_phase(
+        self,
+        context: PluginContext,
+        checkpoint: PlanCheckpoint,
+        resolution: CheckpointResolution,
+        plan: RebuildPlan,
+    ) -> RebuildPlan:
+        workflow = self._workflows.get(plan.workflow_id)
+        if workflow is None:
+            raise LookupError(f"workflow Skill is not installed: {plan.workflow_id}")
+        full_plan = compile_skill_workflow(workflow, context, resolution.video_spec)
+        added, next_checkpoint = append_phase(
+            existing_plan=plan,
+            full_plan=full_plan,
+            workflow=workflow,
+            checkpoint_id=checkpoint.phase,
+            proposed_steps=resolution.proposed_steps,
+        )
+        return copy_plan_with_appended_phase(
+            plan,
+            spec=resolution.video_spec,
+            added_items=added,
+            spec_revision_id=str(context.values["video_spec_revision_id"]),
+            next_checkpoint=next_checkpoint,
+        )
 
 async def load_workflow_skills(
     plugins: VideoPluginRegistry,

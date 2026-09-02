@@ -19,6 +19,15 @@ metadata:
   workflow:
     title: Cuti Scenario Product Workflow
     mode: cuti_scenario_product_workflow
+    planning:
+      mode: staged
+      checkpoints:
+        - id: product_ready
+          after_phase: source_analysis
+          next_phase: visual_production
+          required_artifacts: [product_analysis, source_image]
+          resolves: [shots, product_constraints]
+          instruction: Build a causal product story from verified product facts without changing product identity.
     entrypoints: [text, image]
     dependencies:
       skills: [seedance2]

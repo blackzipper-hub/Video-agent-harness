@@ -9,6 +9,15 @@ metadata:
   workflow:
     title: Music Video
     mode: mv
+    planning:
+      mode: staged
+      checkpoints:
+        - id: music_ready
+          after_phase: music_analysis
+          next_phase: visual_production
+          required_artifacts: [audiomap, audio_cut]
+          resolves: [shots, captions, timeline]
+          instruction: Plan shots and captions from the real duration, beats, lyrics, and cut window.
     entrypoints: [text, image, audio, video]
     pipeline:
       - research.generate

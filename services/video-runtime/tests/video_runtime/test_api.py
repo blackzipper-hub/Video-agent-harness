@@ -176,3 +176,32 @@ class VideoRuntimeApiTest(unittest.TestCase):
         self.assertEqual(payload["project"]["id"], project["projectId"])
         self.assertEqual(payload["builds"][0]["buildId"], build["buildId"])
         self.assertEqual(len(payload["builds"][0]["steps"]), len(plan["steps"]))
+
+    def test_staged_project_intent_plan_exposes_revisions_and_checkpoint(self) -> None:
+        self.runtime.staged_planning_enabled = True
+        project = self.client.post(
+            "/api/video/projects", headers=self.headers, json={"title": "Staged film"},
+        ).json()["data"]
+        response = self.client.post(
+            f"/api/video/projects/{project['projectId']}/plans",
+            headers=self.headers,
+            json={
+                "baseProjectVersionId": project["currentVersionId"],
+                "idempotencyKey": "staged-plan",
+                "projectIntent": {
+                    "title": "Staged film",
+                    "brief": "A short railway story",
+                    "workflow_id": "workflow-keyframe-pipeline",
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        plan = response.json()["data"]
+        self.assertEqual(plan["schemaVersion"], 2)
+        self.assertEqual(plan["planRevision"], 1)
+        self.assertEqual(plan["currentPhase"], "story_intent")
+        self.assertEqual(plan["nextCheckpoint"]["id"], "story_ready")
+        self.assertEqual(
+            [item["step_id"] for item in plan["steps"]],
+            ["intent", "story-draft"],
+        )

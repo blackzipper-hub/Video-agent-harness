@@ -22,6 +22,15 @@ metadata:
   workflow:
     title: Product Ad Video / commercial product promo
     mode: product_ad_video
+    planning:
+      mode: staged
+      checkpoints:
+        - id: product_ready
+          after_phase: source_analysis
+          next_phase: visual_production
+          required_artifacts: [product_analysis, source_image]
+          resolves: [shots, product_constraints]
+          instruction: Plan the commercial from verified visual product facts and preserve product identity.
     entrypoints: [text, image, audio, video]
     parameters:
       workflow_mode: product_ad_video

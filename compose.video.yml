@@ -45,6 +45,7 @@ services:
       VIDEO_RUNTIME_LOCAL_USER_ID: local-user
       VIDEO_AGENT_BACKEND: deepseek
       VIDEO_INCREMENTAL_ENGINE_ENABLED: "true"
+      VIDEO_STAGED_PLANNING_ENABLED: "true"
       VIDEO_PLUGIN_PATHS: /srv/video-runtime/plugins
       VIDEO_CAPABILITY_GRANT_SECRET: ${VIDEO_CAPABILITY_GRANT_SECRET:-video-harness-local-development-grant-secret}
       ACCOUNT_BACKEND: ${ACCOUNT_BACKEND:-env}

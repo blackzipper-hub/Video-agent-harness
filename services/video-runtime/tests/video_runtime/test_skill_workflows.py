@@ -65,6 +65,19 @@ async def _add_product_source(
 
 
 class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
+    async def test_all_installed_workflows_declare_staged_or_agentic_planning(self):
+        plugins = VideoPluginRegistry()
+        skills = VideoSkillRuntime()
+        await load_workflow_skills(plugins, skills)
+        workflow_plugin = plugins.get("cuti.skill-workflows")
+        workflows = workflow_plugin.implementation._workflows
+        self.assertGreaterEqual(len(workflows), 10)
+        self.assertTrue(all(
+            workflow.planning.mode in {"staged", "agentic"}
+            for workflow in workflows.values()
+        ))
+        self.assertEqual(workflows["seedance2"].planning.mode, "agentic")
+
     async def test_imported_cuti_workflows_compile_with_declared_modes(self):
         plugins = VideoPluginRegistry()
         skills = VideoSkillRuntime()

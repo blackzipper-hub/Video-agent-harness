@@ -60,6 +60,7 @@ class ProjectVersion(BaseModel):
     timeline_version_id: str | None = None
     selections: dict[str, str] = Field(default_factory=dict)
     change_request_id: str | None = None
+    video_spec_revision_id: str | None = None
     created_at: datetime = Field(default_factory=now)
 
 
@@ -153,6 +154,27 @@ class VideoAutomationPolicy(BaseModel):
     max_artifact_retries: int = Field(default=1, ge=0, le=3)
 
 
+class ProjectIntent(BaseModel):
+    """Known project constraints accepted before a complete VideoSpec exists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    brief: str = Field(min_length=1)
+    language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    target_duration_seconds: float = Field(default=15, gt=0, le=600)
+    aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
+    resolution: str = Field(default="1080p", pattern=r"^[0-9]{3,4}p$")
+    workflow_id: str
+    style_id: str = "cuti.cinematic"
+    activated_skill_ids: list[str] = Field(default_factory=list)
+    source_asset_ids: list[str] = Field(default_factory=list)
+    workflow_parameters: dict[str, Any] = Field(default_factory=dict)
+    providers: VideoProviderPreferences = Field(default_factory=VideoProviderPreferences)
+    automation: VideoAutomationPolicy = Field(default_factory=VideoAutomationPolicy)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+
+
 class VideoSpec(BaseModel):
     """Provider-neutral, deterministic input for the first project build."""
 
@@ -222,7 +244,13 @@ class RebuildPlan(BaseModel):
     base_project_version_id: str
     workflow_id: str = ""
     video_spec: VideoSpec | None = None
+    project_intent: ProjectIntent | None = None
     items: list[RebuildPlanItem]
+    schema_version: Literal[1, 2] = 1
+    current_revision: int = Field(default=1, ge=1)
+    video_spec_revision_id: str | None = None
+    current_phase: str = "full"
+    next_checkpoint: "PlanCheckpointDefinition | None" = None
     estimated_cost: float = 0.0
     status: Literal["preview", "applied", "superseded"] = "preview"
     created_at: datetime = Field(default_factory=now)
@@ -266,7 +294,10 @@ class Build(BaseModel):
     session_id: str | None = None
     user_id: str | None = None
     kind: Literal["initial", "incremental", "export"] = "incremental"
-    status: Literal["queued", "running", "waiting_external", "completed", "failed", "cancelled"] = "queued"
+    status: Literal[
+        "queued", "running", "waiting_external", "waiting_agent",
+        "completed", "failed", "cancelled",
+    ] = "queued"
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     message: str = "Queued"
     project_version_id: str | None = None
@@ -275,6 +306,105 @@ class Build(BaseModel):
     error: str | None = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
+
+
+class VideoSpecRevision(BaseModel):
+    """Immutable partial or complete VideoSpec state produced at a planning checkpoint."""
+
+    id: str = Field(default_factory=uid)
+    project_id: str
+    revision: int = Field(ge=1)
+    parent_revision_id: str | None = None
+    content: dict[str, Any] = Field(default_factory=dict)
+    resolved_sections: list[str] = Field(default_factory=list)
+    unresolved_sections: list[str] = Field(default_factory=list)
+    source_artifact_version_ids: list[str] = Field(default_factory=list)
+    checkpoint_id: str | None = None
+    created_by: Literal["user", "agent", "migration"] = "agent"
+    complete: bool = False
+    created_at: datetime = Field(default_factory=now)
+
+
+class BuildPlanRevision(BaseModel):
+    """Append-only record of one accepted change to a durable BuildPlan."""
+
+    id: str = Field(default_factory=uid)
+    plan_id: str
+    project_id: str
+    revision: int = Field(ge=1)
+    base_revision: int = Field(ge=0)
+    checkpoint_id: str | None = None
+    video_spec_revision_id: str | None = None
+    added_step_ids: list[str] = Field(default_factory=list)
+    cancelled_step_ids: list[str] = Field(default_factory=list)
+    reason: str = ""
+    created_at: datetime = Field(default_factory=now)
+
+
+class PlanCheckpointDefinition(BaseModel):
+    """Workflow-owned declaration for the next semantic planning boundary."""
+
+    id: str
+    phase: str
+    next_phase: str
+    required_artifact_types: list[str] = Field(default_factory=list)
+    resolves: list[str] = Field(default_factory=list)
+    planner_instruction: str = ""
+    planning_mode: Literal["staged", "agentic"] = "staged"
+    max_planning_attempts: int = Field(default=3, ge=1, le=5)
+
+
+class PlanCheckpoint(BaseModel):
+    """Durable request for the bound DeepSeek Session to plan a later build phase."""
+
+    id: str = Field(default_factory=uid)
+    project_id: str
+    build_id: str
+    plan_id: str
+    workflow_id: str
+    session_id: str
+    user_id: str
+    phase: str
+    next_phase: str
+    status: Literal["pending", "planning", "resolved", "failed"] = "pending"
+    required_artifact_types: list[str] = Field(default_factory=list)
+    artifact_version_ids: list[str] = Field(default_factory=list)
+    artifact_summaries: list[dict[str, Any]] = Field(default_factory=list)
+    resolved_sections: list[str] = Field(default_factory=list)
+    unresolved_sections: list[str] = Field(default_factory=list)
+    planner_instruction: str = ""
+    planning_mode: Literal["staged", "agentic"] = "staged"
+    base_plan_revision: int = Field(ge=1)
+    base_spec_revision: int = Field(ge=1)
+    delivery_attempts: int = Field(default=0, ge=0)
+    max_delivery_attempts: int = Field(default=3, ge=1, le=5)
+    semantic_repair_attempts: int = Field(default=0, ge=0, le=1)
+    delivery_id: str | None = None
+    lease_expires_at: datetime | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
+
+
+class CheckpointResolution(BaseModel):
+    """Agent-authored semantic update accepted by a Workflow compiler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_plan_revision: int = Field(ge=1)
+    base_spec_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    video_spec: VideoSpec | None = None
+    video_spec_patch: dict[str, Any] | None = None
+    phase_inputs: dict[str, Any] = Field(default_factory=dict)
+    proposed_steps: list[RebuildPlanItem] = Field(default_factory=list)
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def exactly_one_spec_input(self):
+        if (self.video_spec is None) == (self.video_spec_patch is None):
+            raise ValueError("provide exactly one of video_spec or video_spec_patch")
+        return self
 
 
 class ValidationResult(BaseModel):

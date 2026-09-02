@@ -19,6 +19,15 @@ metadata:
   workflow:
     title: Cuti Product Commercial Workflow
     mode: cuti_product_workflow
+    planning:
+      mode: staged
+      checkpoints:
+        - id: product_ready
+          after_phase: source_analysis
+          next_phase: visual_production
+          required_artifacts: [product_analysis, source_image]
+          resolves: [shots, product_constraints]
+          instruction: Plan native-audio advertising shots only from verified product analysis and selected helper Skills.
     entrypoints: [text, image]
     dependencies:
       skills: [seedance2, product-feature-demo-script, product-component-exploded-view, product-voiceover-narration]

@@ -10,6 +10,15 @@ metadata:
   workflow:
     title: OpenMontage conventions and bridged tools
     mode: open_montage
+    planning:
+      mode: staged
+      checkpoints:
+        - id: story_ready
+          after_phase: story_intent
+          next_phase: visual_production
+          required_artifacts: [story_draft]
+          resolves: [characters, shots]
+          instruction: Continue only when the OpenMontage runtime and declared capabilities are available.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: open_montage

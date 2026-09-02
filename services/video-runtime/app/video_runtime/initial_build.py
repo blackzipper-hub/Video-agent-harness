@@ -3,7 +3,14 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Iterable
 
-from .models import RebuildPlan, RebuildPlanItem, VideoSpec
+from .models import (
+    CheckpointResolution,
+    PlanCheckpoint,
+    ProjectIntent,
+    RebuildPlan,
+    RebuildPlanItem,
+    VideoSpec,
+)
 from .plugins import BaseVideoPlugin, PluginContext
 
 
@@ -286,6 +293,9 @@ class SeedanceStoryWorkflow:
 
 
 class SeedanceStoryPlugin(BaseVideoPlugin):
+    def planning_mode(self, _workflow_id: str) -> str:
+        return "staged"
+
     async def compile_build_plan(
         self, context: PluginContext, spec: VideoSpec,
     ) -> RebuildPlan:
@@ -296,4 +306,108 @@ class SeedanceStoryPlugin(BaseVideoPlugin):
             project_id=context.project_id,
             base_project_version_id=base_version_id,
             spec=spec,
+        )
+
+    async def compile_initial(
+        self, context: PluginContext, intent: ProjectIntent,
+    ) -> RebuildPlan:
+        from app.orchestration.workflow_compiler.registry import (
+            WorkflowCheckpointSpec,
+            WorkflowPlanningSpec,
+            WorkflowSpec,
+        )
+        from .staged_planning import compile_initial_phase
+
+        workflow = WorkflowSpec(
+            skill_name=intent.workflow_id,
+            title="Cuti Seedance Story",
+            mode="keyframe_pipeline",
+            planning=WorkflowPlanningSpec(
+                mode="staged",
+                checkpoints=(
+                    WorkflowCheckpointSpec(
+                        id="story_ready",
+                        after_phase="story_intent",
+                        next_phase="reference_production",
+                        required_artifacts=("story_draft",),
+                        resolves=("characters", "shots", "audio"),
+                        instruction=(
+                            "Complete the production VideoSpec from the generated story draft."
+                        ),
+                    ),
+                    WorkflowCheckpointSpec(
+                        id="references_ready",
+                        after_phase="reference_production",
+                        next_phase="keyframe_production",
+                        required_artifacts=("character_reference",),
+                        resolves=("keyframe_prompts",),
+                        instruction=(
+                            "Refine keyframe composition from the real character references."
+                        ),
+                    ),
+                    WorkflowCheckpointSpec(
+                        id="keyframes_ready",
+                        after_phase="keyframe_production",
+                        next_phase="video_production",
+                        required_artifacts=("keyframe",),
+                        resolves=("video_motion", "transitions", "timeline"),
+                        instruction="Plan motion and transitions from the generated keyframes.",
+                    ),
+                ),
+            ),
+        )
+        return compile_initial_phase(workflow=workflow, context=context, intent=intent)
+
+    async def compile_phase(
+        self,
+        context: PluginContext,
+        checkpoint: PlanCheckpoint,
+        resolution: CheckpointResolution,
+        plan: RebuildPlan,
+    ) -> RebuildPlan:
+        from app.orchestration.workflow_compiler.registry import (
+            WorkflowCheckpointSpec,
+            WorkflowPlanningSpec,
+            WorkflowSpec,
+        )
+        from .staged_planning import append_phase, copy_plan_with_appended_phase
+
+        workflow = WorkflowSpec(
+            skill_name=plan.workflow_id,
+            title="Cuti Seedance Story",
+            mode="keyframe_pipeline",
+            planning=WorkflowPlanningSpec(
+                mode="staged",
+                checkpoints=(
+                    WorkflowCheckpointSpec(
+                        id="story_ready", after_phase="story_intent",
+                        next_phase="reference_production",
+                        required_artifacts=("story_draft",),
+                    ),
+                    WorkflowCheckpointSpec(
+                        id="references_ready", after_phase="reference_production",
+                        next_phase="keyframe_production",
+                        required_artifacts=("character_reference",),
+                    ),
+                    WorkflowCheckpointSpec(
+                        id="keyframes_ready", after_phase="keyframe_production",
+                        next_phase="video_production", required_artifacts=("keyframe",),
+                    ),
+                ),
+            ),
+        )
+        full_plan = await self.compile_build_plan(context, resolution.video_spec)
+        added, next_checkpoint = append_phase(
+            existing_plan=plan,
+            full_plan=full_plan,
+            workflow=workflow,
+            checkpoint_id=checkpoint.phase,
+            proposed_steps=resolution.proposed_steps,
+        )
+        return copy_plan_with_appended_phase(
+            plan,
+            spec=resolution.video_spec,
+            added_items=added,
+            spec_revision_id=str(context.values["video_spec_revision_id"]),
+            next_checkpoint=next_checkpoint,
         )

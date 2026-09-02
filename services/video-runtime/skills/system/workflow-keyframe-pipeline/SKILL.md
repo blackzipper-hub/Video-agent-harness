@@ -10,6 +10,27 @@ metadata:
   workflow:
     title: Keyframe-centric directed production
     mode: keyframe_pipeline
+    planning:
+      mode: staged
+      checkpoints:
+        - id: story_ready
+          after_phase: story_intent
+          next_phase: reference_production
+          required_artifacts: [story_draft]
+          resolves: [characters, shots, audio]
+          instruction: Complete the production VideoSpec from the generated story draft before references and keyframes.
+        - id: references_ready
+          after_phase: reference_production
+          next_phase: keyframe_production
+          required_artifacts: [character_reference]
+          resolves: [keyframe_prompts]
+          instruction: Inspect the real character references and refine only keyframe composition prompts without changing locked identities.
+        - id: keyframes_ready
+          after_phase: keyframe_production
+          next_phase: video_production
+          required_artifacts: [keyframe]
+          resolves: [video_motion, transitions, timeline]
+          instruction: Plan video motion and transitions from the generated keyframes without replacing completed references or keyframes.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: keyframe_i2v

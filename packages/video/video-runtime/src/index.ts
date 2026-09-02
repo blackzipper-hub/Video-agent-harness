@@ -20,6 +20,8 @@ import type {
   WorkflowDetail,
   SkillDetail,
   SkillResourceDetail,
+  PlanCheckpoint,
+  CheckpointResolutionRequest,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -50,6 +52,25 @@ export abstract class VideoRuntime extends Service {
   abstract applyRebuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>
   abstract getBuild(projectId: string, buildId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>
   abstract cancelBuild(projectId: string, buildId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>
+  abstract inspectCheckpoint(
+    projectId: string,
+    buildId: string,
+    checkpointId: string,
+    identity: RequestIdentity,
+    signal?: AbortSignal,
+  ): Promise<PlanCheckpoint>
+  abstract resolveCheckpoint(
+    request: CheckpointResolutionRequest,
+    identity: RequestIdentity,
+    signal?: AbortSignal,
+  ): Promise<BuildPlanSnapshot>
+  abstract retryCheckpoint(
+    projectId: string,
+    buildId: string,
+    checkpointId: string,
+    identity: RequestIdentity,
+    signal?: AbortSignal,
+  ): Promise<PlanCheckpoint>
   abstract selectArtifact(
     request: ArtifactSelectionRequest,
     identity: RequestIdentity,

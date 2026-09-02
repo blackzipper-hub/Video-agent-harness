@@ -9,6 +9,22 @@ from app.capabilities.models import CapabilityRegistry
 
 
 @dataclass(frozen=True)
+class WorkflowCheckpointSpec:
+    id: str
+    after_phase: str
+    next_phase: str
+    required_artifacts: tuple[str, ...] = ()
+    resolves: tuple[str, ...] = ()
+    instruction: str = ""
+
+
+@dataclass(frozen=True)
+class WorkflowPlanningSpec:
+    mode: str = "full"
+    checkpoints: tuple[WorkflowCheckpointSpec, ...] = ()
+
+
+@dataclass(frozen=True)
 class WorkflowSpec:
     skill_name: str
     title: str
@@ -19,6 +35,7 @@ class WorkflowSpec:
     allowed_capabilities: frozenset[str] | None = None
     entrypoints: tuple[str, ...] = ()
     skill_dependencies: tuple[str, ...] = ()
+    planning: WorkflowPlanningSpec = field(default_factory=WorkflowPlanningSpec)
 
 
 class WorkflowRegistry:
@@ -95,6 +112,7 @@ class WorkflowRegistry:
         )
         merged_parameters = dict(parameters)
         merged_parameters.setdefault("workflow_mode", mode)
+        planning = WorkflowRegistry._planning(name, raw.get("planning"))
         return WorkflowSpec(
             skill_name=name,
             title=title,
@@ -105,7 +123,69 @@ class WorkflowRegistry:
             allowed_capabilities=allowed,
             entrypoints=entrypoints,
             skill_dependencies=skill_dependencies,
+            planning=planning,
         )
+
+    @staticmethod
+    def _planning(name: str, value: Any) -> WorkflowPlanningSpec:
+        if value is None:
+            return WorkflowPlanningSpec()
+        if not isinstance(value, dict):
+            raise ValueError(f"workflow Skill {name} workflow.planning must be an object")
+        mode = str(value.get("mode") or "").strip()
+        if mode not in {"full", "staged", "agentic"}:
+            raise ValueError(
+                f"workflow Skill {name} workflow.planning.mode must be full, staged, or agentic"
+            )
+        raw_checkpoints = value.get("checkpoints") or []
+        if not isinstance(raw_checkpoints, list):
+            raise ValueError(
+                f"workflow Skill {name} workflow.planning.checkpoints must be a list"
+            )
+        checkpoints: list[WorkflowCheckpointSpec] = []
+        ids: set[str] = set()
+        for raw_checkpoint in raw_checkpoints:
+            if not isinstance(raw_checkpoint, dict):
+                raise ValueError(
+                    f"workflow Skill {name} planning checkpoints must be objects"
+                )
+            checkpoint_id = str(raw_checkpoint.get("id") or "").strip()
+            after_phase = str(raw_checkpoint.get("after_phase") or "").strip()
+            next_phase = str(raw_checkpoint.get("next_phase") or "").strip()
+            if not checkpoint_id or not after_phase or not next_phase:
+                raise ValueError(
+                    f"workflow Skill {name} planning checkpoint requires id, after_phase, and next_phase"
+                )
+            if checkpoint_id in ids:
+                raise ValueError(
+                    f"workflow Skill {name} has duplicate planning checkpoint {checkpoint_id}"
+                )
+            ids.add(checkpoint_id)
+            checkpoints.append(WorkflowCheckpointSpec(
+                id=checkpoint_id,
+                after_phase=after_phase,
+                next_phase=next_phase,
+                required_artifacts=WorkflowRegistry._string_tuple(
+                    name,
+                    "planning.checkpoints.required_artifacts",
+                    raw_checkpoint.get("required_artifacts") or [],
+                ),
+                resolves=WorkflowRegistry._string_tuple(
+                    name,
+                    "planning.checkpoints.resolves",
+                    raw_checkpoint.get("resolves") or [],
+                ),
+                instruction=str(raw_checkpoint.get("instruction") or "").strip(),
+            ))
+        if mode == "full" and checkpoints:
+            raise ValueError(
+                f"workflow Skill {name} full planning mode cannot declare checkpoints"
+            )
+        if mode != "full" and not checkpoints:
+            raise ValueError(
+                f"workflow Skill {name} {mode} planning mode requires checkpoints"
+            )
+        return WorkflowPlanningSpec(mode=mode, checkpoints=tuple(checkpoints))
 
     @staticmethod
     def _string_tuple(name: str, field_name: str, value: Any) -> tuple[str, ...]:

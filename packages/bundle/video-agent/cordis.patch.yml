@@ -4,6 +4,8 @@
     providers:
       openai:
         apiKeyEnv: OPENAI_API_KEY
+        reasoning: !!js process.env.VIDEO_AGENT_REASONING ?? 'low'
+        transport: sse
         timeoutMs: 300000
         streamIdleTimeoutMs: 300000
 

@@ -234,6 +234,8 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         steps[1].status = "failed"
         steps[1].attempt = 3
         steps[1].error = "temporary provider failure"
+        steps[1].remote_operation_id = "terminal-provider-job"
+        steps[1].remote_provider = "fake-provider"
         await runtime.repo.update_build_step(steps[1])
         build.status = "failed"
         build.error = steps[1].error
@@ -247,6 +249,8 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(states[1].status, "pending")
         self.assertEqual(states[1].attempt, 0)
         self.assertIsNone(states[1].error)
+        self.assertIsNone(states[1].remote_operation_id)
+        self.assertIsNone(states[1].remote_provider)
 
     async def test_initial_plan_executes_and_commits_once(self):
         runtime = await video_runtime()

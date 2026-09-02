@@ -11,7 +11,7 @@ import type {
   RequestIdentity,
   EditPreviewRequest,
   WorkflowSummary, WorkflowDetail,   SkillDetail,
-  SkillResourceDetail,
+  SkillResourceDetail, PlanCheckpoint, CheckpointResolutionRequest,
 } from '@cuti-ai/video-runtime'
 import * as videoTools from '../src/index.ts'
 
@@ -52,21 +52,48 @@ class FakeVideoRuntime extends VideoRuntime {
     return Promise.resolve({
       planId: 'edit-plan-1', projectId: request.projectId, kind: 'incremental', status: 'preview',
       baseProjectVersionId: request.baseProjectVersionId, workflowId: 'cuti.seedance-story',
-      videoSpec: {} as BuildPlanSnapshot['videoSpec'], shotCount: 0, estimatedCost: 0, steps: [],
+      videoSpec: {} as NonNullable<BuildPlanSnapshot['videoSpec']>, shotCount: 0, estimatedCost: 0, steps: [],
+      schemaVersion: 1, planRevision: 1, currentPhase: 'full',
     })
   }
   planProject(request: BuildPlanRequest): Promise<BuildPlanSnapshot> {
+    const workflowId = request.videoSpec?.workflow_id ?? request.projectIntent?.workflow_id ?? 'unknown'
     return Promise.resolve({
       planId: 'initial-plan-1', projectId: request.projectId, kind: 'initial', status: 'preview',
-      baseProjectVersionId: request.baseProjectVersionId, workflowId: request.videoSpec.workflow_id,
-      videoSpec: request.videoSpec, shotCount: request.videoSpec.shots.length, estimatedCost: 1,
-      steps: [],
+      baseProjectVersionId: request.baseProjectVersionId, workflowId,
+      ...(request.videoSpec === undefined ? {} : { videoSpec: request.videoSpec }),
+      ...(request.projectIntent === undefined ? {} : { projectIntent: request.projectIntent }),
+      shotCount: request.videoSpec?.shots.length ?? 0, estimatedCost: 1,
+      steps: [], schemaVersion: 2, planRevision: 1, currentPhase: 'creative_intent',
     })
   }
   startBuild(request: RebuildRequest): Promise<BuildSnapshot> { return Promise.resolve({ ...this.build(request.projectId), kind: 'initial' }) }
   applyRebuild(request: RebuildRequest): Promise<BuildSnapshot> { return Promise.resolve(this.build(request.projectId)) }
   getBuild(projectId: string): Promise<BuildSnapshot> { return Promise.resolve(this.build(projectId)) }
   cancelBuild(projectId: string): Promise<BuildSnapshot> { return Promise.resolve({ ...this.build(projectId), status: 'cancelled' }) }
+  inspectCheckpoint(projectId: string, buildId: string, checkpointId: string): Promise<PlanCheckpoint> {
+    return Promise.resolve({
+      id: checkpointId, project_id: projectId, build_id: buildId, plan_id: 'plan-1',
+      workflow_id: 'mv', session_id: 'session-1', phase: 'music_analysis',
+      next_phase: 'visual_production', status: 'planning', artifact_summaries: [],
+      resolved_sections: [], unresolved_sections: ['shots'], planner_instruction: '',
+      planning_mode: 'staged', base_plan_revision: 1, base_spec_revision: 1,
+      delivery_attempts: 1,
+    })
+  }
+  resolveCheckpoint(request: CheckpointResolutionRequest): Promise<BuildPlanSnapshot> {
+    const videoSpec = request.videoSpec!
+    return Promise.resolve({
+      planId: 'plan-1', projectId: request.projectId, kind: 'initial', status: 'applied',
+      baseProjectVersionId: 'version-1', workflowId: videoSpec.workflow_id,
+      videoSpec, shotCount: videoSpec.shots.length,
+      estimatedCost: 1, steps: [], schemaVersion: 2, planRevision: 2,
+      currentPhase: 'visual_production',
+    })
+  }
+  retryCheckpoint(projectId: string, buildId: string, checkpointId: string): Promise<PlanCheckpoint> {
+    return this.inspectCheckpoint(projectId, buildId, checkpointId)
+  }
   selectArtifact(request: ArtifactSelectionRequest): Promise<ArtifactSelectionResult> { return Promise.resolve({ projectId: request.projectId, artifactId: 'artifact-1', versionId: request.versionId, projectVersionId: 'version-2' }) }
   exportProject(request: ExportRequest): Promise<ExportResult> { return Promise.resolve({ exportId: 'export-1', projectId: request.projectId, status: 'queued' }) }
   private build(projectId: string): BuildSnapshot { return { buildId: 'build-1', projectId, status: 'queued', progress: 0, message: 'Queued', kind: 'incremental', estimatedCost: 0, actualCost: 0 } }
@@ -85,7 +112,8 @@ describe('video tool composition', () => {
       'video_skill_read_resource',
       'video_project_create', 'video_project_plan', 'video_project_build',
       'video_project_open', 'video_project_inspect', 'video_change_preview', 'video_edit_preview', 'video_rebuild_apply',
-      'video_build_status', 'video_build_cancel', 'video_artifact_select', 'video_export',
+      'video_build_status', 'video_checkpoint_inspect', 'video_checkpoint_resolve',
+      'video_build_retry_checkpoint', 'video_build_cancel', 'video_artifact_select', 'video_export',
     ]
     for (const name of names) expect(ctx.tools.get(name)).toBeDefined()
     const result = await ctx.tools.execute({

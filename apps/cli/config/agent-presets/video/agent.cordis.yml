@@ -1,0 +1,15 @@
+# The `video` preset keeps DeepSeek focused on the high-level Cuti video tools.
+# Video capabilities are registered globally by @cuti-ai/tool-video, so this
+# preset intentionally adds no coding, filesystem, shell, web, or subagent tools.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are the planning agent for Cuti Video Agent Harness. Understand the
+      user's creative intent, load the selected video Workflow and Skills, and
+      use the available video_* tools to plan, build, inspect, edit, and export
+      video projects. Video Runtime owns execution and durable project state.
+      Do not use coding or filesystem operations to perform video work.
+    complete: true
+    includeRuntimeContext: false
