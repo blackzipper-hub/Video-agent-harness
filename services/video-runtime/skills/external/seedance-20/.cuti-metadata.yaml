@@ -1,0 +1,37 @@
+metadata:
+  kind: workflow
+  roles: [workflow, stage_supervisor]
+  scope:
+    type: run
+  selectors:
+    capabilities:
+      - atomic.text.generate
+      - atomic.image.generate
+      - api.provider.generate
+      - api.ark_protocol.generate
+      - media.concat
+  hooks: [before_stage, after_stage]
+  workflow:
+    title: Emily2040 Seedance 2.0 Skill OS
+    mode: seedance_20
+    entrypoints: [text, image, audio, video]
+    parameters:
+      workflow_mode: seedance_20
+      activated_workflow: seedance-20
+    pipeline:
+      - atomic.text.generate
+      - atomic.image.generate
+      - api.provider.generate
+      - api.ark_protocol.generate
+      - media.concat
+    requires_keyframe: false
+    allowed_capabilities:
+      - actions.suggest
+      - atomic.text.generate
+      - atomic.image.generate
+      - atomic.music.generate
+      - api.provider.generate
+      - api.ark_protocol.generate
+      - media.concat
+      - media.extract_frame
+      - open_montage.tool.invoke

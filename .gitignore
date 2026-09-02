@@ -47,14 +47,9 @@ apps/web/dist/
 .dsh-build/
 .playwright-mcp/
 .orig
-# Keep vendor/C++ bundles out of git, but track dest product Skills we compile.
-services/video-runtime/skills/external/*
-!services/video-runtime/skills/external/mv/
-!services/video-runtime/skills/external/mv/**
-!services/video-runtime/skills/external/h3/
-!services/video-runtime/skills/external/h3/**
-!services/video-runtime/skills/external/suno-song/
-!services/video-runtime/skills/external/suno-song/**
+# External Skills are repository inputs and must remain reproducible for collaborators.
+# Runtime-installed credentials, caches, and generated artifacts stay covered by the
+# general environment, data, cache, and build-output rules below.
 
 services/video-runtime/ee/
 .worktrees/
