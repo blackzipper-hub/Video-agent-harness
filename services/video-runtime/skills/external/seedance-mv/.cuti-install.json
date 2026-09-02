@@ -1,0 +1,6 @@
+{
+  "installed_at": "2026-08-12T05:00:00+00:00",
+  "name": "seedance-mv",
+  "source": "local_authored",
+  "notes": "MV workflow skill; does not modify upstream seedance2"
+}

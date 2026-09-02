@@ -1,0 +1,4 @@
+interface:
+  display_name: "LibTV Product Workflow"
+  short_description: "多参考图直出商业产品视频"
+  default_prompt: "使用 $libtv-product-workflow 根据多张产品参考图直接生成商业宣传视频并完成拼接。"
