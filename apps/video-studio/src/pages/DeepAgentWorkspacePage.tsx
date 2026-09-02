@@ -35,6 +35,13 @@ import type { DeepAgentSkill, DeepAgentSkillLock, DeepAgentTokenUsage } from '@/
 import { useDeepAgentWorkspace } from '@/features/deep-agent-v2/useDeepAgentWorkspace'
 import { unpinConversation } from '@/utils/pinnedConversations'
 import { resolveUserOptionDurationSec } from '@/utils/targetVideoDuration'
+import {
+  interpolate,
+  skillDescription,
+  skillDisplayName,
+  skillUnavailableReason,
+  statusLabel,
+} from '@/features/deep-agent-v2/labels'
 
 const activeTaskStatuses = new Set(['proposed', 'blocked', 'ready', 'running', 'waiting_external'])
 const CREATE_DEFAULT_DURATION_SECONDS = 15
@@ -65,7 +72,7 @@ export default function DeepAgentWorkspacePage() {
   } | null
   const shouldStartFromHome = Boolean(initialRequest?.shouldAutoSend && initialRequest.initialPrompt?.trim())
   const isMobile = useIsMobile()
-  const { language } = useLanguage()
+  const { language, t } = useLanguage()
   const { isLoggedIn, isLoading, user, logout } = useAuth()
   const workspaceBase = location.pathname.includes('/deep-agent-v2')
     ? 'deep-agent-v2'
@@ -138,18 +145,41 @@ export default function DeepAgentWorkspacePage() {
   const hasActiveTask = Boolean(state.snapshot?.tasks.some(task =>
     activeTaskStatuses.has(task.status),
   ))
+  const runtimeBusy = Boolean(
+    runtimeProgress && ['queued', 'running', 'waiting_external'].includes(runtimeProgress.status),
+  )
+  const runtimeFinished = Boolean(
+    runtimeProgress && ['completed', 'failed', 'cancelled'].includes(runtimeProgress.status),
+  )
+  // Stop/send follows real work, not the SSE transport flag.
+  // isStreaming stays true while the event socket is open or reconnecting, even
+  // after the video build finished; that used to leave the red stop button stuck.
   // Downstream interrupt keeps the task as waiting_external while the run is
   // waiting_input — do not treat that as "still generating".
-  const isRunning =
-    !isWaitingInput && (
+  const agentBusy =
+    !isWaitingInput &&
+    !runtimeFinished && (
       hasActiveTask ||
       state.isSending ||
-      state.isStreaming ||
       status === 'planning' ||
       status === 'running' ||
       status === 'waiting_external' ||
       isUploading
     )
+  const isRunning = agentBusy || runtimeBusy
+
+  // SSE is the live path; if a terminal run event is missed, hydrate so the
+  // composer can leave the stop button. Right-hand artifacts already poll.
+  useEffect(() => {
+    const runId = state.selectedRunId
+    const busy = status === 'planning' || status === 'running' || status === 'waiting_external'
+    if (!runId || !busy) return
+    const timer = window.setInterval(() => {
+      void workspace.refresh()
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [state.selectedRunId, status, workspace.refresh])
+
   const selectedSkill = skills.find(skill => skill.name === selectedSkillName)
   const workflowSkills = useMemo(
     () => skills.filter(skill => skill.kind === 'workflow' || skill.metadata?.kind === 'workflow'),
@@ -160,36 +190,27 @@ export default function DeepAgentWorkspacePage() {
     [skills],
   )
   const activeThreadId = workspace.sessionThreadId
+  // Skill picker is page-level state, not per-run. Switching conversations
+  // must return to Automatic; otherwise $mv (etc.) leaks into the next chat.
+  useEffect(() => {
+    setSelectedSkillName('')
+  }, [activeThreadId])
   const enabledProjectSkillIds = new Set(
     projectSkillLocks.filter(lock => lock.enabled).map(lock => lock.skill_id),
   )
-  const waitingInputPrompt = language === 'zh'
-    ? [
-      state.notice?.whatHappened && `现在：${state.notice.whatHappened}`,
-      state.notice?.whyInterrupted && `原因：${state.notice.whyInterrupted}`,
-      state.notice?.whyConfirm && `接下来：${state.notice.whyConfirm}`,
-      state.notice?.skillName && `触发 Skill：${state.notice.skillName}`,
-      state.notice?.skillResource && `规则来源：${state.notice.skillResource}`,
-      state.notice?.skillPolicy && `确认规则：${state.notice.skillPolicy}`,
-    ].filter(Boolean).join('\n')
-      || (
-        state.notice?.willAutoResume
-          ? `配乐/分镜等中间步骤做完后，系统会稍停一下，大约 ${state.notice.autoResumeSeconds || 15} 秒后自动继续。你也可以马上点「继续生成」。`
-          : '中间步骤已经完成，系统先停一下。请点「继续生成」进入下一步；右侧工作区可查看已生成的大纲、角色图等内容。'
-      )
-    : [
-      state.notice?.whatHappened && `Now: ${state.notice.whatHappened}`,
-      state.notice?.whyInterrupted && `Why: ${state.notice.whyInterrupted}`,
-      state.notice?.whyConfirm && `Next: ${state.notice.whyConfirm}`,
-      state.notice?.skillName && `Skill: ${state.notice.skillName}`,
-      state.notice?.skillResource && `Policy source: ${state.notice.skillResource}`,
-      state.notice?.skillPolicy && `Policy: ${state.notice.skillPolicy}`,
-    ].filter(Boolean).join('\n')
-      || (
-        state.notice?.willAutoResume
-          ? `A production step finished. Auto-continues in ~${state.notice.autoResumeSeconds || 15}s, or tap Continue generation.`
-          : 'A production step finished. Tap Continue generation to proceed. Check the workspace for outline/characters already made.'
-      )
+  const waitingInputPrompt = [
+    state.notice?.whatHappened && interpolate(t('da.page.noticeNow'), { text: state.notice.whatHappened }),
+    state.notice?.whyInterrupted && interpolate(t('da.page.noticeWhy'), { text: state.notice.whyInterrupted }),
+    state.notice?.whyConfirm && interpolate(t('da.page.noticeNext'), { text: state.notice.whyConfirm }),
+    state.notice?.skillName && interpolate(t('da.page.noticeSkill'), { text: skillDisplayName(state.notice.skillName, t) }),
+    state.notice?.skillResource && interpolate(t('da.page.noticePolicySource'), { text: state.notice.skillResource }),
+    state.notice?.skillPolicy && interpolate(t('da.page.noticePolicy'), { text: state.notice.skillPolicy }),
+  ].filter(Boolean).join('\n')
+    || (
+      state.notice?.willAutoResume
+        ? interpolate(t('da.page.waitingAuto'), { seconds: state.notice.autoResumeSeconds || 15 })
+        : t('da.page.waitingManual')
+    )
   const chatMessages = useMemo(
     () => {
       const mapped = state.messages.map((item) => {
@@ -255,6 +276,7 @@ export default function DeepAgentWorkspacePage() {
     setLipsyncVideoModel(DEFAULT_VIDEO_OPTIONS.lipsyncVideoModel)
     setEnableContinuityMode(DEFAULT_VIDEO_OPTIONS.enableContinuityMode)
     setEnableKeyframeReflection(DEFAULT_VIDEO_OPTIONS.enableKeyframeReflection)
+    setSelectedSkillName('')
   }
 
   const startNewSession = () => {
@@ -269,6 +291,7 @@ export default function DeepAgentWorkspacePage() {
   const selectSession = (runId: string) => {
     setMessage('')
     setUploadedFiles([])
+    setSelectedSkillName('')
     setMobileTab('chat')
     if (runId === workspace.pendingThreadId) {
       navigate(workspacePath(runId), { replace: true, state: null })
@@ -285,17 +308,13 @@ export default function DeepAgentWorkspacePage() {
     event.stopPropagation()
     const run = state.runs.find(item => item.id === runId)
     if (!run) return
-    const confirmed = window.confirm(
-      language === 'zh'
-        ? '确定永久删除此对话及其任务、日志和数据库记录吗？此操作不可撤销。已生成的媒体文件不会从磁盘删除。'
-        : 'Permanently delete this conversation, its tasks, logs, and database records? This cannot be undone. Generated media files will remain on disk.',
-    )
+    const confirmed = window.confirm(t('da.page.deleteConfirm'))
     if (!confirmed) return
     try {
       const deletingSelected = state.selectedRunId === runId
       await workspace.deleteRun(runId)
       unpinConversation(runId)
-      toast.success(language === 'zh' ? '对话和任务已永久删除' : 'Conversation and tasks deleted')
+      toast.success(t('da.page.deleted'))
       if (deletingSelected) startNewSession()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
@@ -383,7 +402,7 @@ export default function DeepAgentWorkspacePage() {
 
   const setProjectSkill = async (skill: DeepAgentSkill, enabled: boolean) => {
     if (!activeThreadId || !state.snapshot?.run.id) {
-      toast.error(language === 'zh' ? '请先发送第一条消息以创建项目' : 'Send the first message to create this project first.')
+      toast.error(t('da.skill.createProjectFirst'))
       return
     }
     try {
@@ -395,8 +414,8 @@ export default function DeepAgentWorkspacePage() {
       if (enabled) setSelectedSkillName(skill.name)
       if (!enabled && selectedSkillName === skill.name) setSelectedSkillName('')
       toast.success(enabled
-        ? (language === 'zh' ? `已为当前项目启用 ${skill.name}` : `${skill.name} enabled for this project`)
-        : (language === 'zh' ? `已为当前项目停用 ${skill.name}` : `${skill.name} disabled for this project`))
+        ? interpolate(t('da.skill.enabledForProject'), { name: skillDisplayName(skill.name, t) })
+        : interpolate(t('da.skill.disabledForProject'), { name: skillDisplayName(skill.name, t) }))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     }
@@ -405,7 +424,7 @@ export default function DeepAgentWorkspacePage() {
   const installSkillBundle = async (file?: File | null) => {
     if (!file || isInstallingSkill) return
     if (!/\.zip$/i.test(file.name)) {
-      toast.error(language === 'zh' ? '请上传 .zip 格式的 Skill 包' : 'Upload a .zip Skill bundle.')
+      toast.error(t('da.skill.uploadZipRequired'))
       return
     }
     setIsInstallingSkill(true)
@@ -414,7 +433,7 @@ export default function DeepAgentWorkspacePage() {
       const refreshed = await deepAgentV2Client.listSkills()
       setSkills(refreshed.filter(item => item.enabled))
       setSelectedSkillName(installed.name)
-      toast.success(language === 'zh' ? `已安装 Skill：${installed.name}` : `Installed Skill: ${installed.name}`)
+      toast.success(interpolate(t('da.skill.installed'), { name: skillDisplayName(installed.name, t) }))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
@@ -460,7 +479,7 @@ export default function DeepAgentWorkspacePage() {
 
   const persistedChats = state.runs.map(run => ({
     id: run.id,
-    title: run.title || (language === 'zh' ? '未命名任务' : 'Untitled task'),
+    title: run.title || t('da.page.untitledTask'),
     thread_id: run.thread_id,
     conversation_id: 0,
     preview: run.last_response,
@@ -471,7 +490,7 @@ export default function DeepAgentWorkspacePage() {
   const chats = workspace.pendingThreadId && !state.selectedRunId
     ? [{
       id: workspace.pendingThreadId,
-      title: language === 'zh' ? '新对话' : 'New conversation',
+      title: t('da.page.newConversation'),
       thread_id: workspace.pendingThreadId,
       conversation_id: 0,
       preview: '',
@@ -498,7 +517,7 @@ export default function DeepAgentWorkspacePage() {
     const hasFiles = uploadedFiles.length > 0
     if ((!hasText && !hasFiles) || isUploading || state.isSending) return
     const normalizedContent = content.trim() || (
-      language === 'zh' ? '请分析并使用我上传的附件。' : 'Please analyze and use the uploaded attachment.'
+      t('da.page.analyzeAttachment')
     )
     setMessage('')
     setIsUploading(true)
@@ -513,7 +532,7 @@ export default function DeepAgentWorkspacePage() {
         ? await deepAgentV2Client.uploadFiles(uploadedFiles)
         : []
       if (hasFiles && inputFiles.length !== uploadedFiles.length) {
-        throw new Error(language === 'zh' ? '部分附件上传失败，请重试。' : 'Some attachments failed to upload. Please try again.')
+        throw new Error(t('da.page.uploadPartialFail'))
       }
       const userOption = currentUserOption(normalizedContent)
       if (userOption.duration !== duration[0]) setDuration([userOption.duration])
@@ -568,11 +587,11 @@ export default function DeepAgentWorkspacePage() {
             </Button>
           )}
           <span className="max-w-56 truncate text-sm font-medium">
-            {state.snapshot?.run.title || (language === 'zh' ? '新任务' : 'New task')}
+            {state.snapshot?.run.title || t('da.page.newTask')}
           </span>
           {status && (
-            <span className="text-xs capitalize text-muted-foreground">
-              {status.replace('_', ' ')}
+            <span className="text-xs text-muted-foreground">
+              {statusLabel(status, t)}
             </span>
           )}
         </div>
@@ -589,14 +608,14 @@ export default function DeepAgentWorkspacePage() {
               <Button size="sm" variant={selectedSkill ? 'secondary' : 'ghost'}>
                 <WandSparkles className="mr-1.5 h-3.5 w-3.5" />
                 <span className="max-w-28 truncate">
-                  {selectedSkill?.name || (language === 'zh' ? '选择 Skill' : 'Select Skill')}
+                  {selectedSkill ? skillDisplayName(selectedSkill.name, t) : t('da.skill.select')}
                 </span>
                 <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
               <DropdownMenuLabel>
-                {language === 'zh' ? '显式激活 Skill' : 'Explicitly activate a Skill'}
+                {t('da.skill.activate')}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <div className="max-h-[60vh] overflow-y-auto pr-1">
@@ -606,14 +625,14 @@ export default function DeepAgentWorkspacePage() {
                 >
                   <DropdownMenuRadioItem value="__auto__">
                     <div>
-                      <div className="font-medium">{language === 'zh' ? '自动选择' : 'Automatic'}</div>
+                      <div className="font-medium">{t('da.skill.automatic')}</div>
                       <div className="text-xs text-muted-foreground">
-                        {language === 'zh' ? '由 Agent 根据任务选择 Skill' : 'Let the Agent choose for the task'}
+                        {t('da.skill.automaticHint')}
                       </div>
                     </div>
                   </DropdownMenuRadioItem>
                   <DropdownMenuLabel className="text-xs">
-                    {language === 'zh' ? '制作 Workflow' : 'Production workflows'}
+                    {t('da.skill.workflows')}
                   </DropdownMenuLabel>
                   {workflowSkills.map(skill => (
                     <DropdownMenuRadioItem
@@ -623,17 +642,20 @@ export default function DeepAgentWorkspacePage() {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 truncate font-medium">
-                          <span>${skill.name}</span>
+                          <span>{skillDisplayName(skill.name, t)}</span>
+                          <span className="shrink-0 text-[10px] font-normal text-muted-foreground">${skill.name}</span>
                           {enabledProjectSkillIds.has(skill.name) && (
                             <span className="rounded bg-accent-purple/15 px-1 py-0.5 text-[9px] font-medium text-accent-purple">
-                              {language === 'zh' ? '项目已锁定' : 'Project locked'}
+                              {t('da.skill.projectLocked')}
                             </span>
                           )}
                         </div>
-                        <div className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</div>
+                        <div className="line-clamp-2 text-xs text-muted-foreground">
+                          {skillDescription(skill.name, t, skill.description)}
+                        </div>
                         {skill.available === false && (
                           <div className="line-clamp-2 text-xs text-amber-600">
-                            {skill.unavailable_reason || (language === 'zh' ? '当前运行环境不可用' : 'Unavailable in this runtime')}
+                            {skillUnavailableReason(skill.unavailable_reason, t)}
                           </div>
                         )}
                       </div>
@@ -641,13 +663,18 @@ export default function DeepAgentWorkspacePage() {
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs">
-                    {language === 'zh' ? '风格／辅助 Skill' : 'Style / helper skills'}
+                    {t('da.skill.helpers')}
                   </DropdownMenuLabel>
                   {helperSkills.map(skill => (
                     <DropdownMenuRadioItem key={skill.name} value={skill.name}>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">${skill.name}</div>
-                        <div className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</div>
+                        <div className="truncate font-medium">
+                          {skillDisplayName(skill.name, t)}
+                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">${skill.name}</span>
+                        </div>
+                        <div className="line-clamp-2 text-xs text-muted-foreground">
+                          {skillDescription(skill.name, t, skill.description)}
+                        </div>
                       </div>
                     </DropdownMenuRadioItem>
                   ))}
@@ -657,7 +684,7 @@ export default function DeepAgentWorkspacePage() {
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs">
-                    {language === 'zh' ? '项目 Skill 锁定' : 'Project Skill locks'}
+                    {t('da.skill.projectLocks')}
                   </DropdownMenuLabel>
                   <div className="max-h-40 overflow-y-auto">
                     {skills.map((skill) => {
@@ -672,9 +699,9 @@ export default function DeepAgentWorkspacePage() {
                             void setProjectSkill(skill, !enabled)
                           }}
                         >
-                          <span className="truncate text-xs">${skill.name}</span>
+                          <span className="truncate text-xs">{skillDisplayName(skill.name, t)}</span>
                           <span className={enabled ? 'text-[10px] text-emerald-600' : 'text-[10px] text-muted-foreground'}>
-                            {enabled ? (language === 'zh' ? '已启用' : 'Enabled') : (language === 'zh' ? '启用' : 'Enable')}
+                            {enabled ? t('da.skill.enabled') : t('da.skill.enable')}
                           </span>
                         </DropdownMenuItem>
                       )
@@ -690,9 +717,7 @@ export default function DeepAgentWorkspacePage() {
                   skillUploadRef.current?.click()
                 }}
               >
-                {isInstallingSkill
-                  ? (language === 'zh' ? '正在安装 Skill…' : 'Installing Skill…')
-                  : (language === 'zh' ? '上传外部 Skill 包 (.zip)' : 'Upload external Skill (.zip)')}
+                {isInstallingSkill ? t('da.skill.installing') : t('da.skill.uploadZip')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -702,7 +727,7 @@ export default function DeepAgentWorkspacePage() {
             onClick={() => setTraceOpen(value => !value)}
           >
             <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
-            {language === 'zh' ? '轨迹' : 'Trace'}
+            {t('da.page.trace')}
             {state.traceEvents.length > 0 && (
               <span className="ml-1.5 rounded-full bg-accent-purple/15 px-1.5 text-[10px] text-accent-purple">
                 {state.traceEvents.length}
@@ -713,16 +738,16 @@ export default function DeepAgentWorkspacePage() {
             <Button
               size="sm"
               variant="default"
-              onClick={() => void workspace.resume(language === 'zh' ? '继续生成' : 'Continue generation')}
+              onClick={() => void workspace.resume(t('da.page.continue'))}
             >
               <Play className="mr-1.5 h-3.5 w-3.5" />
-              {language === 'zh' ? '继续生成' : 'Continue generation'}
+              {t('da.page.continue')}
             </Button>
           )}
           {(status === 'cancelled' || status === 'failed') && (
-            <Button size="sm" variant="outline" onClick={() => void workspace.resume(language === 'zh' ? '恢复并继续' : 'Resume and continue')}>
+            <Button size="sm" variant="outline" onClick={() => void workspace.resume(t('da.page.resumeAndContinue'))}>
               <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-              {language === 'zh' ? '恢复' : 'Resume'}
+              {t('da.page.resume')}
             </Button>
           )}
         </div>
@@ -737,60 +762,54 @@ export default function DeepAgentWorkspacePage() {
           <div className="min-w-0 flex-1 space-y-1.5">
             <p className="font-medium">
               {state.notice?.confirmationRequired
-                ? (language === 'zh' ? '此中断需要你确认' : 'This interruption needs confirmation')
+                ? t('da.page.interruptNeedsConfirm')
                 : state.notice?.willAutoResume
-                  ? (language === 'zh' ? '先停一下 · 很快会自动继续' : 'Paused briefly · auto-continue soon')
-                  : (language === 'zh' ? '执行已暂停' : 'Execution paused')}
+                  ? t('da.page.interruptAutoSoon')
+                  : t('da.page.interruptPaused')}
             </p>
             <p className="text-xs opacity-95">
-              <span className="font-semibold">{language === 'zh' ? '现在：' : 'Now: '}</span>
-              {state.notice?.whatHappened
-                || (language === 'zh' ? '视频制作做到一半先停住了' : 'Video production paused mid-way')}
+              <span className="font-semibold">{t('da.page.now')}</span>
+              {state.notice?.whatHappened || t('da.page.pausedMidway')}
             </p>
             <p className="text-xs opacity-95">
-              <span className="font-semibold">{language === 'zh' ? '原因：' : 'Why: '}</span>
-              {state.notice?.whyInterrupted
-                || (language === 'zh'
-                  ? '做完当前这一步后会稍停，方便你确认结果。'
-                  : 'The system pauses after this step so you can confirm the result.')}
+              <span className="font-semibold">{t('da.page.why')}</span>
+              {state.notice?.whyInterrupted || t('da.page.pauseToConfirm')}
             </p>
             <p className="text-xs opacity-95">
-              <span className="font-semibold">{language === 'zh' ? '接下来：' : 'Next: '}</span>
+              <span className="font-semibold">{t('da.page.next')}</span>
               {state.notice?.whyConfirm
                 || waitingInputPrompt}
             </p>
             {(state.notice?.skillName || state.notice?.capabilityId || state.notice?.stage) && (
               <p className="text-xs opacity-95">
-                <span className="font-semibold">{language === 'zh' ? '触发来源：' : 'Triggered by: '}</span>
+                <span className="font-semibold">{t('da.page.triggeredBy')}</span>
                 {[
-                  state.notice?.skillName && `Skill: ${state.notice.skillName}`,
+                  state.notice?.skillName && interpolate(t('da.page.noticeSkill'), { text: skillDisplayName(state.notice.skillName, t) }),
                   state.notice?.skillResource,
-                  state.notice?.capabilityId && `Capability: ${state.notice.capabilityId}`,
-                  state.notice?.stage && `Stage: ${state.notice.stage}`,
-                  state.notice?.taskId && `Task: ${state.notice.taskId}`,
+                  state.notice?.capabilityId && interpolate(t('da.page.noticeCapability'), { text: state.notice.capabilityId }),
+                  state.notice?.stage && interpolate(t('da.page.noticeStage'), { text: state.notice.stage }),
+                  state.notice?.taskId && interpolate(t('da.page.noticeTask'), { text: state.notice.taskId }),
                 ].filter(Boolean).join(' · ')}
               </p>
             )}
             {state.notice?.skillPolicy && (
               <p className="rounded bg-background/40 px-2 py-1 text-[11px] opacity-90">
-                <span className="font-semibold">{language === 'zh' ? 'Skill 确认规则：' : 'Skill policy: '}</span>
+                <span className="font-semibold">{t('da.page.skillPolicy')}</span>
                 {state.notice.skillPolicy}
               </p>
             )}
             <p className="text-[11px] opacity-80">
               {state.notice?.confirmationRequired
-                ? (language === 'zh'
-                  ? '这是已验证来源的确认请求；检查结果后点「继续生成」。'
-                  : 'This confirmation request has a verified source; review and continue.')
-                : (language === 'zh' ? '不需要人工确认，任务会自动继续。' : 'No confirmation is required.')}
+                ? t('da.page.verifiedConfirm')
+                : t('da.page.noConfirmNeeded')}
             </p>          </div>
           <Button
             size="sm"
             className="shrink-0"
-            onClick={() => void workspace.resume(language === 'zh' ? '继续生成' : 'Continue generation')}
+            onClick={() => void workspace.resume(t('da.page.continue'))}
           >
             <Play className="mr-1.5 h-3.5 w-3.5" />
-            {language === 'zh' ? '继续生成' : 'Continue generation'}
+            {t('da.page.continue')}
           </Button>
         </div>
       )}
@@ -813,14 +832,16 @@ export default function DeepAgentWorkspacePage() {
             <p className="whitespace-pre-line">{state.notice.message}</p>
             {(state.notice.skillName || state.notice.capabilityId) && (
               <p className="mt-1 text-[10px] opacity-75">
-                {[state.notice.skillName && `Skill: ${state.notice.skillName}`, state.notice.capabilityId]
-                  .filter(Boolean).join(' · ')}
+                {[
+                  state.notice.skillName && interpolate(t('da.page.noticeSkill'), { text: skillDisplayName(state.notice.skillName, t) }),
+                  state.notice.capabilityId && interpolate(t('da.page.noticeCapability'), { text: state.notice.capabilityId }),
+                ].filter(Boolean).join(' · ')}
               </p>
             )}
           </div>
           {state.notice.severity !== 'error' && (
             <span className="shrink-0 text-[10px] opacity-70">
-              {language === 'zh' ? '任务仍在继续' : 'Run still in progress'}
+              {t('da.page.stillInProgress')}
             </span>
           )}
         </div>
@@ -843,7 +864,7 @@ export default function DeepAgentWorkspacePage() {
           />
           <div className="min-h-0 flex-1">
             <MessageArea
-              chatTitle={state.snapshot?.run.title || (language === 'zh' ? '新任务' : 'New task')}
+              chatTitle={state.snapshot?.run.title || t('da.page.newTask')}
               messages={chatMessages}
               message={message}
               uploadedFiles={uploadedFiles}
@@ -909,9 +930,7 @@ export default function DeepAgentWorkspacePage() {
     <div className="flex h-full items-center justify-center bg-white px-8 text-center text-sm text-muted-foreground dark:bg-black">
       {state.isHydrating
         ? <Loader2 className="h-5 w-5 animate-spin" />
-        : language === 'zh'
-          ? '发送消息开始新的创作任务'
-          : 'Send a message to begin a new creation task.'}
+        : t('da.workspace.begin')}
     </div>
   )
 
@@ -943,10 +962,10 @@ export default function DeepAgentWorkspacePage() {
           <div className={mobileTab === 'artifacts' ? 'h-full min-h-0 pb-16' : 'hidden'}>{artifactsArea}</div>
           <div className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 rounded-full border border-border/60 bg-background/90 p-1 shadow-lg backdrop-blur">
             <Button size="sm" variant={mobileTab === 'chat' ? 'secondary' : 'ghost'} onClick={() => setMobileTab('chat')}>
-              {language === 'zh' ? '对话' : 'Chat'}
+              {t('da.page.chat')}
             </Button>
             <Button size="sm" variant={mobileTab === 'artifacts' ? 'secondary' : 'ghost'} onClick={() => setMobileTab('artifacts')}>
-              {language === 'zh' ? '创作' : 'Create'}
+              {t('da.page.create')}
             </Button>
           </div>
           {mobileSidebarOpen && (

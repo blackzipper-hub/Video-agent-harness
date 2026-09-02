@@ -19,7 +19,22 @@ export default defineConfig(({ mode, command }) => {
   console.log('🔧 Vite Config - Base path:', base);
   console.log("env.VITE_BACKEND_URL", env.VITE_BACKEND_URL);
 
-  const cutiTarget = (env.VITE_CUTI_BACKEND_URL || env.VITE_BACKEND_URL || '').trim();
+  const httpTarget = (...candidates: Array<string | undefined>) => {
+    for (const raw of candidates) {
+      const value = (raw || "").trim();
+      if (/^https?:\/\//i.test(value)) return value;
+    }
+    return undefined;
+  };
+  // Video Runtime is 8001 in compose. Empty proxy target crashes http-proxy
+  // (`Cannot read properties of null (reading 'split')`) and Vite shows the overlay.
+  const runtimeTarget = httpTarget(
+    env.VITE_VIDEO_RUNTIME_URL,
+    env.VITE_VIDEOCHAT_URL,
+    "http://127.0.0.1:8001",
+  ) ?? "http://127.0.0.1:8001";
+  const apiTarget = httpTarget(env.VITE_CUTI_BACKEND_URL, env.VITE_BACKEND_URL, runtimeTarget)
+    ?? runtimeTarget;
   // dev.newai.land 上 Nginx 用 /api/cv-v1 进 K8s、/api/cuti 进本机 8002；经该域名时勿改成 /api/cuti
 
   // 分享链接：标题、简介、缩略图（Open Graph / Twitter Card）
@@ -81,48 +96,48 @@ export default defineConfig(({ mode, command }) => {
       proxy: {
         // 兼容旧路径：/api/cuti 仍转发到 VITE_CUTI_BACKEND_URL
         '/api/cuti': {
-          target: (env.VITE_CUTI_BACKEND_URL || env.VITE_BACKEND_URL || '').trim(),
+          target: apiTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path,
           configure: (proxy) => {
             proxy.on('proxyReq', (_proxyReq, req, _res) => {
-              console.log('🔄 Cuti proxy:', req.method, req.url, '→', (env.VITE_CUTI_BACKEND_URL || '').trim());
+              console.log('🔄 Cuti proxy:', req.method, req.url, '→', apiTarget);
             });
           },
         },
         // 经 newai.land 与线上一致；直连本机/内网 VideoAgent 时其只挂 /api/cuti，需重写
         '/api/cv-v1': {
-          target: (env.VITE_CUTI_BACKEND_URL || env.VITE_BACKEND_URL || '').trim(),
+          target: apiTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/api\/cv-v1/, '/api/cuti'),
           configure: (proxy) => {
             proxy.on('proxyReq', (_proxyReq, req, _res) => {
-              console.log('🔄 Cuti proxy:', req.method, req.url, '→', (env.VITE_CUTI_BACKEND_URL || '').trim());
+              console.log('🔄 Cuti proxy:', req.method, req.url, '→', apiTarget);
             });
           },
         },
         // Migrated DeepSeek BFF is mounted by Video Runtime on port 8001.
         // Legacy deployments can still override this with VITE_VIDEOCHAT_URL.
         '/chat-v1': {
-          target: (env.VITE_VIDEOCHAT_URL || 'http://127.0.0.1:8001').trim(),
+          target: runtimeTarget,
           changeOrigin: true,
           secure: false,
         },
         '/api/video': {
-          target: (env.VITE_VIDEO_RUNTIME_URL || env.VITE_CUTI_BACKEND_URL || 'http://127.0.0.1:8001').trim(),
+          target: runtimeTarget,
           changeOrigin: true,
           secure: false,
         },
-        // 代理其他 API 请求到 CartoonBook 后端
+        // 未配 VITE_BACKEND_URL 时跟 Runtime，避免 http-proxy target 为 null 把 Vite overlay 打出来
         '/api': {
-          target: env.VITE_BACKEND_URL,
+          target: apiTarget,
           changeOrigin: true,
           secure: false,
           configure: (proxy, _options) => {
             proxy.on('proxyReq', (_proxyReq, req, _res) => {
-              console.log('🔄 Proxying:', req.method, req.url, '→', env.VITE_BACKEND_URL);
+              console.log('🔄 Proxying:', req.method, req.url, '→', apiTarget);
             });
           },
         },
