@@ -46,15 +46,15 @@ Cuti-backend-go
   helm/values-prod.yaml
 ```
 
-每个仓只留一个 **Build and deploy** workflow：Helm 检查 → 编镜像进 ECR → helm upgrade。推 `dev` 会上 `vda-dev`（镜像 tag `dev`），推 `main` 会上 `vda-prod`（镜像 tag `main`）。也可以在 Actions 里手动 Run，选 dev 或 prod（Video Agent 还可勾服务，默认全勾）。
+每个仓只留一个 **Build and deploy** workflow：Helm 检查 → 编镜像进 ECR → helm upgrade。推 `dev` 会上 `vda-dev`，推 `main` 会上 `vda-prod`。镜像打 **git SHA**（Helm 用这个滚 Pod），同时再打浮动别名 `dev` / `main` 方便人在 ECR 里找，**不要**用别名做 `--set image.tag`。也可以在 Actions 里手动 Run，选 dev 或 prod（Video Agent 还可勾服务，默认全勾）。
 
 两个仓要分别点一次 **Build and deploy**（Video Agent 的 Studio / Runtime / Media / DSH，和 Go 仓的 API）。prod 建议 GitHub Environment `vda-prod` 开 required reviewers。GitHub 托管 runner 需要仓库 Secret `AWS_ROLE_ARN`（OIDC）；EC2 上的 instance role 只给那台机器用，GitHub 的虚机用不了。没配好之前镜像和 helm 仍走跳板机。GitHub 调用的是 `deploy/vda-upgrade.sh`，**不会**跑 `vda-apply.sh`（那是第一次装 namespace 用的，不要删）。DeepSeek 自带的 CI / Release / Issue / 文档那些 workflow 已去掉。
 
 本地点一次（和 Actions 同一脚本）：
 
 ```bash
-./deploy/vda-upgrade.sh dev --tag dev
-./deploy/vda-upgrade.sh prod --tag main --studio
+./deploy/vda-upgrade.sh dev --tag "$GITHUB_SHA"
+./deploy/vda-upgrade.sh prod --tag "$GITHUB_SHA" --studio
 ```
 
 Go：`Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
@@ -66,7 +66,7 @@ Go：`Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
 | **Dev** | http://k8s-vdadev-cutistud-9e1f0bbc43-61600723.ap-southeast-2.elb.amazonaws.com | `vda-dev` |
 | **Prod** | http://k8s-vdaprod-cutistud-084c8e4334-770037228.ap-southeast-2.elb.amazonaws.com | `vda-prod` |
 
-ALB 已挂悉尼 ACM（443）。用 ALB 长域名走 https 会证书名对不上；`dev.newai.land` / `cuti.land` CNAME 过去之后才是给用户的 HTTPS。现网旧站仍是 EC2，DNS 还没切。
+ALB 已挂悉尼 ACM（443）。`dev.newai.land` 指 `vda-dev` ALB，`www.cuti.land` 指 `vda-prod` ALB。HTTPS 用这些域名；ALB 长域名走 https 会证书名对不上。
 
 
 ## 同事本地（不要改）
@@ -131,7 +131,7 @@ helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-dev -f ./helm/values-d
 helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-prod -f ./helm/values-prod.yaml
 ```
 
-`--set image.tag=dev` 或 `main` 钉 ECR 里对应环境的镜像。
+`--set image.tag=<git SHA>` 钉这次 CI 推进 ECR 的不可变标签。浮动 `dev` / `main` 只给人看。
 
 ## 第三方依赖
 

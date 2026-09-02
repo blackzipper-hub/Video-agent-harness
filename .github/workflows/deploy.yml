@@ -1,8 +1,9 @@
 name: Build and deploy
 
 # One run: check Helm, build images to ECR, then helm upgrade.
-# Git dev → image tag dev → namespace vda-dev.
-# Git main → image tag main → namespace vda-prod.
+# Git dev → namespace vda-dev. Git main → namespace vda-prod.
+# Images are tagged with the git SHA (what Helm deploys) and also the floating
+# alias `dev` or `main` (human lookup only). Do not helm-upgrade from the alias.
 # Does not touch live namespaces dev/prod. Does not touch Postgres/Redis.
 # Manual Run: pick dev or prod, tick services (default all).
 
@@ -25,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 部署到哪（dev 用镜像 tag dev，prod 用镜像 tag main）
+        description: 部署到哪（镜像按本次 git SHA 部署；并额外打上浮动 tag dev 或 main）
         type: choice
         required: true
         default: dev
@@ -90,6 +91,7 @@ jobs:
     outputs:
       env: ${{ steps.s.outputs.env }}
       tag: ${{ steps.s.outputs.tag }}
+      floating: ${{ steps.s.outputs.floating }}
       images: ${{ steps.s.outputs.images }}
     steps:
       - id: s
@@ -109,7 +111,8 @@ jobs:
           else
             env=dev
           fi
-          if [ "$env" = "prod" ]; then tag=main; else tag=dev; fi
+          if [ "$env" = "prod" ]; then floating=main; else floating=dev; fi
+          tag="$GITHUB_SHA"
 
           want() {
             if [ "$EVENT_NAME" != "workflow_dispatch" ]; then return 0; fi
@@ -128,8 +131,9 @@ jobs:
 
           echo "env=$env" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "floating=$floating" >> "$GITHUB_OUTPUT"
           echo "images=$images" >> "$GITHUB_OUTPUT"
-          echo "will build and deploy tag $tag to vda-$env images=$images"
+          echo "will build SHA $tag and alias $floating, deploy to vda-$env images=$images"
 
   images:
     name: Build ${{ matrix.name }}
@@ -154,7 +158,9 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:${{ needs.setup.outputs.tag }}
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:${{ needs.setup.outputs.tag }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:${{ needs.setup.outputs.floating }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -188,7 +194,7 @@ jobs:
           set -euo pipefail
           env="${{ needs.setup.outputs.env }}"
           tag="${{ needs.setup.outputs.tag }}"
-          echo "deploying tag $tag to vda-$env"
+          echo "deploying SHA $tag (alias ${{ needs.setup.outputs.floating }}) to vda-$env"
           chmod +x deploy/vda-upgrade.sh
           args=( "$env" --tag "$tag" )
           if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.studio }}" = "true" ]; then args+=(--studio); fi

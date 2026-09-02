@@ -11,14 +11,7 @@ vendor/**/lib
 **/.pytest_cache
 **/*.pyc
 tmp
-# Keep vendor/C++ bundles out of the image, but copy dest product Skills.
-services/video-runtime/skills/external/*
-!services/video-runtime/skills/external/mv/
-!services/video-runtime/skills/external/mv/**
-!services/video-runtime/skills/external/h3/
-!services/video-runtime/skills/external/h3/**
-!services/video-runtime/skills/external/suno-song/
-!services/video-runtime/skills/external/suno-song/**
+# Copy the full external Skill catalog into the Runtime image so Studio can list it.
 services/video-runtime/ee
 services/video-runtime/logs
 services/video-runtime/data

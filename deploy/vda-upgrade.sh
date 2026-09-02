@@ -2,12 +2,12 @@
 # Roll existing vda-dev / vda-prod app releases. Does not install Postgres/Redis,
 # does not touch live namespaces `dev` / `prod`, does not recreate Ingress/ALB.
 #
-#   ./deploy/vda-upgrade.sh dev --tag dev
-#   ./deploy/vda-upgrade.sh prod --tag main --studio
-#   ./deploy/vda-upgrade.sh prod --tag main --runtime --media
+#   ./deploy/vda-upgrade.sh dev --tag "$GITHUB_SHA"
+#   ./deploy/vda-upgrade.sh prod --tag "$GITHUB_SHA" --studio
+# Floating aliases `dev` / `main` exist on ECR for lookup; do not deploy them.
 set -euo pipefail
 
-ENV="${1:?usage: $0 dev|prod --tag TAG [--all|--studio|--runtime|--media|--dsh]}"
+ENV="${1:?usage: $0 dev|prod --tag GIT_SHA [--all|--studio|--runtime|--media|--dsh]}"
 shift
 case "$ENV" in
   dev|prod) ;;
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAG" ]]; then
-  echo "--tag is required (ECR tag: dev or main)" >&2
+  echo "--tag is required (ECR git SHA from CI; not the floating aliases dev/main)" >&2
   exit 1
 fi
 if [[ "$ANY" -eq 0 ]]; then
@@ -52,6 +52,9 @@ if [[ "$NS" != "vda-dev" && "$NS" != "vda-prod" ]]; then
 fi
 
 echo "namespace=$NS tag=$TAG studio=$DO_STUDIO runtime=$DO_RUNTIME media=$DO_MEDIA dsh=$DO_DSH"
+if [[ "$TAG" == "dev" || "$TAG" == "main" ]]; then
+  echo "warning: $TAG is a floating alias; Helm will not roll pods if the Deployment already uses it. Prefer the git SHA CI pushed." >&2
+fi
 
 if [[ "$DO_RUNTIME" -eq 1 ]]; then
   helm upgrade cuti-runtime "$ROOT/services/video-runtime/helm/cuti-videoagent" -n "$NS" \
