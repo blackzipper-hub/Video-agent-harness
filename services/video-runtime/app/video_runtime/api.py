@@ -10,12 +10,16 @@ from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .repository import ProjectVersionConflict
+from .repository import (
+    PlanRevisionConflict,
+    ProjectVersionConflict,
+    VideoSpecRevisionConflict,
+)
 from .runtime import VideoBuildRuntime
 from .identity import IdentityResolver, ServiceOrLocalIdentityResolver
-from .models import VideoSpec
+from .models import CheckpointResolution, ProjectIntent, VideoSpec
 from .plugins import PluginDependencyError, VideoPluginManifest
 from .plugins.registry import configured_plugin_roots
 
@@ -60,7 +64,31 @@ class RebuildBody(ApiBody):
 class PlanBody(ApiBody):
     base_project_version_id: str
     idempotency_key: str = Field(min_length=1, max_length=200)
-    video_spec: VideoSpec
+    video_spec: VideoSpec | None = None
+    project_intent: ProjectIntent | None = None
+
+    @model_validator(mode="after")
+    def require_one_planning_input(self):
+        if (self.video_spec is None) == (self.project_intent is None):
+            raise ValueError("provide exactly one of videoSpec or projectIntent")
+        return self
+
+
+class CheckpointResolveBody(ApiBody):
+    base_plan_revision: int = Field(ge=1)
+    base_spec_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    video_spec: VideoSpec | None = None
+    video_spec_patch: dict | None = None
+    phase_inputs: dict = Field(default_factory=dict)
+    proposed_steps: list[dict] = Field(default_factory=list)
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def exactly_one_spec_input(self):
+        if (self.video_spec is None) == (self.video_spec_patch is None):
+            raise ValueError("provide exactly one of videoSpec or videoSpecPatch")
+        return self
 
 
 class BuildBody(ApiBody):
@@ -212,13 +240,26 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
     versions = await build_runtime.repo.list_project_versions(project_id)
     builds = await build_runtime.repo.list_builds(project_id)
     build_payloads = []
+    active_checkpoint = None
+    plan_revision_history: list[dict] = []
     for build in builds[:10]:
         steps = await build_runtime.repo.list_build_steps(project_id, build.id)
         validations = await build_runtime.repo.list_validation_results(project_id, build.id)
+        checkpoints = await build_runtime.repo.list_build_checkpoints(project_id, build.id)
+        if active_checkpoint is None:
+            active_checkpoint = next(
+                (item for item in reversed(checkpoints) if item.status in {"pending", "planning"}),
+                None,
+            )
+        plan_revisions = await build_runtime.repo.list_plan_revisions(build.plan_id)
+        plan_revision_history.extend(
+            item.model_dump(mode="json") for item in plan_revisions
+        )
         build_payloads.append({
             **_build_payload(build),
             "steps": [item.model_dump(mode="json") for item in steps],
             "validations": [item.model_dump(mode="json") for item in validations],
+            "checkpoints": [item.model_dump(mode="json") for item in checkpoints],
         })
     spec = None
     for artifact in reversed(artifacts):
@@ -232,6 +273,8 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
     for artifact in artifacts:
         payload = _artifact_payload(project_id, artifact, selected_ids)
         grouped.setdefault(payload["logicalId"], []).append(payload)
+    spec_revisions = await build_runtime.repo.list_video_spec_revisions(project_id)
+    current_spec_revision = spec_revisions[-1] if spec_revisions else None
     return {
         "project": project.model_dump(mode="json"),
         "currentProjectVersion": current_version.model_dump(mode="json"),
@@ -244,6 +287,41 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
         ],
         "builds": build_payloads,
         "projectVersions": [item.model_dump(mode="json") for item in reversed(versions)],
+        "videoSpecRevision": (
+            current_spec_revision.model_dump(mode="json")
+            if current_spec_revision is not None else None
+        ),
+        "videoSpecRevisions": [
+            item.model_dump(mode="json") for item in reversed(spec_revisions)
+        ],
+        "currentBuildPhase": (
+            active_checkpoint.next_phase if active_checkpoint is not None else None
+        ),
+        "activeCheckpoint": (
+            active_checkpoint.model_dump(mode="json")
+            if active_checkpoint is not None else None
+        ),
+        "resolvedSections": (
+            list(active_checkpoint.resolved_sections)
+            if active_checkpoint is not None
+            else (
+                list(current_spec_revision.resolved_sections)
+                if current_spec_revision is not None else []
+            )
+        ),
+        "unresolvedSections": (
+            list(active_checkpoint.unresolved_sections)
+            if active_checkpoint is not None
+            else (
+                list(current_spec_revision.unresolved_sections)
+                if current_spec_revision is not None else []
+            )
+        ),
+        "planRevisions": sorted(
+            plan_revision_history,
+            key=lambda item: item["created_at"],
+            reverse=True,
+        ),
     }
 
 
@@ -612,10 +690,15 @@ async def create_build_plan(
             project_id=project_id,
             base_project_version_id=body.base_project_version_id,
             video_spec=body.video_spec,
+            project_intent=body.project_intent,
             idempotency_key=body.idempotency_key,
         )
     except ProjectVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": _plan_payload(plan)}
 
 
@@ -721,6 +804,99 @@ async def list_build_steps(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"data": [item.model_dump(mode="json") for item in steps]}
+
+
+@router.get(
+    "/projects/{project_id}/builds/{build_id}/checkpoints/{checkpoint_id}",
+)
+async def inspect_build_checkpoint(
+    project_id: str,
+    build_id: str,
+    checkpoint_id: str,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    await _owned_and_bound(build_runtime, project_id, identity)
+    try:
+        checkpoint = await build_runtime.inspect_checkpoint(
+            project_id=project_id,
+            build_id=build_id,
+            checkpoint_id=checkpoint_id,
+            session_id=identity[1],
+            user_id=identity[0],
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"data": checkpoint.model_dump(mode="json")}
+
+
+@router.post(
+    "/projects/{project_id}/builds/{build_id}/checkpoints/{checkpoint_id}/resolve",
+)
+async def resolve_build_checkpoint(
+    project_id: str,
+    build_id: str,
+    checkpoint_id: str,
+    body: CheckpointResolveBody,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    await _owned_and_bound(build_runtime, project_id, identity)
+    if identity[1] is None:
+        raise HTTPException(status_code=400, detail="DeepSeek Session identity is required")
+    try:
+        resolution = CheckpointResolution.model_validate(body.model_dump())
+        plan = await build_runtime.resolve_checkpoint(
+            project_id=project_id,
+            build_id=build_id,
+            checkpoint_id=checkpoint_id,
+            resolution=resolution,
+            session_id=identity[1],
+            user_id=identity[0],
+        )
+    except (PlanRevisionConflict, VideoSpecRevisionConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": _plan_payload(plan)}
+
+
+@router.post(
+    "/projects/{project_id}/builds/{build_id}/checkpoints/{checkpoint_id}/retry",
+)
+async def retry_build_checkpoint(
+    project_id: str,
+    build_id: str,
+    checkpoint_id: str,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    await _owned_and_bound(build_runtime, project_id, identity)
+    try:
+        checkpoint = await build_runtime.inspect_checkpoint(
+            project_id=project_id,
+            build_id=build_id,
+            checkpoint_id=checkpoint_id,
+            user_id=identity[0],
+        )
+        if checkpoint.status != "failed":
+            raise ValueError("only failed checkpoints can be retried")
+        checkpoint = await build_runtime.retry_checkpoint(
+            project_id=project_id,
+            build_id=build_id,
+            checkpoint_id=checkpoint_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"data": checkpoint.model_dump(mode="json")}
 
 
 @router.get("/projects/{project_id}/builds/{build_id}/validations")
@@ -947,7 +1123,18 @@ def _plan_payload(plan) -> dict:
         "baseProjectVersionId": plan.base_project_version_id,
         "workflowId": plan.workflow_id,
         "videoSpec": plan.video_spec.model_dump(mode="json") if plan.video_spec else None,
+        "projectIntent": (
+            plan.project_intent.model_dump(mode="json") if plan.project_intent else None
+        ),
         "shotCount": len(plan.video_spec.shots) if plan.video_spec else 0,
+        "schemaVersion": plan.schema_version,
+        "planRevision": plan.current_revision,
+        "specRevisionId": plan.video_spec_revision_id,
+        "currentPhase": plan.current_phase,
+        "nextCheckpoint": (
+            plan.next_checkpoint.model_dump(mode="json")
+            if plan.next_checkpoint is not None else None
+        ),
         "estimatedCost": plan.estimated_cost,
         "steps": [item.model_dump(mode="json") for item in plan.items],
     }

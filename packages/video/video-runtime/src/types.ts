@@ -53,6 +53,23 @@ export interface VideoSpec {
   automation: { mode: 'automatic'; max_artifact_retries: number }
 }
 
+export interface ProjectIntent {
+  title: string
+  brief: string
+  language: string
+  target_duration_seconds: number
+  aspect_ratio: '16:9' | '9:16' | '1:1'
+  resolution: string
+  workflow_id: string
+  style_id: string
+  activated_skill_ids?: string[]
+  source_asset_ids?: string[]
+  workflow_parameters?: Record<string, JsonValue>
+  providers: { video: string; image: string; music: string }
+  automation: { mode: 'automatic'; max_artifact_retries: number }
+  constraints?: Record<string, JsonValue>
+}
+
 export interface CreateProjectRequest {
   title: string
   idempotencyKey: string
@@ -62,7 +79,8 @@ export interface BuildPlanRequest {
   projectId: string
   baseProjectVersionId: string
   idempotencyKey: string
-  videoSpec: VideoSpec
+  videoSpec?: VideoSpec
+  projectIntent?: ProjectIntent
 }
 
 export interface BuildPlanSnapshot {
@@ -72,8 +90,14 @@ export interface BuildPlanSnapshot {
   status: string
   baseProjectVersionId: string
   workflowId: string
-  videoSpec: VideoSpec
+  videoSpec?: VideoSpec
+  projectIntent?: ProjectIntent
   shotCount: number
+  schemaVersion: 1 | 2
+  planRevision: number
+  specRevisionId?: string
+  currentPhase: string
+  nextCheckpoint?: Record<string, JsonValue>
   estimatedCost: number
   steps: Array<Record<string, JsonValue>>
 }
@@ -126,7 +150,7 @@ export interface RebuildRequest {
 export interface BuildSnapshot {
   buildId: string
   projectId: string
-  status: 'queued' | 'running' | 'waiting_external' | 'completed' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'waiting_external' | 'waiting_agent' | 'completed' | 'failed' | 'cancelled'
   progress: number
   message: string
   projectVersionId?: string
@@ -134,6 +158,41 @@ export interface BuildSnapshot {
   estimatedCost: number
   actualCost: number
   error?: string
+}
+
+export interface PlanCheckpoint {
+  id: string
+  project_id: string
+  build_id: string
+  plan_id: string
+  workflow_id: string
+  session_id: string
+  phase: string
+  next_phase: string
+  status: 'pending' | 'planning' | 'resolved' | 'failed'
+  artifact_summaries: Array<Record<string, JsonValue>>
+  resolved_sections: string[]
+  unresolved_sections: string[]
+  planner_instruction: string
+  planning_mode: 'staged' | 'agentic'
+  base_plan_revision: number
+  base_spec_revision: number
+  delivery_attempts: number
+  error?: string
+}
+
+export interface CheckpointResolutionRequest {
+  projectId: string
+  buildId: string
+  checkpointId: string
+  basePlanRevision: number
+  baseSpecRevision: number
+  idempotencyKey: string
+  videoSpec?: VideoSpec
+  videoSpecPatch?: Record<string, JsonValue>
+  phaseInputs?: Record<string, JsonValue>
+  proposedSteps?: Array<Record<string, JsonValue>>
+  reason?: string
 }
 
 export interface ArtifactSelectionRequest {

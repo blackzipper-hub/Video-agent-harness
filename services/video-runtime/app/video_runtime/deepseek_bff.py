@@ -228,6 +228,7 @@ def _usage_payload(data: dict[str, Any]) -> dict[str, Any] | None:
 
 
 _CREATE_PROMPT_MARKER = "CUTI_VIDEO_CREATE_V1"
+_CHECKPOINT_PROMPT_MARKER = "CUTI_VIDEO_CHECKPOINT_V1"
 _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
@@ -283,6 +284,8 @@ def _validate_workflow_selection(
 
 def _visible_user_text(value: str) -> str:
     """Keep BFF orchestration instructions out of the legacy chat transcript."""
+    if value.startswith(f"{_CHECKPOINT_PROMPT_MARKER}\n"):
+        return ""
     controls_separator = "\n\nCurrent creation controls and inputs:\n"
     if controls_separator in value:
         value = value.split(controls_separator, 1)[0]
@@ -316,6 +319,9 @@ def _initial_video_build_prompt(
     options = user_option or {}
     activated = list(dict.fromkeys(activated_skill_ids or []))
     safe_inputs = _prompt_input_files(input_files)
+    staged = os.getenv("VIDEO_STAGED_PLANNING_ENABLED", "false").lower() in {
+        "1", "true", "yes", "on",
+    }
     lines = [
         _CREATE_PROMPT_MARKER,
         f"VISIBLE_USER_REQUEST_JSON: {json.dumps(objective, ensure_ascii=False)}",
@@ -331,9 +337,15 @@ def _initial_video_build_prompt(
             "Use only the uploaded artifact_id values as VideoSpec.source_asset_ids and shot "
             "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
         ),
-        "Turn the visible user request and creation controls into one complete, valid VideoSpec.",
         (
-            f"Set VideoSpec.activated_skill_ids exactly to {json.dumps(activated, ensure_ascii=False)}. "
+            "Create a ProjectIntent containing only known goals and constraints. Do not invent "
+            "shots, captions, timing, or other details that depend on media not generated yet."
+            if staged else
+            "Turn the visible user request and creation controls into one complete, valid VideoSpec."
+        ),
+        (
+            f"Set {'ProjectIntent' if staged else 'VideoSpec'}.activated_skill_ids exactly to "
+            f"{json.dumps(activated, ensure_ascii=False)}. "
             "Always use automation.mode automatic."
         ),
         "Respect duration, aspect ratio, resolution, selected image/video providers, and attachments when present.",
@@ -346,20 +358,20 @@ def _initial_video_build_prompt(
             "After video_workflow_load, follow that Skill's instructions, including any "
             "video_skill_load and video_skill_read_resource calls it names, markdown links "
             "to bundled files, and paths under references/. Helper Skills stay in context; "
-            "do not copy them into VideoSpec.activated_skill_ids unless the user or a "
+            "do not copy them into activated_skill_ids unless the user or a "
             "project lock already activated them."
         ),
     ]
     if workflow_id:
         lines.append(
             f"The workflow is explicitly selected or project-locked: {json.dumps(workflow_id)}. "
-            "Call video_workflow_load for it, then set VideoSpec.workflow_id exactly to that id."
+            "Call video_workflow_load for it, then set workflow_id exactly to that id."
         )
     else:
         lines.append(
             "No workflow was explicitly selected. Call video_workflow_list, choose the best "
             "available user-selectable workflow from its descriptions, call video_workflow_load "
-            "for that workflow, and set VideoSpec.workflow_id to its exact id. Never choose an "
+            "for that workflow, and set workflow_id to its exact id. Never choose an "
             "unavailable workflow and never silently substitute another workflow after a failure."
         )
     if activated:
@@ -370,7 +382,8 @@ def _initial_video_build_prompt(
         "Then perform these tool calls in order without asking for confirmation:",
         (
             "1. video_project_plan with the existing project_id and base_project_version_id, "
-            f"using idempotency_key plan:{idempotency_key}."
+            f"using idempotency_key plan:{idempotency_key} and "
+            + ("project_intent." if staged else "video_spec.")
         ),
         (
             "2. video_project_build with the returned plan_id and the same base version, "
@@ -627,7 +640,10 @@ async def create_run(
     )
     _validate_workflow_selection(runtime, requested_workflow)
     try:
-        session_id = await dsh.create_session(session_id=body.thread_id)
+        session_id = await dsh.create_session(
+            session_id=body.thread_id,
+            agent_preset=os.getenv("VIDEO_AGENT_PRESET", "video"),
+        )
         project, initial_version = await runtime.create_project(
             user_id=user_id,
             title=body.objective[:200],
@@ -825,11 +841,17 @@ def _compat_event(project_id: str, event: dict[str, Any]) -> dict[str, Any] | No
         mapped_type = "chat.message.created"
         milliseconds = event.get("time") if isinstance(event.get("time"), (int, float)) else 0
         created_at = datetime.fromtimestamp(milliseconds / 1000, timezone.utc).isoformat()
+        visible_content = (
+            _visible_user_text(_text(content_source)) if role == "user"
+            else _text(content_source)
+        )
+        if not visible_content:
+            return None
         payload = {"message": {
             "id": f"dsh-{project_id}-{event.get('seq', 0)}",
             "run_id": project_id,
             "role": role,
-            "content": _visible_user_text(_text(content_source)) if role == "user" else _text(content_source),
+            "content": visible_content,
             "sequence": event.get("seq", 0) + 1,
             "metadata": {"source": "deepseek-harness"},
             "created_at": created_at,

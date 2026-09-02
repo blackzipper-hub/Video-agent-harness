@@ -9,6 +9,15 @@ metadata:
   workflow:
     title: Seedance MV
     mode: seedance_mv
+    planning:
+      mode: staged
+      checkpoints:
+        - id: music_ready
+          after_phase: music_analysis
+          next_phase: visual_production
+          required_artifacts: [audiomap, audio_cut]
+          resolves: [shots, captions, timeline]
+          instruction: Plan the MV from the real music duration, beats, lyrics, and cut window.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: seedance2_script

@@ -19,6 +19,15 @@ metadata:
   workflow:
     title: LibTV multireference product commercial
     mode: libtv_product_workflow
+    planning:
+      mode: staged
+      checkpoints:
+        - id: product_ready
+          after_phase: source_analysis
+          next_phase: visual_production
+          required_artifacts: [product_analysis, source_image]
+          resolves: [shots, product_constraints]
+          instruction: Plan multireference shots from verified product identity and actual source media.
     entrypoints: [text, image, audio, video]
     parameters:
       workflow_mode: libtv_product_workflow

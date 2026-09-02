@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 
 import asyncpg
 
 from .models import (
-    ArtifactDependency, Build, BuildStep, ChangeRequest, ExportRecord, MediaArtifactVersion,
-    Project, ProjectEvent, ProjectSessionBinding, ProjectSkillLock, ProjectVersion, RebuildPlan,
-    RebuildPlanItem, ValidationResult, now,
+    ArtifactDependency, Build, BuildPlanRevision, BuildStep, ChangeRequest, ExportRecord,
+    MediaArtifactVersion, PlanCheckpoint, Project, ProjectEvent, ProjectSessionBinding,
+    ProjectSkillLock, ProjectVersion, RebuildPlan, RebuildPlanItem, ValidationResult,
+    VideoSpecRevision, now, uid,
 )
-from .repository import ProjectVersionConflict
+from .repository import PlanRevisionConflict, ProjectVersionConflict, VideoSpecRevisionConflict
 
 
 class PostgresVideoProjectRepository:
@@ -267,6 +269,7 @@ class PostgresVideoProjectRepository:
                 project_id=project.id, parent_version_id=current.id,
                 timeline_version_id=artifact.id if artifact.type == "timeline" else current.timeline_version_id,
                 selections=selections,
+                video_spec_revision_id=current.video_spec_revision_id,
             )
             await self._commit_version(connection, project, version)
             await self._append_event(connection, project.id, "artifact.committed", {
@@ -378,6 +381,76 @@ class PostgresVideoProjectRepository:
                 "estimated_cost": plan.estimated_cost,
             })
         return plan
+
+    async def save_staged_plan(
+        self,
+        plan: RebuildPlan,
+        spec_revision: VideoSpecRevision,
+        plan_revision: BuildPlanRevision,
+        idempotency_key: str,
+    ) -> RebuildPlan:
+        async with self.pool.acquire() as connection, connection.transaction():
+            project = await self._locked_project(connection, plan.project_id)
+            existing = await self._idempotent_result(
+                connection, plan.project_id, "plan", idempotency_key,
+            )
+            if existing:
+                return await self._get_plan(connection, existing)
+            self._assert_version(project, plan.base_project_version_id)
+            await self._insert_spec_revision(connection, spec_revision)
+            await connection.execute(
+                f"""INSERT INTO {self.schema}.rebuild_plans
+                (id,project_id,change_request_id,base_project_version_id,kind,workflow_id,
+                 video_spec,items,estimated_cost,status,created_at,schema_version,current_revision,
+                 project_intent,video_spec_revision_id,current_phase,next_checkpoint)
+                VALUES($1,$2,NULL,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,
+                 $13::jsonb,$14,$15,$16::jsonb)""",
+                plan.id, plan.project_id, plan.base_project_version_id, plan.kind,
+                plan.workflow_id,
+                json.dumps(plan.video_spec.model_dump(mode="json") if plan.video_spec else None),
+                json.dumps([item.model_dump(mode="json") for item in plan.items]),
+                plan.estimated_cost, plan.status, plan.created_at, plan.schema_version,
+                plan.current_revision,
+                json.dumps(plan.project_intent.model_dump(mode="json") if plan.project_intent else None),
+                plan.video_spec_revision_id, plan.current_phase,
+                json.dumps(plan.next_checkpoint.model_dump(mode="json") if plan.next_checkpoint else None),
+            )
+            await self._insert_plan_revision(connection, plan_revision)
+            await self._remember(connection, plan.project_id, "plan", idempotency_key, plan.id)
+            await self._append_event(connection, plan.project_id, "video_spec.revised", {
+                "video_spec_revision_id": spec_revision.id,
+                "revision": spec_revision.revision,
+                "complete": spec_revision.complete,
+            })
+            await self._append_event(connection, plan.project_id, "plan.revised", {
+                "plan_id": plan.id,
+                "revision": plan_revision.revision,
+                "phase": plan.current_phase,
+            })
+        return plan
+
+    async def get_video_spec_revision(self, revision_id: str) -> VideoSpecRevision:
+        row = await self.pool.fetchrow(
+            f"SELECT * FROM {self.schema}.video_spec_revisions WHERE id=$1", revision_id,
+        )
+        if row is None:
+            raise LookupError("VideoSpec revision not found")
+        return self._spec_revision(row)
+
+    async def list_video_spec_revisions(self, project_id: str) -> list[VideoSpecRevision]:
+        await self.get_project(project_id)
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.video_spec_revisions
+            WHERE project_id=$1 ORDER BY revision""", project_id,
+        )
+        return [self._spec_revision(row) for row in rows]
+
+    async def list_plan_revisions(self, plan_id: str) -> list[BuildPlanRevision]:
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.build_plan_revisions
+            WHERE plan_id=$1 ORDER BY revision""", plan_id,
+        )
+        return [self._plan_revision(row) for row in rows]
 
     async def submit_build(
         self, *, project_id: str, plan_id: str, base_version_id: str,
@@ -535,6 +608,7 @@ class PostgresVideoProjectRepository:
             if any(not item.passed for item in validation_results):
                 raise ValueError("all initial build validations must pass before commit")
             current = await self._get_version(connection, project.current_version_id)
+            plan = await self._get_plan(connection, build.plan_id)
             selections = dict(current.selections)
             timeline_id = current.timeline_version_id
             for artifact in artifacts:
@@ -563,6 +637,7 @@ class PostgresVideoProjectRepository:
             version = ProjectVersion(
                 project_id=project.id, parent_version_id=project.current_version_id,
                 timeline_version_id=timeline_id, selections=selections,
+                video_spec_revision_id=plan.video_spec_revision_id,
             )
             await self._commit_version(connection, project, version)
             for item in validation_results:
@@ -597,6 +672,310 @@ class PostgresVideoProjectRepository:
             raise LookupError("build not found")
         return self._build(row)
 
+    async def create_checkpoint(self, checkpoint: PlanCheckpoint) -> PlanCheckpoint:
+        async with self.pool.acquire() as connection, connection.transaction():
+            build_row = await connection.fetchrow(
+                f"""SELECT * FROM {self.schema}.builds
+                WHERE id=$1 AND project_id=$2 FOR UPDATE""",
+                checkpoint.build_id, checkpoint.project_id,
+            )
+            if build_row is None:
+                raise LookupError("build not found")
+            inserted = await connection.fetchrow(
+                f"""INSERT INTO {self.schema}.plan_checkpoints
+                (id,project_id,build_id,plan_id,workflow_id,session_id,user_id,phase,next_phase,
+                 status,required_artifact_types,artifact_version_ids,artifact_summaries,
+                 resolved_sections,unresolved_sections,planner_instruction,planning_mode,
+                 base_plan_revision,base_spec_revision,delivery_attempts,max_delivery_attempts,
+                 semantic_repair_attempts,delivery_id,lease_expires_at,error,created_at,updated_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,
+                 $14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+                ON CONFLICT(build_id,phase) DO NOTHING RETURNING *""",
+                checkpoint.id, checkpoint.project_id, checkpoint.build_id, checkpoint.plan_id,
+                checkpoint.workflow_id, checkpoint.session_id, checkpoint.user_id,
+                checkpoint.phase, checkpoint.next_phase, checkpoint.status,
+                json.dumps(checkpoint.required_artifact_types),
+                json.dumps(checkpoint.artifact_version_ids),
+                json.dumps(checkpoint.artifact_summaries),
+                json.dumps(checkpoint.resolved_sections),
+                json.dumps(checkpoint.unresolved_sections), checkpoint.planner_instruction,
+                checkpoint.planning_mode, checkpoint.base_plan_revision,
+                checkpoint.base_spec_revision, checkpoint.delivery_attempts,
+                checkpoint.max_delivery_attempts, checkpoint.semantic_repair_attempts,
+                checkpoint.delivery_id, checkpoint.lease_expires_at, checkpoint.error,
+                checkpoint.created_at, checkpoint.updated_at,
+            )
+            if inserted is None:
+                existing = await connection.fetchrow(
+                    f"""SELECT * FROM {self.schema}.plan_checkpoints
+                    WHERE build_id=$1 AND phase=$2""", checkpoint.build_id, checkpoint.phase,
+                )
+                return self._checkpoint(existing)
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds SET status='waiting_agent',message=$3,updated_at=$4
+                WHERE id=$1 AND project_id=$2""",
+                checkpoint.build_id, checkpoint.project_id,
+                f"Waiting for Agent planning after {checkpoint.phase}", now(),
+            )
+            await self._append_event(connection, checkpoint.project_id, "build.phase.completed", {
+                "build_id": checkpoint.build_id, "phase": checkpoint.phase,
+            })
+            await self._append_event(connection, checkpoint.project_id, "build.checkpoint.waiting", {
+                "build_id": checkpoint.build_id, "checkpoint_id": checkpoint.id,
+                "phase": checkpoint.phase, "next_phase": checkpoint.next_phase,
+            })
+        return checkpoint
+
+    async def get_checkpoint(
+        self, project_id: str, build_id: str, checkpoint_id: str,
+    ) -> PlanCheckpoint:
+        row = await self.pool.fetchrow(
+            f"""SELECT * FROM {self.schema}.plan_checkpoints
+            WHERE id=$1 AND project_id=$2 AND build_id=$3""",
+            checkpoint_id, project_id, build_id,
+        )
+        if row is None:
+            raise LookupError("plan checkpoint not found")
+        return self._checkpoint(row)
+
+    async def list_build_checkpoints(
+        self, project_id: str, build_id: str,
+    ) -> list[PlanCheckpoint]:
+        await self.get_build(project_id, build_id)
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.plan_checkpoints
+            WHERE project_id=$1 AND build_id=$2 ORDER BY created_at""",
+            project_id, build_id,
+        )
+        return [self._checkpoint(row) for row in rows]
+
+    async def claim_pending_checkpoint(self, lease_seconds: int = 120) -> PlanCheckpoint | None:
+        current_time = now()
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""SELECT * FROM {self.schema}.plan_checkpoints
+                WHERE status='pending'
+                   OR (status='planning' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1)
+                ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
+                current_time,
+            )
+            if row is None:
+                return None
+            checkpoint = self._checkpoint(row)
+            checkpoint.status = "planning"
+            checkpoint.delivery_attempts += 1
+            checkpoint.delivery_id = checkpoint.delivery_id or uid()
+            checkpoint.lease_expires_at = current_time + timedelta(seconds=lease_seconds)
+            checkpoint.updated_at = current_time
+            await connection.execute(
+                f"""UPDATE {self.schema}.plan_checkpoints
+                SET status=$2,delivery_attempts=$3,delivery_id=$4,lease_expires_at=$5,updated_at=$6
+                WHERE id=$1""",
+                checkpoint.id, checkpoint.status, checkpoint.delivery_attempts,
+                checkpoint.delivery_id, checkpoint.lease_expires_at, checkpoint.updated_at,
+            )
+            await self._append_event(connection, checkpoint.project_id, "build.checkpoint.planning", {
+                "build_id": checkpoint.build_id,
+                "checkpoint_id": checkpoint.id,
+                "attempt": checkpoint.delivery_attempts,
+            })
+        return checkpoint
+
+    async def fail_checkpoint_delivery(self, checkpoint_id: str, error: str) -> PlanCheckpoint:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.plan_checkpoints WHERE id=$1 FOR UPDATE",
+                checkpoint_id,
+            )
+            if row is None:
+                raise LookupError("plan checkpoint not found")
+            checkpoint = self._checkpoint(row)
+            checkpoint.error = error
+            checkpoint.lease_expires_at = None
+            checkpoint.updated_at = now()
+            terminal = checkpoint.delivery_attempts >= checkpoint.max_delivery_attempts
+            checkpoint.status = "failed" if terminal else "pending"
+            await connection.execute(
+                f"""UPDATE {self.schema}.plan_checkpoints
+                SET status=$2,lease_expires_at=NULL,error=$3,updated_at=$4 WHERE id=$1""",
+                checkpoint.id, checkpoint.status, checkpoint.error, checkpoint.updated_at,
+            )
+            event_type = "build.checkpoint.failed" if terminal else "build.checkpoint.waiting"
+            if terminal:
+                await connection.execute(
+                    f"""UPDATE {self.schema}.builds
+                    SET status='failed',message=$2,error=$3,updated_at=$4 WHERE id=$1""",
+                    checkpoint.build_id,
+                    "Agent planning failed; the previous project version remains active",
+                    error, now(),
+                )
+            await self._append_event(connection, checkpoint.project_id, event_type, {
+                "build_id": checkpoint.build_id,
+                "checkpoint_id": checkpoint.id,
+                "attempt": checkpoint.delivery_attempts,
+                "error": error,
+            })
+        return checkpoint
+
+    async def resolve_checkpoint(
+        self,
+        *,
+        checkpoint: PlanCheckpoint,
+        updated_plan: RebuildPlan,
+        spec_revision: VideoSpecRevision,
+        plan_revision: BuildPlanRevision,
+        idempotency_key: str,
+    ) -> RebuildPlan:
+        async with self.pool.acquire() as connection, connection.transaction():
+            stored_row = await connection.fetchrow(
+                f"""SELECT * FROM {self.schema}.plan_checkpoints
+                WHERE id=$1 AND project_id=$2 AND build_id=$3 FOR UPDATE""",
+                checkpoint.id, checkpoint.project_id, checkpoint.build_id,
+            )
+            if stored_row is None:
+                raise LookupError("plan checkpoint not found")
+            stored = self._checkpoint(stored_row)
+            operation = f"checkpoint:{stored.id}"
+            existing = await self._idempotent_result(
+                connection, stored.project_id, operation, idempotency_key,
+            )
+            if existing:
+                return await self._get_plan(connection, existing)
+            current_plan = await self._get_plan(connection, stored.plan_id)
+            latest_spec_row = await connection.fetchrow(
+                f"""SELECT * FROM {self.schema}.video_spec_revisions
+                WHERE project_id=$1 ORDER BY revision DESC LIMIT 1 FOR UPDATE""",
+                stored.project_id,
+            )
+            if latest_spec_row is None:
+                raise LookupError("VideoSpec revision not found")
+            latest_spec = self._spec_revision(latest_spec_row)
+            if current_plan.current_revision != checkpoint.base_plan_revision:
+                raise PlanRevisionConflict(checkpoint.base_plan_revision, current_plan.current_revision)
+            if latest_spec.revision != checkpoint.base_spec_revision:
+                raise VideoSpecRevisionConflict(checkpoint.base_spec_revision, latest_spec.revision)
+            if stored.status not in {"pending", "planning"}:
+                raise ValueError(f"cannot resolve {stored.status} checkpoint")
+            existing_step_ids = {
+                row["plan_step_id"] for row in await connection.fetch(
+                    f"SELECT plan_step_id FROM {self.schema}.build_steps WHERE build_id=$1",
+                    stored.build_id,
+                )
+            }
+            added = [item for item in updated_plan.items if item.step_id not in existing_step_ids]
+            await self._insert_spec_revision(connection, spec_revision)
+            await self._insert_plan_revision(connection, plan_revision)
+            await connection.execute(
+                f"""UPDATE {self.schema}.rebuild_plans
+                SET video_spec=$2::jsonb,items=$3::jsonb,estimated_cost=$4,
+                    current_revision=$5,video_spec_revision_id=$6,current_phase=$7,
+                    next_checkpoint=$8::jsonb
+                WHERE id=$1""",
+                updated_plan.id,
+                json.dumps(updated_plan.video_spec.model_dump(mode="json") if updated_plan.video_spec else None),
+                json.dumps([item.model_dump(mode="json") for item in updated_plan.items]),
+                updated_plan.estimated_cost, updated_plan.current_revision,
+                updated_plan.video_spec_revision_id, updated_plan.current_phase,
+                json.dumps(
+                    updated_plan.next_checkpoint.model_dump(mode="json")
+                    if updated_plan.next_checkpoint else None
+                ),
+            )
+            if added:
+                await connection.executemany(
+                    f"""INSERT INTO {self.schema}.build_steps
+                    (id,build_id,project_id,plan_step_id,action,capability,status,attempt,
+                     resolved_skills,skill_context,updated_at)
+                    VALUES($1,$2,$3,$4,$5,$6,'pending',0,$7::jsonb,$8::jsonb,$9)""",
+                    [
+                        (
+                            BuildStep(
+                                build_id=stored.build_id,
+                                project_id=stored.project_id,
+                                plan_step_id=item.step_id,
+                                action=item.action,
+                                capability=item.capability,
+                            ).id,
+                            stored.build_id, stored.project_id, item.step_id, item.action,
+                            item.capability,
+                            json.dumps([value.model_dump(mode="json") for value in item.resolved_skills]),
+                            json.dumps(item.skill_context.model_dump(mode="json") if item.skill_context else None),
+                            now(),
+                        )
+                        for item in added
+                    ],
+                )
+            await connection.execute(
+                f"""UPDATE {self.schema}.plan_checkpoints
+                SET status='resolved',lease_expires_at=NULL,error=NULL,updated_at=$2 WHERE id=$1""",
+                stored.id, now(),
+            )
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds
+                SET status='queued',message=$2,estimated_cost=$3,error=NULL,updated_at=$4
+                WHERE id=$1""",
+                stored.build_id, f"Agent planned {stored.next_phase}",
+                updated_plan.estimated_cost, now(),
+            )
+            await self._remember(connection, stored.project_id, operation, idempotency_key, current_plan.id)
+            await self._append_event(connection, stored.project_id, "video_spec.revised", {
+                "video_spec_revision_id": spec_revision.id,
+                "revision": spec_revision.revision,
+                "checkpoint_id": stored.id,
+                "complete": spec_revision.complete,
+            })
+            await self._append_event(connection, stored.project_id, "plan.revised", {
+                "plan_id": current_plan.id,
+                "revision": plan_revision.revision,
+                "checkpoint_id": stored.id,
+                "added_step_ids": plan_revision.added_step_ids,
+            })
+            await self._append_event(connection, stored.project_id, "build.checkpoint.resolved", {
+                "build_id": stored.build_id,
+                "checkpoint_id": stored.id,
+                "next_phase": stored.next_phase,
+            })
+            await self._append_event(connection, stored.project_id, "build.phase.started", {
+                "build_id": stored.build_id, "phase": stored.next_phase,
+            })
+        return updated_plan
+
+    async def retry_checkpoint(
+        self, project_id: str, build_id: str, checkpoint_id: str,
+    ) -> PlanCheckpoint:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""SELECT * FROM {self.schema}.plan_checkpoints
+                WHERE id=$1 AND project_id=$2 AND build_id=$3 FOR UPDATE""",
+                checkpoint_id, project_id, build_id,
+            )
+            if row is None:
+                raise LookupError("plan checkpoint not found")
+            checkpoint = self._checkpoint(row)
+            if checkpoint.status != "failed":
+                raise ValueError("only failed checkpoints can be retried")
+            checkpoint.status = "pending"
+            checkpoint.delivery_attempts = 0
+            checkpoint.delivery_id = None
+            checkpoint.lease_expires_at = None
+            checkpoint.error = None
+            checkpoint.updated_at = now()
+            await connection.execute(
+                f"""UPDATE {self.schema}.plan_checkpoints
+                SET status='pending',delivery_attempts=0,delivery_id=NULL,
+                    lease_expires_at=NULL,error=NULL,updated_at=$2 WHERE id=$1""",
+                checkpoint.id, checkpoint.updated_at,
+            )
+            await connection.execute(
+                f"""UPDATE {self.schema}.builds
+                SET status='waiting_agent',message=$2,error=NULL,updated_at=$3 WHERE id=$1""",
+                build_id, f"Retrying Agent planning after {checkpoint.phase}", now(),
+            )
+            await self._append_event(connection, project_id, "build.checkpoint.waiting", {
+                "build_id": build_id, "checkpoint_id": checkpoint_id, "retry": True,
+            })
+        return checkpoint
+
     async def update_build(self, build: Build) -> Build:
         build.updated_at = now()
         async with self.pool.acquire() as connection, connection.transaction():
@@ -629,7 +1008,8 @@ class PostgresVideoProjectRepository:
                 raise ValueError("only failed builds can be retried")
             await connection.execute(
                 f"""UPDATE {self.schema}.build_steps
-                SET status='pending',attempt=0,error=NULL,started_at=NULL,completed_at=NULL,updated_at=$3
+                SET status='pending',attempt=0,error=NULL,started_at=NULL,completed_at=NULL,
+                    remote_operation_id=NULL,remote_provider=NULL,updated_at=$3
                 WHERE build_id=$1 AND project_id=$2 AND status='failed'""",
                 build_id, project_id, now(),
             )
@@ -810,6 +1190,9 @@ class PostgresVideoProjectRepository:
                 project_id=project.id, parent_version_id=current.id,
                 timeline_version_id=timeline_version_id,
                 selections=next_selections, change_request_id=plan.change_request_id,
+                video_spec_revision_id=(
+                    plan.video_spec_revision_id or current.video_spec_revision_id
+                ),
             )
             await self._commit_version(connection, project, version)
             for item in validation_results:
@@ -950,7 +1333,7 @@ class PostgresVideoProjectRepository:
     async def active_builds(self, project_id: str) -> list[Build]:
         rows = await self.pool.fetch(
             f"SELECT * FROM {self.schema}.builds WHERE project_id=$1 AND status=ANY($2::text[]) ORDER BY created_at",
-            project_id, ["queued", "running", "waiting_external"],
+            project_id, ["queued", "running", "waiting_external", "waiting_agent"],
         )
         return [self._build(row) for row in rows]
 
@@ -971,10 +1354,12 @@ class PostgresVideoProjectRepository:
     async def _insert_version(self, connection, version: ProjectVersion) -> None:
         await connection.execute(
             f"""INSERT INTO {self.schema}.project_versions
-            (id,project_id,parent_version_id,timeline_version_id,change_request_id,created_at)
-            VALUES($1,$2,$3,$4,$5,$6)""",
+            (id,project_id,parent_version_id,timeline_version_id,change_request_id,
+             video_spec_revision_id,created_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7)""",
             version.id, version.project_id, version.parent_version_id,
-            version.timeline_version_id, version.change_request_id, version.created_at,
+            version.timeline_version_id, version.change_request_id,
+            version.video_spec_revision_id, version.created_at,
         )
         if version.selections:
             await connection.executemany(
@@ -1034,11 +1419,49 @@ class PostgresVideoProjectRepository:
         video_spec = values.get("video_spec")
         if isinstance(video_spec, str):
             video_spec = json.loads(video_spec)
+        project_intent = values.get("project_intent")
+        if isinstance(project_intent, str):
+            project_intent = json.loads(project_intent)
+        next_checkpoint = values.get("next_checkpoint")
+        if isinstance(next_checkpoint, str):
+            next_checkpoint = json.loads(next_checkpoint)
         return RebuildPlan(**{
             **values,
             "video_spec": video_spec,
+            "project_intent": project_intent,
+            "next_checkpoint": next_checkpoint,
             "items": [RebuildPlanItem(**item) for item in items],
         })
+
+    async def _insert_spec_revision(
+        self, connection, revision: VideoSpecRevision,
+    ) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.video_spec_revisions
+            (id,project_id,revision,parent_revision_id,content,resolved_sections,
+             unresolved_sections,source_artifact_version_ids,checkpoint_id,created_by,
+             complete,created_at)
+            VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12)""",
+            revision.id, revision.project_id, revision.revision, revision.parent_revision_id,
+            json.dumps(revision.content), json.dumps(revision.resolved_sections),
+            json.dumps(revision.unresolved_sections),
+            json.dumps(revision.source_artifact_version_ids), revision.checkpoint_id,
+            revision.created_by, revision.complete, revision.created_at,
+        )
+
+    async def _insert_plan_revision(
+        self, connection, revision: BuildPlanRevision,
+    ) -> None:
+        await connection.execute(
+            f"""INSERT INTO {self.schema}.build_plan_revisions
+            (id,plan_id,project_id,revision,base_revision,checkpoint_id,
+             video_spec_revision_id,added_step_ids,cancelled_step_ids,reason,created_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)""",
+            revision.id, revision.plan_id, revision.project_id, revision.revision,
+            revision.base_revision, revision.checkpoint_id, revision.video_spec_revision_id,
+            json.dumps(revision.added_step_ids), json.dumps(revision.cancelled_step_ids),
+            revision.reason, revision.created_at,
+        )
 
     async def _append_event(self, connection, project_id: str, event_type: str, payload: dict) -> ProjectEvent:
         await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", project_id)
@@ -1086,3 +1509,33 @@ class PostgresVideoProjectRepository:
         raw = dict(row)
         values = {key: raw[key] for key in Build.model_fields if key in raw}
         return Build(**values)
+
+    @staticmethod
+    def _spec_revision(row) -> VideoSpecRevision:
+        values = dict(row)
+        for key in (
+            "content", "resolved_sections", "unresolved_sections",
+            "source_artifact_version_ids",
+        ):
+            if isinstance(values.get(key), str):
+                values[key] = json.loads(values[key])
+        return VideoSpecRevision(**values)
+
+    @staticmethod
+    def _plan_revision(row) -> BuildPlanRevision:
+        values = dict(row)
+        for key in ("added_step_ids", "cancelled_step_ids"):
+            if isinstance(values.get(key), str):
+                values[key] = json.loads(values[key])
+        return BuildPlanRevision(**values)
+
+    @staticmethod
+    def _checkpoint(row) -> PlanCheckpoint:
+        values = dict(row)
+        for key in (
+            "required_artifact_types", "artifact_version_ids", "artifact_summaries",
+            "resolved_sections", "unresolved_sections",
+        ):
+            if isinstance(values.get(key), str):
+                values[key] = json.loads(values[key])
+        return PlanCheckpoint(**values)

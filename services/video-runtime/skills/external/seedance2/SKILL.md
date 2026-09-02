@@ -9,6 +9,15 @@ metadata:
   workflow:
     title: Seedance 2 creative workstation
     mode: seedance2
+    planning:
+      mode: agentic
+      checkpoints:
+        - id: creative_ready
+          after_phase: creative_intent
+          next_phase: visual_production
+          required_artifacts: [project_intent]
+          resolves: [shots, references]
+          instruction: Choose direct or segmented Seedance generation using only this Workflow's capabilities and native audio.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: seedance2_script

@@ -30,7 +30,7 @@ const buildOutput = {
     status: {
       type: 'string' as const,
       required: true,
-      enum: ['queued', 'running', 'waiting_external', 'completed', 'failed', 'cancelled'],
+      enum: ['queued', 'running', 'waiting_external', 'waiting_agent', 'completed', 'failed', 'cancelled'],
     },
     progress: { type: 'number' as const, required: true },
     message: { type: 'string' as const, required: true },
@@ -42,9 +42,40 @@ const buildOutput = {
   },
 } as const
 
+const projectIntentParameters = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string' as const, required: true },
+    brief: { type: 'string' as const, required: true },
+    language: { type: 'string' as const, required: true },
+    target_duration_seconds: { type: 'number' as const, required: true },
+    aspect_ratio: { type: 'string' as const, required: true, enum: ['16:9', '9:16', '1:1'] },
+    resolution: { type: 'string' as const, required: true },
+    workflow_id: { type: 'string' as const, required: true },
+    style_id: { type: 'string' as const, required: true },
+    activated_skill_ids: { type: 'array' as const, items: { type: 'string' as const } },
+    source_asset_ids: { type: 'array' as const, items: { type: 'string' as const } },
+    workflow_parameters: { type: 'object' as const, additionalProperties: true },
+    providers: {
+      type: 'object' as const, required: true, additionalProperties: false, properties: {
+        video: { type: 'string' as const, required: true },
+        image: { type: 'string' as const, required: true },
+        music: { type: 'string' as const, required: true },
+      },
+    },
+    automation: {
+      type: 'object' as const, required: true, additionalProperties: false, properties: {
+        mode: { type: 'string' as const, required: true, enum: ['automatic'] },
+        max_artifact_retries: { type: 'integer' as const, required: true },
+      },
+    },
+    constraints: { type: 'object' as const, additionalProperties: true },
+  },
+} as const
+
 const videoSpecParameters = {
   type: 'object' as const,
-  required: true,
   additionalProperties: false,
   properties: {
     title: { type: 'string' as const, required: true },
@@ -225,28 +256,16 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_project_plan',
-    description: 'Validate a complete VideoSpec and compile a durable initial video BuildPlan with estimated cost.',
+    description: 'Create the first durable phase of a video BuildPlan. Prefer project_intent when later creative decisions depend on generated media; provide exactly one of project_intent or video_spec.',
     parameters: {
       project_id: { type: 'string', required: true },
       base_project_version_id: { type: 'string', required: true },
       idempotency_key: { type: 'string', required: true },
+      project_intent: projectIntentParameters,
       video_spec: videoSpecParameters,
     },
     output: {
-      schema: {
-        type: 'object', additionalProperties: false, properties: {
-          planId: { type: 'string', required: true },
-          projectId: { type: 'string', required: true },
-          kind: { type: 'string', required: true, enum: ['initial', 'incremental', 'export'] },
-          status: { type: 'string', required: true },
-          baseProjectVersionId: { type: 'string', required: true },
-          workflowId: { type: 'string', required: true },
-          videoSpec: videoSpecParameters,
-          shotCount: { type: 'integer', required: true },
-          estimatedCost: { type: 'number', required: true },
-          steps: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
-        },
-      },
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
         text: `Initial video plan ${value.planId}: ${value.shotCount} shots, estimated cost $${value.estimatedCost}.`,
@@ -256,8 +275,11 @@ export function apply(ctx: Context): void {
       projectId: args.project_id,
       baseProjectVersionId: args.base_project_version_id,
       idempotencyKey: args.idempotency_key,
-      videoSpec: args.video_spec,
-    }, identityOf(exec.agent), exec.signal),
+      ...(args.video_spec === undefined ? {} : { videoSpec: args.video_spec }),
+      ...(args.project_intent === undefined ? {} : { projectIntent: args.project_intent }),
+    }, identityOf(exec.agent), exec.signal).then(
+      value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
+    ),
   }))
 
   ctx.tools.register(defineTool({
@@ -353,23 +375,10 @@ export function apply(ctx: Context): void {
       },
     },
     output: {
-      schema: {
-        type: 'object', additionalProperties: false, properties: {
-          planId: { type: 'string', required: true },
-          projectId: { type: 'string', required: true },
-          kind: { type: 'string', required: true, enum: ['initial', 'incremental', 'export'] },
-          status: { type: 'string', required: true },
-          baseProjectVersionId: { type: 'string', required: true },
-          workflowId: { type: 'string', required: true },
-          videoSpec: videoSpecParameters,
-          shotCount: { type: 'integer', required: true },
-          estimatedCost: { type: 'number', required: true },
-          steps: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
-        },
-      },
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Edit plan ${value.planId}: ${value.steps.filter(step => step.action === 'rebuild').length} rebuild steps, estimated cost $${value.estimatedCost}. Await user confirmation before applying.`,
+        text: `Edit plan ${String(value.planId)}: ${Array.isArray(value.steps) ? value.steps.filter(step => typeof step === 'object' && step !== null && !Array.isArray(step) && step.action === 'rebuild').length : 0} rebuild steps, estimated cost $${String(value.estimatedCost)}. Await user confirmation before applying.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewEdits({
@@ -378,7 +387,9 @@ export function apply(ctx: Context): void {
       idempotencyKey: args.idempotency_key,
       description: args.description,
       edits: args.edits,
-    }, identityOf(exec.agent), exec.signal),
+    }, identityOf(exec.agent), exec.signal).then(
+      value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
+    ),
   }))
 
   ctx.tools.register(defineTool({
@@ -408,6 +419,89 @@ export function apply(ctx: Context): void {
     },
     output: { schema: buildOutput, render: (_args, value) => [{ type: 'text', text: buildText(value) }] },
     execute: (args, exec) => ctx.videoRuntime.getBuild(args.project_id, args.build_id, identityOf(exec.agent), exec.signal),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_checkpoint_inspect',
+    description: 'Inspect one durable semantic planning checkpoint, including real artifact summaries and the unresolved VideoSpec sections. Use only the project, build, and checkpoint named in the automatic continuation message.',
+    parameters: {
+      project_id: { type: 'string', required: true },
+      build_id: { type: 'string', required: true },
+      checkpoint_id: { type: 'string', required: true },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Checkpoint ${String(value.id)} after ${String(value.phase)}; plan ${String(value.next_phase)} from ${Array.isArray(value.artifact_summaries) ? value.artifact_summaries.length : 0} real artifacts.`,
+      }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.inspectCheckpoint(
+      args.project_id, args.build_id, args.checkpoint_id, identityOf(exec.agent), exec.signal,
+    ).then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_checkpoint_resolve',
+    description: 'Resolve the current semantic checkpoint with either a complete revised VideoSpec or a structured video_spec_patch. The Runtime merges and validates patches, appends only the next Workflow phase, and rejects stale revisions, workflow/provider switches, and changes to completed steps.',
+    parameters: {
+      project_id: { type: 'string', required: true },
+      build_id: { type: 'string', required: true },
+      checkpoint_id: { type: 'string', required: true },
+      base_plan_revision: { type: 'integer', required: true },
+      base_spec_revision: { type: 'integer', required: true },
+      idempotency_key: { type: 'string', required: true },
+      video_spec: videoSpecParameters,
+      video_spec_patch: {
+        type: 'object', additionalProperties: true,
+        description: 'Partial VideoSpec fields resolved at this checkpoint. Use instead of video_spec.',
+      },
+      phase_inputs: { type: 'object', additionalProperties: true },
+      proposed_steps: {
+        type: 'array', items: { type: 'object', additionalProperties: true },
+        description: 'Allowed only for agentic workflows. Deterministic workflow compilers ignore or reject these steps.',
+      },
+      reason: { type: 'string' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Resolved checkpoint; plan ${String(value.planId)} revision ${String(value.planRevision)} now runs phase ${String(value.currentPhase)}.`,
+      }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.resolveCheckpoint({
+      projectId: args.project_id,
+      buildId: args.build_id,
+      checkpointId: args.checkpoint_id,
+      basePlanRevision: args.base_plan_revision,
+      baseSpecRevision: args.base_spec_revision,
+      idempotencyKey: args.idempotency_key,
+      ...(args.video_spec === undefined ? {} : { videoSpec: args.video_spec }),
+      ...(args.video_spec_patch === undefined ? {} : { videoSpecPatch: args.video_spec_patch }),
+      ...(args.phase_inputs === undefined ? {} : { phaseInputs: args.phase_inputs }),
+      ...(args.proposed_steps === undefined ? {} : { proposedSteps: args.proposed_steps }),
+      ...(args.reason === undefined ? {} : { reason: args.reason }),
+    }, identityOf(exec.agent), exec.signal).then(
+      value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
+    ),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_build_retry_checkpoint',
+    description: 'Retry automatic delivery of a failed semantic checkpoint. This does not regenerate media or create a new build.',
+    parameters: {
+      project_id: { type: 'string', required: true },
+      build_id: { type: 'string', required: true },
+      checkpoint_id: { type: 'string', required: true },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: `Checkpoint ${String(value.id)} is ${String(value.status)}.` }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.retryCheckpoint(
+      args.project_id, args.build_id, args.checkpoint_id, identityOf(exec.agent), exec.signal,
+    ).then(value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>),
   }))
 
   ctx.tools.register(defineTool({

@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Service definition for the project-oriented video runtime. DeepSeek owns dialogue and tool selection; this service owns projects, immutable versions, artifact dependencies, structured edit previews, incremental rebuilds, validation, and exports.
 
+Schema-version-2 builds are append-only staged plans. The Runtime persists `ProjectIntent`, `VideoSpecRevision`, `BuildPlanRevision`, and semantic checkpoints; it never plans with an LLM. A BFF delivery worker wakes the bound DeepSeek Session when real media changes the next creative decision.
+
 ## Model Experience
 
 ### Runtime service
@@ -22,4 +24,4 @@ None directly because this package registers no prompt text or tool schema.
 
 ## Known Limitations and Deferred Work
 
-- The first provider uses HTTP and delegates durable task recovery to the Python Video Runtime.
+- The first provider uses HTTP and delegates durable task and checkpoint recovery to the Python Video Runtime.

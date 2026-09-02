@@ -474,9 +474,18 @@ def compile_mv(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) 
             "source_image", "image", "character_reference",
         }
     ]
-    refs_by_character = b.character_references(
-        characters, skills=[], reference_from_steps=identity_images,
-    ) if spec.characters else {}
+    # The music-video workflow is driven by the finished track and supplied
+    # identity media. It must not silently insert an image-generation stage.
+    # When a character is named, associate existing reference images only.
+    if workflow.skill_name in {"cuti.music-video", "cuti.lipsync-music-video"}:
+        refs_by_character = {
+            character.id: identity_images[index % len(identity_images)]
+            for index, character in enumerate(spec.characters)
+        } if identity_images else {}
+    else:
+        refs_by_character = b.character_references(
+            characters, skills=[], reference_from_steps=identity_images,
+        ) if spec.characters else {}
     wp = spec.workflow_parameters or {}
     uploaded = [
         b.source_steps[item] for item in spec.source_asset_ids

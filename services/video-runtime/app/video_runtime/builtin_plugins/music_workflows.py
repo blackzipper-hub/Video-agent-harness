@@ -3,15 +3,26 @@ from __future__ import annotations
 from app.orchestration.workflow_compiler.registry import WorkflowSpec
 
 from ..initial_build import BuildPlanValidationError, topological_steps
-from ..models import RebuildPlan, RebuildPlanItem, VideoSpec
+from ..models import (
+    CheckpointResolution,
+    PlanCheckpoint,
+    ProjectIntent,
+    RebuildPlan,
+    RebuildPlanItem,
+    VideoSpec,
+)
 from ..plugins import BaseVideoPlugin, PluginContext
 from ..workflow_plans import compile_mv
 
 
 class MusicVideoWorkflowPlugin(BaseVideoPlugin):
-    async def compile_build_plan(self, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
-        workflow = WorkflowSpec(
-            skill_name=spec.workflow_id,
+    def planning_mode(self, _workflow_id: str) -> str:
+        return "staged"
+
+    @staticmethod
+    def _workflow(workflow_id: str) -> WorkflowSpec:
+        return WorkflowSpec(
+            skill_name=workflow_id,
             title="Cuti Music Video",
             mode="seedance_mv",
             parameters={"workflow_mode": "music_video", "content_category": "music_video"},
@@ -22,7 +33,43 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             ),
             requires_keyframe=False,
         )
-        return compile_mv(workflow, context, spec)
+
+    async def compile_build_plan(self, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
+        return compile_mv(self._workflow(spec.workflow_id), context, spec)
+
+    async def compile_initial(
+        self, context: PluginContext, intent: ProjectIntent,
+    ) -> RebuildPlan:
+        from ..staged_planning import compile_initial_phase
+
+        return compile_initial_phase(
+            workflow=self._workflow(intent.workflow_id), context=context, intent=intent,
+        )
+
+    async def compile_phase(
+        self,
+        context: PluginContext,
+        checkpoint: PlanCheckpoint,
+        resolution: CheckpointResolution,
+        plan: RebuildPlan,
+    ) -> RebuildPlan:
+        from ..staged_planning import append_phase, copy_plan_with_appended_phase
+
+        full_plan = await self.compile_build_plan(context, resolution.video_spec)
+        added, next_checkpoint = append_phase(
+            existing_plan=plan,
+            full_plan=full_plan,
+            workflow=self._workflow(plan.workflow_id),
+            checkpoint_id=checkpoint.phase,
+            proposed_steps=resolution.proposed_steps,
+        )
+        return copy_plan_with_appended_phase(
+            plan,
+            spec=resolution.video_spec,
+            added_items=added,
+            spec_revision_id=str(context.values["video_spec_revision_id"]),
+            next_checkpoint=next_checkpoint,
+        )
 
 
 class LipsyncMusicVideoWorkflowPlugin(MusicVideoWorkflowPlugin):

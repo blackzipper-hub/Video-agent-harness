@@ -20,6 +20,15 @@ metadata:
   workflow:
     title: Ink Press product promotional film
     mode: ink_press_product_workflow
+    planning:
+      mode: staged
+      checkpoints:
+        - id: product_ready
+          after_phase: source_analysis
+          next_phase: visual_production
+          required_artifacts: [product_analysis, source_image]
+          resolves: [shots, product_constraints]
+          instruction: Continue only with the verified product analysis and installed Ink Press template runtime.
     entrypoints: [text, image, video]
     parameters:
       workflow_mode: ink_press_product_workflow

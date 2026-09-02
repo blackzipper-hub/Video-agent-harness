@@ -10,6 +10,13 @@ export interface RuntimeProductionProgress {
   progress: number
   message: string
   error?: string
+  phase?: string | null
+  checkpoint?: {
+    status: string
+    nextPhase: string
+    artifactCount: number
+    unresolvedSections: string[]
+  } | null
   steps: Array<{ id: string; name: string; status: string; error?: string; skills: string[] }>
 }
 
@@ -38,7 +45,8 @@ export function AgentProductionProgress({
   runtime: RuntimeProductionProgress | null
   language?: 'zh' | 'en'
 }) {
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
+  const zh = language === 'zh'
   const completedCallIds = new Set(
     events.filter(event => event.type === 'agent.tool.completed')
       .map(event => nestedCallId(event.payload))
@@ -54,20 +62,22 @@ export function AgentProductionProgress({
   const hasVisibleActivity = isSending || isRunning || Boolean(runtime) || tools.length > 0 || tasks.length > 0
   if (!hasVisibleActivity) return null
 
-  const runtimeActive = runtime && ['queued', 'running', 'waiting_external'].includes(runtime.status)
+  const runtimeActive = runtime && ['queued', 'running', 'waiting_external', 'waiting_agent'].includes(runtime.status)
   const stoppedWithoutBuild = status === 'completed' && !runtime && !hasBuildTool
   const failed = status === 'failed' || status === 'cancelled' || runtime?.status === 'failed'
   const heading = failed
     ? t('da.progress.didNotFinish')
     : stoppedWithoutBuild
       ? t('da.progress.noBuild')
-      : runtimeActive
-        ? t('da.progress.producing')
-        : runtime?.status === 'completed'
-          ? t('da.progress.completed')
-          : isSending
-            ? t('da.progress.submitting')
-            : t('da.progress.interpreting')
+      : runtime?.status === 'waiting_agent'
+        ? (zh ? 'Agent 正在规划下一阶段' : 'Agent is planning the next phase')
+        : runtimeActive
+          ? t('da.progress.producing')
+          : runtime?.status === 'completed'
+            ? t('da.progress.completed')
+            : isSending
+              ? t('da.progress.submitting')
+              : t('da.progress.interpreting')
   const progressValue = runtime
     ? Math.max(0, Math.min(100, runtime.progress * 100))
     : tools.length > 0 ? (hasBuildTool ? 20 : 10) : 4
@@ -102,6 +112,19 @@ export function AgentProductionProgress({
               ? t('da.progress.noBuildHint')
               : runtime?.message || t('da.progress.defaultHint')}
           </p>
+
+          {runtime?.checkpoint && (
+            <div className="mt-2 rounded-md border border-accent-purple/20 bg-background/60 px-2.5 py-2 text-xs">
+              <p className="font-medium">
+                {zh ? '当前阶段' : 'Current phase'}: {runtime.phase || runtime.checkpoint.nextPhase}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {zh
+                  ? `已获得 ${runtime.checkpoint.artifactCount} 个真实产物，正在补全：${runtime.checkpoint.unresolvedSections.join('、') || '下一阶段参数'}`
+                  : `${runtime.checkpoint.artifactCount} real artifacts ready; resolving ${runtime.checkpoint.unresolvedSections.join(', ') || 'next-phase parameters'}`}
+              </p>
+            </div>
+          )}
 
           {tools.length > 0 && (
             <div className="mt-3 space-y-1.5">

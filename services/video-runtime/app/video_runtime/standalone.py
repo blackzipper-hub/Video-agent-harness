@@ -12,6 +12,7 @@ from .deepseek_bff import (
     studio_router as deepseek_studio_bff_router,
 )
 from .deepseek_client import DeepSeekHarnessClient
+from .checkpoint_coordinator import CheckpointCoordinator
 from .postgres_repository import PostgresVideoProjectRepository
 from .plugins.registry import configured_plugin_roots
 from .runtime import VideoBuildRuntime
@@ -55,9 +56,12 @@ async def lifespan(_app: FastAPI):
         authorization=os.getenv("DEEPSEEK_HARNESS_AUTHORIZATION") or None,
     )
     set_deepseek_client(deepseek)
+    checkpoint_coordinator = CheckpointCoordinator(build_runtime, deepseek)
+    checkpoint_coordinator.start()
     try:
         yield
     finally:
+        await checkpoint_coordinator.close()
         await build_runtime.close()
         set_deepseek_client(None)
         if deepseek is not None:

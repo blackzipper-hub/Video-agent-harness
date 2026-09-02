@@ -12,6 +12,15 @@ metadata:
   workflow:
     title: Short drama production
     mode: short_drama_workflow
+    planning:
+      mode: staged
+      checkpoints:
+        - id: story_ready
+          after_phase: story_intent
+          next_phase: visual_production
+          required_artifacts: [story_draft]
+          resolves: [characters, shots, audio]
+          instruction: Complete dialogue, shared references, and parallel shot specifications from the story draft.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: seedance2_short_drama

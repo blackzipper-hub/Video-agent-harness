@@ -22,6 +22,8 @@ import type {
   WorkflowDetail,
   SkillDetail,
   SkillResourceDetail,
+  PlanCheckpoint,
+  CheckpointResolutionRequest,
 } from '@cuti-ai/video-runtime'
 
 export interface Config {
@@ -150,6 +152,38 @@ export class HttpVideoRuntime extends VideoRuntime {
 
   cancelBuild(projectId: string, buildId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot> {
     return this.request(`/api/video/projects/${encodeURIComponent(projectId)}/rebuilds/${encodeURIComponent(buildId)}/cancel`, identity, {
+      method: 'POST', signal,
+    })
+  }
+
+  inspectCheckpoint(
+    projectId: string,
+    buildId: string,
+    checkpointId: string,
+    identity: RequestIdentity,
+    signal?: AbortSignal,
+  ): Promise<PlanCheckpoint> {
+    const path = `/api/video/projects/${encodeURIComponent(projectId)}`
+      + `/builds/${encodeURIComponent(buildId)}/checkpoints/${encodeURIComponent(checkpointId)}`
+    return this.request(path, identity, { signal })
+  }
+
+  resolveCheckpoint(request: CheckpointResolutionRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot> {
+    return this.request(`/api/video/projects/${encodeURIComponent(request.projectId)}/builds/${encodeURIComponent(request.buildId)}/checkpoints/${encodeURIComponent(request.checkpointId)}/resolve`, identity, {
+      method: 'POST', body: request, signal,
+    })
+  }
+
+  retryCheckpoint(
+    projectId: string,
+    buildId: string,
+    checkpointId: string,
+    identity: RequestIdentity,
+    signal?: AbortSignal,
+  ): Promise<PlanCheckpoint> {
+    const path = `/api/video/projects/${encodeURIComponent(projectId)}`
+      + `/builds/${encodeURIComponent(buildId)}/checkpoints/${encodeURIComponent(checkpointId)}/retry`
+    return this.request(path, identity, {
       method: 'POST', signal,
     })
   }

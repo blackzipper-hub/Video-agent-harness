@@ -10,6 +10,15 @@ metadata:
   workflow:
     title: Direct single-clip video
     mode: direct_video
+    planning:
+      mode: staged
+      checkpoints:
+        - id: creative_ready
+          after_phase: creative_intent
+          next_phase: visual_production
+          required_artifacts: [project_intent]
+          resolves: [shots, references]
+          instruction: Complete only the direct-video fields that depend on the supplied reference material.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: direct

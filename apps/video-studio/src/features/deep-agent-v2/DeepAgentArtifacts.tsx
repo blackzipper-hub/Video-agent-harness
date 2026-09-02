@@ -467,6 +467,9 @@ export function DeepAgentArtifacts({
     const eventNames = [
       'build.queued', 'build.status', 'build.step_status', 'artifact.committed',
       'artifact.selected', 'project.version_committed', 'project.version_restored',
+      'build.phase.started', 'build.phase.completed', 'build.checkpoint.waiting',
+      'build.checkpoint.planning', 'build.checkpoint.resolved', 'build.checkpoint.failed',
+      'video_spec.revised', 'plan.revised',
     ]
     eventNames.forEach(name => events.addEventListener(name, refreshFromEvent))
     const interval = window.setInterval(() => void load(), 10000)
@@ -490,6 +493,13 @@ export function DeepAgentArtifacts({
       progress: latestRuntimeBuild.progress || 0,
       message: runtimeMessage(latestRuntimeBuild.message || latestRuntimeBuild.kind || '', t),
       error: latestRuntimeBuild.error,
+      phase: runtimeWorkspace?.currentBuildPhase,
+      checkpoint: runtimeWorkspace?.activeCheckpoint ? {
+        status: runtimeWorkspace.activeCheckpoint.status,
+        nextPhase: runtimeWorkspace.activeCheckpoint.next_phase,
+        artifactCount: runtimeWorkspace.activeCheckpoint.artifact_summaries.length,
+        unresolvedSections: runtimeWorkspace.activeCheckpoint.unresolved_sections,
+      } : null,
       steps: latestRuntimeBuild.steps.map(step => ({
         id: step.id,
         name: planStepLabel(step.plan_step_id, t),
@@ -498,7 +508,13 @@ export function DeepAgentArtifacts({
         skills: (step.resolved_skills || []).map(skill => skill.skill_id),
       })),
     })
-  }, [latestRuntimeBuild, onRuntimeProgress, t])
+  }, [
+    latestRuntimeBuild,
+    onRuntimeProgress,
+    runtimeWorkspace?.activeCheckpoint,
+    runtimeWorkspace?.currentBuildPhase,
+    t,
+  ])
 
   const selectedIds = useMemo(
     () => new Set([

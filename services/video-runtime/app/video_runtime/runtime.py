@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 from copy import deepcopy
 from typing import Any, Protocol
@@ -9,11 +11,15 @@ from .engine import IncrementalBuildEngine
 from .models import (
     ArtifactDependency,
     Build,
+    BuildPlanRevision,
     BuildStep,
+    CheckpointResolution,
     ChangeRequest,
     ExportRecord,
     MediaArtifactVersion,
+    PlanCheckpoint,
     Project,
+    ProjectIntent,
     ProjectSessionBinding,
     ProjectSkillLock,
     ProjectVersion,
@@ -21,6 +27,7 @@ from .models import (
     RebuildPlanItem,
     ValidationResult,
     VideoSpec,
+    VideoSpecRevision,
     now,
 )
 from .initial_build import topological_steps
@@ -32,6 +39,67 @@ from .security import CapabilityGrant, CapabilityGrantSigner
 from .skills import VideoSkillRuntime, default_video_skill_runtime
 from app.orchestration.skills import SkillResolutionRequest
 from app.domain.skills.service import make_skill_lock
+
+
+_CHECKPOINT_METADATA_KEYS = {
+    "content",
+    "duration",
+    "duration_seconds",
+    "lyrics",
+    "transcript",
+    "beats",
+    "segments",
+    "words",
+    "width",
+    "height",
+    "plan_step_id",
+}
+
+
+def _bounded_checkpoint_value(value: Any, *, limit: int = 16_000) -> Any:
+    """Keep planner inputs useful while preventing an Artifact from flooding a prompt."""
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    if len(encoded) <= limit:
+        return value
+    return {
+        "truncated": True,
+        "preview": encoded[:limit],
+        "original_characters": len(encoded),
+    }
+
+
+def _checkpoint_artifact_summary(
+    artifact: MediaArtifactVersion,
+    *,
+    issues: list[Any] | None = None,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "id": artifact.id,
+        "artifact_id": artifact.artifact_id,
+        "type": artifact.type,
+        "title": artifact.title,
+        "summary": artifact.summary,
+        "uri": artifact.uri,
+        "metadata": {
+            key: _bounded_checkpoint_value(value)
+            for key, value in artifact.metadata.items()
+            if key in _CHECKPOINT_METADATA_KEYS
+        },
+    }
+    if issues is not None:
+        summary["issues"] = issues
+    return summary
+
+
+def _merge_spec_patch(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge object sections recursively; arrays and scalar values replace atomically."""
+    merged = deepcopy(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_spec_patch(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
 
 
 class BuildStepExecutor(Protocol):
@@ -179,11 +247,18 @@ class VideoBuildRuntime:
         engine: IncrementalBuildEngine | None = None,
         plugins: VideoPluginRegistry | None = None,
         skill_runtime: VideoSkillRuntime | None = None,
+        staged_planning_enabled: bool | None = None,
     ) -> None:
         self.repo = repository or InMemoryVideoProjectRepository()
         self.engine = engine or IncrementalBuildEngine()
         self.plugins = plugins or VideoPluginRegistry()
         self.skills = skill_runtime or default_video_skill_runtime()
+        self.staged_planning_enabled = (
+            staged_planning_enabled
+            if staged_planning_enabled is not None
+            else os.getenv("VIDEO_STAGED_PLANNING_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes"}
+        )
         self._default_executor: BuildStepExecutor | None = None
         self._grant_signer: CapabilityGrantSigner | None = None
         self._build_tasks: dict[str, asyncio.Task] = {}
@@ -243,8 +318,8 @@ class VideoBuildRuntime:
     async def _apply_project_skill_locks(
         self,
         project_id: str,
-        video_spec: VideoSpec,
-    ) -> VideoSpec:
+        video_spec: VideoSpec | ProjectIntent,
+    ) -> VideoSpec | ProjectIntent:
         enabled = [
             item for item in await self.repo.list_project_skill_locks(project_id)
             if item.enabled
@@ -667,28 +742,40 @@ class VideoBuildRuntime:
         *,
         project_id: str,
         base_project_version_id: str,
-        video_spec: VideoSpec,
+        video_spec: VideoSpec | None = None,
+        project_intent: ProjectIntent | None = None,
         idempotency_key: str,
     ) -> RebuildPlan:
+        if (video_spec is None) == (project_intent is None):
+            raise ValueError("provide exactly one of video_spec or project_intent")
         project = await self.repo.get_project(project_id)
         if project.current_version_id != base_project_version_id:
             from .repository import ProjectVersionConflict
             raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
-        video_spec = await self._apply_project_skill_locks(project_id, video_spec)
+        supplied: VideoSpec | ProjectIntent = video_spec or project_intent  # type: ignore[assignment]
+        supplied = await self._apply_project_skill_locks(project_id, supplied)
+        if isinstance(supplied, VideoSpec):
+            video_spec = supplied
+            project_intent = None
+        else:
+            project_intent = supplied
+            video_spec = None
         current_artifacts = await self.repo.current_artifacts(project_id)
         source_by_logical_id = {item.artifact_id: item for item in current_artifacts}
-        referenced_source_ids = {
-            *video_spec.source_asset_ids,
-            *(asset_id for shot in video_spec.shots for asset_id in shot.reference_asset_ids),
-        }
+        referenced_source_ids = set(supplied.source_asset_ids)
+        if video_spec is not None:
+            referenced_source_ids.update(
+                asset_id for shot in video_spec.shots for asset_id in shot.reference_asset_ids
+            )
         missing_source_ids = sorted(referenced_source_ids - set(source_by_logical_id))
         if missing_source_ids:
             raise LookupError(
-                "VideoSpec references project source assets that do not exist: "
+                "project plan references source assets that do not exist: "
                 + ", ".join(missing_source_ids)
             )
         context = PluginContext(project_id=project_id, values={
             "video_spec": video_spec,
+            "project_intent": project_intent,
             "base_project_version_id": base_project_version_id,
             "source_artifacts": {
                 key: value for key, value in source_by_logical_id.items()
@@ -697,12 +784,133 @@ class VideoBuildRuntime:
         })
         for loaded in self.plugins.loaded:
             await loaded.implementation.before_plan(context)
-        plan = await self._compile_workflow_plan(context, video_spec)
+        if self.staged_planning_enabled:
+            workflow_id = supplied.workflow_id
+            plugin = self._workflow_plugin(workflow_id)
+            planning_mode = plugin.implementation.planning_mode(workflow_id)
+            if planning_mode not in {"full", "staged", "agentic"}:
+                raise ValueError(f"unsupported workflow planning mode: {planning_mode}")
+            if planning_mode == "full":
+                if video_spec is None:
+                    raise ValueError(
+                        f"full-planning workflow {workflow_id} requires a complete VideoSpec"
+                    )
+                plan = await plugin.implementation.compile_build_plan(context, video_spec)
+                plan.schema_version = 2
+                plan.current_revision = 1
+                plan.current_phase = "full"
+                plan.next_checkpoint = None
+            else:
+                if project_intent is None:
+                    assert video_spec is not None
+                    project_intent = ProjectIntent(
+                        title=video_spec.title,
+                        brief=str(
+                            video_spec.workflow_parameters.get("brief")
+                            or "; ".join(shot.beat for shot in video_spec.shots)
+                        ),
+                        language=video_spec.language,
+                        target_duration_seconds=video_spec.target_duration_seconds,
+                        aspect_ratio=video_spec.aspect_ratio,
+                        resolution=video_spec.resolution,
+                        workflow_id=video_spec.workflow_id,
+                        style_id=video_spec.style_id,
+                        activated_skill_ids=list(video_spec.activated_skill_ids),
+                        source_asset_ids=list(video_spec.source_asset_ids),
+                        workflow_parameters=dict(video_spec.workflow_parameters),
+                        providers=video_spec.providers,
+                        automation=video_spec.automation,
+                        constraints={"initial_video_spec": video_spec.model_dump(mode="json")},
+                    )
+                    context.values["project_intent"] = project_intent
+                compile_initial = getattr(plugin.implementation, "compile_initial", None)
+                if not callable(compile_initial):
+                    raise LookupError(
+                        f"workflow plugin has no staged compiler: {project_intent.workflow_id}"
+                    )
+                plan = await compile_initial(context, project_intent)
+            if project_intent is None and video_spec is not None:
+                # Full planning does not need a ProjectIntent, but preserving the
+                # user's known constraints makes the plan self-describing.
+                assert video_spec is not None
+                project_intent = ProjectIntent(
+                    title=video_spec.title,
+                    brief=str(
+                        video_spec.workflow_parameters.get("brief")
+                        or "; ".join(shot.beat for shot in video_spec.shots)
+                    ),
+                    language=video_spec.language,
+                    target_duration_seconds=video_spec.target_duration_seconds,
+                    aspect_ratio=video_spec.aspect_ratio,
+                    resolution=video_spec.resolution,
+                    workflow_id=video_spec.workflow_id,
+                    style_id=video_spec.style_id,
+                    activated_skill_ids=list(video_spec.activated_skill_ids),
+                    source_asset_ids=list(video_spec.source_asset_ids),
+                    workflow_parameters=dict(video_spec.workflow_parameters),
+                    providers=video_spec.providers,
+                    automation=video_spec.automation,
+                    constraints={"initial_video_spec": video_spec.model_dump(mode="json")},
+                )
+            source_versions = [source_by_logical_id[item].id for item in referenced_source_ids]
+            revision_content = (
+                video_spec.model_dump(mode="json")
+                if video_spec is not None
+                else project_intent.model_dump(mode="json")
+            )
+            existing_spec_revisions = await self.repo.list_video_spec_revisions(project_id)
+            latest_spec_revision = (
+                existing_spec_revisions[-1] if existing_spec_revisions else None
+            )
+            spec_revision = VideoSpecRevision(
+                project_id=project_id,
+                revision=(latest_spec_revision.revision + 1 if latest_spec_revision else 1),
+                parent_revision_id=(latest_spec_revision.id if latest_spec_revision else None),
+                content=revision_content,
+                resolved_sections=(
+                    ["title", "format", "workflow", "style", "providers", "automation"]
+                    if video_spec is None
+                    else [
+                        "title", "format", "workflow", "style", "characters", "shots",
+                        "audio", "providers", "automation", "timeline",
+                    ]
+                ),
+                unresolved_sections=(
+                    ["characters", "shots", "audio", "timeline"]
+                    if video_spec is None else []
+                ),
+                source_artifact_version_ids=source_versions,
+                created_by="agent",
+                complete=video_spec is not None,
+            )
+            plan.video_spec = video_spec
+            plan.video_spec_revision_id = spec_revision.id
+            plan.project_intent = project_intent
+            plan_revision = BuildPlanRevision(
+                plan_id=plan.id,
+                project_id=project_id,
+                revision=1,
+                base_revision=0,
+                video_spec_revision_id=spec_revision.id,
+                added_step_ids=[item.step_id for item in plan.items],
+                reason="Initial staged phase",
+            )
+        else:
+            if video_spec is None:
+                raise ValueError(
+                    "ProjectIntent requires VIDEO_STAGED_PLANNING_ENABLED=true"
+                )
+            plan = await self._compile_workflow_plan(context, video_spec)
         for loaded in self.plugins.loaded:
             plan = await loaded.implementation.after_plan(context, plan)
         topological_steps(plan.items)
         await self._resolve_plan_skills(plan)
-        saved = await self.repo.save_plan(plan, idempotency_key)
+        if plan.schema_version == 2:
+            saved = await self.repo.save_staged_plan(
+                plan, spec_revision, plan_revision, idempotency_key,
+            )
+        else:
+            saved = await self.repo.save_plan(plan, idempotency_key)
         if self.skills.catalog.has(saved.workflow_id):
             metadata = self.skills.catalog.load(saved.workflow_id).metadata
             if (metadata.metadata or {}).get("kind") == "workflow":
@@ -713,24 +921,26 @@ class VideoBuildRuntime:
                 )
         return saved
 
+    def _workflow_plugin(self, workflow_id: str):
+        from .skill_workflows import SKILL_WORKFLOW_PLUGIN_ID
+
+        matches = [
+            loaded for loaded in self.plugins.loaded
+            if workflow_id in loaded.manifest.contributions.workflows
+        ]
+        if not matches:
+            raise LookupError(f"workflow plugin is not installed: {workflow_id}")
+        return next(
+            (item for item in matches if item.manifest.id == SKILL_WORKFLOW_PLUGIN_ID),
+            matches[0],
+        )
+
     async def _compile_workflow_plan(
         self,
         context: PluginContext,
         video_spec: VideoSpec,
     ) -> RebuildPlan:
-        from .skill_workflows import SKILL_WORKFLOW_PLUGIN_ID
-
-        matches = [
-            loaded for loaded in self.plugins.loaded
-            if video_spec.workflow_id in loaded.manifest.contributions.workflows
-        ]
-        if not matches:
-            raise LookupError(f"workflow plugin is not installed: {video_spec.workflow_id}")
-        preferred = next(
-            (item for item in matches if item.manifest.id == SKILL_WORKFLOW_PLUGIN_ID),
-            None,
-        )
-        return await (preferred or matches[0]).implementation.compile_build_plan(
+        return await self._workflow_plugin(video_spec.workflow_id).implementation.compile_build_plan(
             context, video_spec,
         )
 
@@ -785,6 +995,179 @@ class VideoBuildRuntime:
         self._schedule_build(build)
         return build
 
+    async def inspect_checkpoint(
+        self, *, project_id: str, build_id: str, checkpoint_id: str,
+        session_id: str | None = None, user_id: str | None = None,
+    ) -> PlanCheckpoint:
+        checkpoint = await self.repo.get_checkpoint(project_id, build_id, checkpoint_id)
+        if session_id is not None and checkpoint.session_id != session_id:
+            raise PermissionError("checkpoint does not belong to this DeepSeek Session")
+        if user_id is not None and checkpoint.user_id != user_id:
+            raise PermissionError("checkpoint does not belong to this user")
+        return checkpoint
+
+    async def resolve_checkpoint(
+        self,
+        *,
+        project_id: str,
+        build_id: str,
+        checkpoint_id: str,
+        resolution: CheckpointResolution,
+        session_id: str,
+        user_id: str,
+    ) -> RebuildPlan:
+        existing = await self.repo.get_operation_result(
+            project_id, f"checkpoint:{checkpoint_id}", resolution.idempotency_key,
+        )
+        if existing is not None:
+            return await self.repo.get_plan(existing)
+        checkpoint = await self.inspect_checkpoint(
+            project_id=project_id,
+            build_id=build_id,
+            checkpoint_id=checkpoint_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if checkpoint.base_plan_revision != resolution.base_plan_revision:
+            from .repository import PlanRevisionConflict
+            raise PlanRevisionConflict(
+                resolution.base_plan_revision, checkpoint.base_plan_revision,
+            )
+        if checkpoint.base_spec_revision != resolution.base_spec_revision:
+            from .repository import VideoSpecRevisionConflict
+            raise VideoSpecRevisionConflict(
+                resolution.base_spec_revision, checkpoint.base_spec_revision,
+            )
+        plan = await self.repo.get_plan(checkpoint.plan_id)
+        if plan.schema_version != 2:
+            raise ValueError("legacy build plans cannot resolve semantic checkpoints")
+        current_spec_revision = await self.repo.get_video_spec_revision(
+            plan.video_spec_revision_id,
+        )
+        if resolution.video_spec is not None:
+            submitted_spec = resolution.video_spec
+        else:
+            intent = plan.project_intent
+            intent_base = ({
+                "title": intent.title,
+                "language": intent.language,
+                "target_duration_seconds": intent.target_duration_seconds,
+                "aspect_ratio": intent.aspect_ratio,
+                "resolution": intent.resolution,
+                "workflow_id": intent.workflow_id,
+                "style_id": intent.style_id,
+                "activated_skill_ids": list(intent.activated_skill_ids),
+                "source_asset_ids": list(intent.source_asset_ids),
+                "workflow_parameters": dict(intent.workflow_parameters),
+                "providers": intent.providers.model_dump(mode="json"),
+                "automation": intent.automation.model_dump(mode="json"),
+            } if intent is not None else {})
+            current_base = {
+                key: value for key, value in current_spec_revision.content.items()
+                if key in VideoSpec.model_fields
+            }
+            submitted_spec = VideoSpec.model_validate(_merge_spec_patch(
+                {**intent_base, **current_base},
+                resolution.video_spec_patch or {},
+            ))
+        supplied_spec = await self._apply_project_skill_locks(
+            project_id, submitted_spec,
+        )
+        if not isinstance(supplied_spec, VideoSpec):
+            raise TypeError("checkpoint resolution requires a complete VideoSpec")
+        if supplied_spec.workflow_id != plan.workflow_id:
+            raise ValueError("checkpoint resolution cannot switch workflows")
+        if (
+            plan.project_intent is not None
+            and supplied_spec.providers != plan.project_intent.providers
+        ):
+            raise ValueError("checkpoint resolution cannot switch providers")
+        resolution = resolution.model_copy(update={"video_spec": supplied_spec})
+        source_artifacts = {
+            item.artifact_id: item
+            for item in await self.repo.current_artifacts(project_id)
+        }
+        referenced_source_ids = {
+            *supplied_spec.source_asset_ids,
+            *(
+                asset_id
+                for shot in supplied_spec.shots
+                for asset_id in shot.reference_asset_ids
+            ),
+        }
+        missing = sorted(referenced_source_ids - set(source_artifacts))
+        if missing:
+            raise LookupError(
+                "VideoSpec references project source assets that do not exist: "
+                + ", ".join(missing)
+            )
+        spec_revision = VideoSpecRevision(
+            project_id=project_id,
+            revision=current_spec_revision.revision + 1,
+            parent_revision_id=current_spec_revision.id,
+            content=supplied_spec.model_dump(mode="json"),
+            resolved_sections=[
+                "title", "format", "workflow", "style", "characters", "shots",
+                "audio", "providers", "automation", "timeline",
+            ],
+            unresolved_sections=[],
+            source_artifact_version_ids=[
+                source_artifacts[item].id for item in sorted(referenced_source_ids)
+            ],
+            checkpoint_id=checkpoint.id,
+            created_by="agent",
+            complete=True,
+        )
+        context = PluginContext(project_id=project_id, build_id=build_id, values={
+            "video_spec": supplied_spec,
+            "base_project_version_id": plan.base_project_version_id,
+            "source_artifacts": {
+                key: value for key, value in source_artifacts.items()
+                if key in referenced_source_ids
+            },
+            "checkpoint": checkpoint,
+            "phase_inputs": dict(resolution.phase_inputs),
+            "video_spec_revision_id": spec_revision.id,
+        })
+        plugin = self._workflow_plugin(plan.workflow_id)
+        compile_phase = getattr(plugin.implementation, "compile_phase", None)
+        if not callable(compile_phase):
+            raise LookupError(f"workflow plugin has no staged phase compiler: {plan.workflow_id}")
+        updated_plan = await compile_phase(context, checkpoint, resolution, plan)
+        if updated_plan.workflow_id != plan.workflow_id:
+            raise ValueError("workflow compiler changed the locked workflow")
+        previous_ids = {item.step_id for item in plan.items}
+        added_ids = [item.step_id for item in updated_plan.items if item.step_id not in previous_ids]
+        if not added_ids:
+            raise ValueError("checkpoint resolution did not add a build phase")
+        await self._resolve_plan_skills(updated_plan)
+        topological_steps(updated_plan.items)
+        plan_revision = BuildPlanRevision(
+            plan_id=plan.id,
+            project_id=project_id,
+            revision=updated_plan.current_revision,
+            base_revision=plan.current_revision,
+            checkpoint_id=checkpoint.id,
+            video_spec_revision_id=spec_revision.id,
+            added_step_ids=added_ids,
+            reason=resolution.reason or f"Resolved checkpoint {checkpoint.id}",
+        )
+        saved = await self.repo.resolve_checkpoint(
+            checkpoint=checkpoint,
+            updated_plan=updated_plan,
+            spec_revision=spec_revision,
+            plan_revision=plan_revision,
+            idempotency_key=resolution.idempotency_key,
+        )
+        build = await self.repo.get_build(project_id, build_id)
+        self._schedule_build(build)
+        return saved
+
+    async def retry_checkpoint(
+        self, *, project_id: str, build_id: str, checkpoint_id: str,
+    ) -> PlanCheckpoint:
+        return await self.repo.retry_checkpoint(project_id, build_id, checkpoint_id)
+
     def configure_plugin_execution(self, signer: CapabilityGrantSigner) -> int:
         """Register loaded plugin handlers and make them the default Build executor."""
         self._grant_signer = signer
@@ -818,6 +1201,7 @@ class VideoBuildRuntime:
             build
             for project in await self._all_projects_for_recovery()
             for build in await self.repo.active_builds(project.id)
+            if build.status != "waiting_agent"
         ]
         for build in builds:
             self._schedule_build(build)
@@ -895,7 +1279,7 @@ class VideoBuildRuntime:
         project_id: str,
         build_id: str,
         executor: BuildStepExecutor,
-    ) -> tuple[Build, ProjectVersion]:
+    ) -> tuple[Build, ProjectVersion | None]:
         """Execute one persisted plan and publish only its atomic version commit."""
         build = await self.repo.get_build(project_id, build_id)
         if build.status == "completed" and build.project_version_id:
@@ -1132,7 +1516,7 @@ class VideoBuildRuntime:
         build: Build,
         plan: RebuildPlan,
         executor: BuildStepExecutor,
-    ) -> tuple[Build, ProjectVersion]:
+    ) -> tuple[Build, ProjectVersion | None]:
         ordered = topological_steps(plan.items)
         persisted_steps = {
             item.plan_step_id: item
@@ -1167,14 +1551,78 @@ class VideoBuildRuntime:
                 state.started_at = state.started_at or now()
                 await self.repo.update_build_step(state)
                 targets = [completed[item] for item in planned.depends_on if item in completed]
+                step_results: list[ValidationResult] = []
                 for artifact in targets:
-                    validations.extend(await self.validate_artifact(
+                    step_results.extend(await self.validate_artifact(
                         build_id=build.id, artifact=artifact,
                     ))
-                if not validations:
+                validations.extend(step_results)
+                if not step_results:
                     raise ValueError("initial build requires at least one validator result")
-                if any(not result.passed for result in validations):
-                    raise ValueError("initial build validation failed")
+                failed_results = [item for item in step_results if not item.passed]
+                if failed_results:
+                    semantic_failure = any(
+                        any(token in item.validator_id.lower() for token in (
+                            "continuity", "semantic", "identity", "product",
+                        ))
+                        for item in failed_results
+                    )
+                    prior_checkpoints = await self.repo.list_build_checkpoints(
+                        build.project_id, build.id,
+                    )
+                    repaired_before = any(
+                        item.phase == "semantic_validation" for item in prior_checkpoints
+                    )
+                    if plan.schema_version != 2 or not semantic_failure or repaired_before:
+                        raise ValueError("initial build validation failed")
+                    if not plan.video_spec_revision_id:
+                        raise ValueError("staged build plan has no VideoSpec revision")
+                    spec_revision = await self.repo.get_video_spec_revision(
+                        plan.video_spec_revision_id,
+                    )
+                    session_id, user_id = build.session_id, build.user_id
+                    if not session_id or not user_id:
+                        project = await self.repo.get_project(build.project_id)
+                        binding = await self.repo.latest_session_binding(
+                            build.project_id, project.user_id,
+                        )
+                        session_id, user_id = binding.session_id, binding.user_id
+                    state.status = "completed"
+                    state.completed_at = now()
+                    state.error = "Semantic validation requested one repair pass"
+                    await self.repo.update_build_step(state)
+                    repair = PlanCheckpoint(
+                        project_id=build.project_id,
+                        build_id=build.id,
+                        plan_id=plan.id,
+                        workflow_id=plan.workflow_id,
+                        session_id=session_id,
+                        user_id=user_id,
+                        phase="semantic_validation",
+                        next_phase="semantic_repair",
+                        required_artifact_types=[item.type for item in targets],
+                        artifact_version_ids=[item.id for item in targets],
+                        artifact_summaries=[_checkpoint_artifact_summary(
+                            item,
+                            issues=[
+                                issue
+                                for result in failed_results
+                                for issue in result.issues
+                            ],
+                        ) for item in targets],
+                        resolved_sections=list(spec_revision.resolved_sections),
+                        unresolved_sections=["semantic_repair"],
+                        planner_instruction=(
+                            "Revise only prompts or creative fields implicated by the validation "
+                            "issues. This is the single allowed semantic repair pass."
+                        ),
+                        planning_mode="staged",
+                        base_plan_revision=plan.current_revision,
+                        base_spec_revision=spec_revision.revision,
+                        semantic_repair_attempts=1,
+                    )
+                    await self.repo.create_checkpoint(repair)
+                    return await self.repo.get_build(build.project_id, build.id), None
                 state.status = "completed"
                 state.completed_at = now()
                 await self.repo.update_build_step(state)
@@ -1289,6 +1737,77 @@ class VideoBuildRuntime:
             build.message = f"Completed {index + 1} of {len(ordered)} build steps"
             await self.repo.update_build(build)
 
+        if plan.schema_version == 2 and plan.next_checkpoint is not None:
+            if not plan.video_spec_revision_id:
+                raise ValueError("staged build plan has no VideoSpec revision")
+            spec_revision = await self.repo.get_video_spec_revision(
+                plan.video_spec_revision_id,
+            )
+            session_id = build.session_id
+            user_id = build.user_id
+            if not session_id or not user_id:
+                project = await self.repo.get_project(build.project_id)
+                binding = await self.repo.latest_session_binding(
+                    build.project_id, project.user_id,
+                )
+                session_id = binding.session_id
+                user_id = binding.user_id
+            definition = plan.next_checkpoint
+            required = set(definition.required_artifact_types)
+            aliases = {
+                "source_image": {"source_image", "image", "character_reference"},
+                "source_audio": {"source_audio", "audio", "audio_bgm", "audio_cut"},
+            }
+            relevant = [
+                artifact for artifact in completed.values()
+                if not required
+                or artifact.type in required
+                or any(
+                    expected in required and artifact.type in accepted
+                    for expected, accepted in aliases.items()
+                )
+            ]
+            missing_types = [
+                artifact_type for artifact_type in required
+                if not any(
+                    artifact.type == artifact_type
+                    or artifact.type in aliases.get(artifact_type, set())
+                    for artifact in completed.values()
+                )
+            ]
+            if missing_types:
+                raise ValueError(
+                    "checkpoint required artifacts are missing: " + ", ".join(missing_types)
+                )
+            checkpoint = PlanCheckpoint(
+                project_id=build.project_id,
+                build_id=build.id,
+                plan_id=plan.id,
+                workflow_id=plan.workflow_id,
+                session_id=session_id,
+                user_id=user_id,
+                phase=definition.phase,
+                next_phase=definition.next_phase,
+                required_artifact_types=list(definition.required_artifact_types),
+                artifact_version_ids=[artifact.id for artifact in relevant],
+                artifact_summaries=[
+                    _checkpoint_artifact_summary(artifact) for artifact in relevant
+                ],
+                resolved_sections=list(spec_revision.resolved_sections),
+                unresolved_sections=list(dict.fromkeys([
+                    *spec_revision.unresolved_sections,
+                    *definition.resolves,
+                ])),
+                planner_instruction=definition.planner_instruction,
+                planning_mode=definition.planning_mode,
+                base_plan_revision=plan.current_revision,
+                base_spec_revision=spec_revision.revision,
+                max_delivery_attempts=definition.max_planning_attempts,
+            )
+            await self.repo.create_checkpoint(checkpoint)
+            waiting = await self.repo.get_build(build.project_id, build.id)
+            return waiting, None
+
         dependencies: list[ArtifactDependency] = []
         for planned in ordered:
             target = completed.get(planned.step_id)
@@ -1303,6 +1822,8 @@ class VideoBuildRuntime:
                         target_version_id=target.id,
                         relation="build_step_dependency",
                     ))
+        if plan.schema_version == 2 and plan.video_spec is None:
+            raise ValueError("final staged build requires a complete VideoSpec")
         result = await self.repo.commit_initial_build(
             build_id=build.id,
             artifacts=list(completed.values()),

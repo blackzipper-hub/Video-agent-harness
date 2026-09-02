@@ -7,7 +7,15 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..models import MediaArtifactVersion, RebuildPlan, ValidationResult, VideoSpec
+from ..models import (
+    CheckpointResolution,
+    MediaArtifactVersion,
+    PlanCheckpoint,
+    ProjectIntent,
+    RebuildPlan,
+    ValidationResult,
+    VideoSpec,
+)
 from ..security import CapabilityExecutionEnvelope
 
 
@@ -81,8 +89,19 @@ class PluginContext:
 
 
 class VideoPlugin(Protocol):
+    def planning_mode(self, workflow_id: str) -> str: ...
     async def compile_build_plan(
         self, context: PluginContext, spec: VideoSpec,
+    ) -> RebuildPlan: ...
+    async def compile_initial(
+        self, context: PluginContext, intent: ProjectIntent,
+    ) -> RebuildPlan: ...
+    async def compile_phase(
+        self,
+        context: PluginContext,
+        checkpoint: PlanCheckpoint,
+        resolution: CheckpointResolution,
+        plan: RebuildPlan,
     ) -> RebuildPlan: ...
     def capability_handlers(self) -> dict[
         str,
@@ -115,6 +134,20 @@ class BaseVideoPlugin:
     ) -> RebuildPlan:
         raise NotImplementedError("plugin does not contribute a workflow compiler")
 
+    async def compile_initial(
+        self, _context: PluginContext, _intent: ProjectIntent,
+    ) -> RebuildPlan:
+        raise NotImplementedError("plugin does not contribute a staged workflow compiler")
+
+    async def compile_phase(
+        self,
+        _context: PluginContext,
+        _checkpoint: PlanCheckpoint,
+        _resolution: CheckpointResolution,
+        _plan: RebuildPlan,
+    ) -> RebuildPlan:
+        raise NotImplementedError("plugin does not contribute a staged workflow compiler")
+
     async def on_load(self, _context: PluginContext) -> None: return None
     async def before_plan(self, _context: PluginContext) -> None: return None
     async def after_plan(self, _context: PluginContext, plan: RebuildPlan) -> RebuildPlan: return plan
@@ -139,3 +172,5 @@ class LoadedVideoPlugin:
     manifest: VideoPluginManifest
     implementation: VideoPlugin
     manifest_path: Path
+    def planning_mode(self, _workflow_id: str) -> str:
+        return "full"

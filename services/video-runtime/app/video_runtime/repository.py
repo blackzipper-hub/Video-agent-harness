@@ -3,28 +3,47 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from copy import deepcopy
+from datetime import timedelta
 
 from .models import (
     ArtifactDependency,
     Build,
+    BuildPlanRevision,
     BuildStep,
     ChangeRequest,
     ExportRecord,
     MediaArtifactVersion,
     Project,
+    PlanCheckpoint,
     ProjectEvent,
     ProjectSessionBinding,
     ProjectSkillLock,
     ProjectVersion,
     RebuildPlan,
+    VideoSpecRevision,
     ValidationResult,
     now,
+    uid,
 )
 
 
 class ProjectVersionConflict(RuntimeError):
     def __init__(self, expected: str, actual: str) -> None:
         super().__init__(f"project version changed: expected {expected}, current {actual}")
+        self.expected = expected
+        self.actual = actual
+
+
+class PlanRevisionConflict(RuntimeError):
+    def __init__(self, expected: int, actual: int) -> None:
+        super().__init__(f"build plan revision changed: expected {expected}, current {actual}")
+        self.expected = expected
+        self.actual = actual
+
+
+class VideoSpecRevisionConflict(RuntimeError):
+    def __init__(self, expected: int, actual: int) -> None:
+        super().__init__(f"VideoSpec revision changed: expected {expected}, current {actual}")
         self.expected = expected
         self.actual = actual
 
@@ -43,6 +62,11 @@ class InMemoryVideoProjectRepository:
         self.skill_locks: dict[str, dict[str, ProjectSkillLock]] = defaultdict(dict)
         self.changes: dict[str, ChangeRequest] = {}
         self.plans: dict[str, RebuildPlan] = {}
+        self.video_spec_revisions: dict[str, VideoSpecRevision] = {}
+        self.project_spec_revisions: dict[str, list[str]] = defaultdict(list)
+        self.plan_revisions: dict[str, list[BuildPlanRevision]] = defaultdict(list)
+        self.checkpoints: dict[str, PlanCheckpoint] = {}
+        self.build_checkpoints: dict[str, list[str]] = defaultdict(list)
         self.builds: dict[str, Build] = {}
         self.build_steps: dict[str, dict[str, BuildStep]] = defaultdict(dict)
         self.validations: dict[str, list[ValidationResult]] = defaultdict(list)
@@ -223,6 +247,7 @@ class InMemoryVideoProjectRepository:
                 parent_version_id=current.id,
                 timeline_version_id=(artifact.id if artifact.type == "timeline" else current.timeline_version_id),
                 selections=selections,
+                video_spec_revision_id=current.video_spec_revision_id,
             )
             self._commit_version(project, version)
             self._append_event(project.id, "artifact.committed", {
@@ -294,6 +319,254 @@ class InMemoryVideoProjectRepository:
                 "estimated_cost": plan.estimated_cost,
             })
             return deepcopy(plan)
+
+    async def save_staged_plan(
+        self,
+        plan: RebuildPlan,
+        spec_revision: VideoSpecRevision,
+        plan_revision: BuildPlanRevision,
+        idempotency_key: str,
+    ) -> RebuildPlan:
+        async with self.lock:
+            project = self._project(plan.project_id)
+            key = (plan.project_id, "plan", idempotency_key)
+            existing_id = self.idempotency.get(key)
+            if existing_id is not None:
+                return deepcopy(self.plans[existing_id])
+            self._assert_version(project, plan.base_project_version_id)
+            self.video_spec_revisions[spec_revision.id] = deepcopy(spec_revision)
+            self.project_spec_revisions[plan.project_id].append(spec_revision.id)
+            self.plan_revisions[plan.id].append(deepcopy(plan_revision))
+            self.plans[plan.id] = deepcopy(plan)
+            self.idempotency[key] = plan.id
+            self._append_event(project.id, "video_spec.revised", {
+                "video_spec_revision_id": spec_revision.id,
+                "revision": spec_revision.revision,
+                "complete": spec_revision.complete,
+            })
+            self._append_event(project.id, "plan.revised", {
+                "plan_id": plan.id,
+                "revision": plan_revision.revision,
+                "phase": plan.current_phase,
+            })
+            return deepcopy(plan)
+
+    async def get_video_spec_revision(self, revision_id: str) -> VideoSpecRevision:
+        revision = self.video_spec_revisions.get(revision_id)
+        if revision is None:
+            raise LookupError("VideoSpec revision not found")
+        return deepcopy(revision)
+
+    async def list_video_spec_revisions(self, project_id: str) -> list[VideoSpecRevision]:
+        await self.get_project(project_id)
+        return [
+            deepcopy(self.video_spec_revisions[item])
+            for item in self.project_spec_revisions[project_id]
+        ]
+
+    async def list_plan_revisions(self, plan_id: str) -> list[BuildPlanRevision]:
+        await self.get_plan(plan_id)
+        return deepcopy(self.plan_revisions[plan_id])
+
+    async def create_checkpoint(self, checkpoint: PlanCheckpoint) -> PlanCheckpoint:
+        async with self.lock:
+            build = self.builds.get(checkpoint.build_id)
+            if build is None or build.project_id != checkpoint.project_id:
+                raise LookupError("build not found")
+            existing = next((
+                self.checkpoints[item]
+                for item in self.build_checkpoints[checkpoint.build_id]
+                if self.checkpoints[item].phase == checkpoint.phase
+            ), None)
+            if existing is not None:
+                return deepcopy(existing)
+            self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
+            self.build_checkpoints[checkpoint.build_id].append(checkpoint.id)
+            build.status = "waiting_agent"
+            build.message = f"Waiting for Agent planning after {checkpoint.phase}"
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(checkpoint.project_id, "build.phase.completed", {
+                "build_id": build.id, "phase": checkpoint.phase,
+            })
+            self._append_event(checkpoint.project_id, "build.checkpoint.waiting", {
+                "build_id": build.id, "checkpoint_id": checkpoint.id,
+                "phase": checkpoint.phase, "next_phase": checkpoint.next_phase,
+            })
+            return deepcopy(checkpoint)
+
+    async def get_checkpoint(
+        self, project_id: str, build_id: str, checkpoint_id: str,
+    ) -> PlanCheckpoint:
+        checkpoint = self.checkpoints.get(checkpoint_id)
+        if checkpoint is None or checkpoint.project_id != project_id or checkpoint.build_id != build_id:
+            raise LookupError("plan checkpoint not found")
+        return deepcopy(checkpoint)
+
+    async def list_build_checkpoints(
+        self, project_id: str, build_id: str,
+    ) -> list[PlanCheckpoint]:
+        await self.get_build(project_id, build_id)
+        return [deepcopy(self.checkpoints[item]) for item in self.build_checkpoints[build_id]]
+
+    async def claim_pending_checkpoint(self, lease_seconds: int = 120) -> PlanCheckpoint | None:
+        async with self.lock:
+            current_time = now()
+            candidates = sorted(self.checkpoints.values(), key=lambda item: item.created_at)
+            checkpoint = next((
+                item for item in candidates
+                if item.status == "pending"
+                or (
+                    item.status == "planning"
+                    and item.lease_expires_at is not None
+                    and item.lease_expires_at <= current_time
+                )
+            ), None)
+            if checkpoint is None:
+                return None
+            checkpoint.status = "planning"
+            checkpoint.delivery_attempts += 1
+            checkpoint.delivery_id = checkpoint.delivery_id or uid()
+            checkpoint.lease_expires_at = current_time + timedelta(seconds=lease_seconds)
+            checkpoint.updated_at = current_time
+            self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
+            self._append_event(checkpoint.project_id, "build.checkpoint.planning", {
+                "build_id": checkpoint.build_id,
+                "checkpoint_id": checkpoint.id,
+                "attempt": checkpoint.delivery_attempts,
+            })
+            return deepcopy(checkpoint)
+
+    async def fail_checkpoint_delivery(self, checkpoint_id: str, error: str) -> PlanCheckpoint:
+        async with self.lock:
+            checkpoint = self.checkpoints.get(checkpoint_id)
+            if checkpoint is None:
+                raise LookupError("plan checkpoint not found")
+            checkpoint.error = error
+            checkpoint.lease_expires_at = None
+            checkpoint.updated_at = now()
+            build = self.builds[checkpoint.build_id]
+            if checkpoint.delivery_attempts >= checkpoint.max_delivery_attempts:
+                checkpoint.status = "failed"
+                build.status = "failed"
+                build.message = "Agent planning failed; the previous project version remains active"
+                build.error = error
+                event_type = "build.checkpoint.failed"
+            else:
+                checkpoint.status = "pending"
+                event_type = "build.checkpoint.waiting"
+            self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(checkpoint.project_id, event_type, {
+                "build_id": checkpoint.build_id,
+                "checkpoint_id": checkpoint.id,
+                "attempt": checkpoint.delivery_attempts,
+                "error": error,
+            })
+            return deepcopy(checkpoint)
+
+    async def resolve_checkpoint(
+        self,
+        *,
+        checkpoint: PlanCheckpoint,
+        updated_plan: RebuildPlan,
+        spec_revision: VideoSpecRevision,
+        plan_revision: BuildPlanRevision,
+        idempotency_key: str,
+    ) -> RebuildPlan:
+        async with self.lock:
+            stored = self.checkpoints.get(checkpoint.id)
+            if stored is None:
+                raise LookupError("plan checkpoint not found")
+            key = (stored.project_id, f"checkpoint:{stored.id}", idempotency_key)
+            existing = self.idempotency.get(key)
+            if existing is not None:
+                return deepcopy(self.plans[existing])
+            plan = self.plans[stored.plan_id]
+            latest_specs = self.project_spec_revisions[stored.project_id]
+            latest_spec = self.video_spec_revisions[latest_specs[-1]]
+            if plan.current_revision != checkpoint.base_plan_revision:
+                raise PlanRevisionConflict(checkpoint.base_plan_revision, plan.current_revision)
+            if latest_spec.revision != checkpoint.base_spec_revision:
+                raise VideoSpecRevisionConflict(checkpoint.base_spec_revision, latest_spec.revision)
+            if stored.status not in {"pending", "planning"}:
+                raise ValueError(f"cannot resolve {stored.status} checkpoint")
+            existing_steps = set(self.build_steps[stored.build_id])
+            added = [item for item in updated_plan.items if item.step_id not in existing_steps]
+            self.video_spec_revisions[spec_revision.id] = deepcopy(spec_revision)
+            self.project_spec_revisions[stored.project_id].append(spec_revision.id)
+            self.plan_revisions[plan.id].append(deepcopy(plan_revision))
+            self.plans[plan.id] = deepcopy(updated_plan)
+            for item in added:
+                self.build_steps[stored.build_id][item.step_id] = BuildStep(
+                    build_id=stored.build_id,
+                    project_id=stored.project_id,
+                    plan_step_id=item.step_id,
+                    action=item.action,
+                    capability=item.capability,
+                    resolved_skills=list(item.resolved_skills),
+                    skill_context=item.skill_context,
+                )
+            stored.status = "resolved"
+            stored.lease_expires_at = None
+            stored.error = None
+            stored.updated_at = now()
+            self.checkpoints[stored.id] = deepcopy(stored)
+            build = self.builds[stored.build_id]
+            build.status = "queued"
+            build.message = f"Agent planned {stored.next_phase}"
+            build.estimated_cost = updated_plan.estimated_cost
+            build.updated_at = now()
+            self.builds[build.id] = deepcopy(build)
+            self.idempotency[key] = plan.id
+            self._append_event(stored.project_id, "video_spec.revised", {
+                "video_spec_revision_id": spec_revision.id,
+                "revision": spec_revision.revision,
+                "checkpoint_id": stored.id,
+                "complete": spec_revision.complete,
+            })
+            self._append_event(stored.project_id, "plan.revised", {
+                "plan_id": plan.id,
+                "revision": plan_revision.revision,
+                "checkpoint_id": stored.id,
+                "added_step_ids": plan_revision.added_step_ids,
+            })
+            self._append_event(stored.project_id, "build.checkpoint.resolved", {
+                "build_id": stored.build_id,
+                "checkpoint_id": stored.id,
+                "next_phase": stored.next_phase,
+            })
+            self._append_event(stored.project_id, "build.phase.started", {
+                "build_id": stored.build_id,
+                "phase": stored.next_phase,
+            })
+            return deepcopy(updated_plan)
+
+    async def retry_checkpoint(
+        self, project_id: str, build_id: str, checkpoint_id: str,
+    ) -> PlanCheckpoint:
+        async with self.lock:
+            checkpoint = self.checkpoints.get(checkpoint_id)
+            if checkpoint is None or checkpoint.project_id != project_id or checkpoint.build_id != build_id:
+                raise LookupError("plan checkpoint not found")
+            if checkpoint.status != "failed":
+                raise ValueError("only failed checkpoints can be retried")
+            checkpoint.status = "pending"
+            checkpoint.delivery_attempts = 0
+            checkpoint.delivery_id = None
+            checkpoint.lease_expires_at = None
+            checkpoint.error = None
+            checkpoint.updated_at = now()
+            self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
+            build = self.builds[build_id]
+            build.status = "waiting_agent"
+            build.error = None
+            build.message = f"Retrying Agent planning after {checkpoint.phase}"
+            self.builds[build.id] = deepcopy(build)
+            self._append_event(project_id, "build.checkpoint.waiting", {
+                "build_id": build_id, "checkpoint_id": checkpoint_id, "retry": True,
+            })
+            return deepcopy(checkpoint)
 
     async def get_plan(self, plan_id: str) -> RebuildPlan:
         plan = self.plans.get(plan_id)
@@ -415,6 +688,7 @@ class InMemoryVideoProjectRepository:
             if any(not item.passed for item in validation_results):
                 raise ValueError("all initial build validations must pass before commit")
             current = self.versions[project.current_version_id]
+            plan = self.plans[build.plan_id]
             selections: dict[str, str] = dict(current.selections)
             timeline_id = current.timeline_version_id
             for artifact in artifacts:
@@ -432,6 +706,7 @@ class InMemoryVideoProjectRepository:
                 parent_version_id=project.current_version_id,
                 timeline_version_id=timeline_id,
                 selections=selections,
+                video_spec_revision_id=plan.video_spec_revision_id,
             )
             self._commit_version(project, version)
             self.validations[build.id] = deepcopy(validation_results)
@@ -486,6 +761,12 @@ class InMemoryVideoProjectRepository:
                 step.error = None
                 step.started_at = None
                 step.completed_at = None
+                # A failed build is retried only after its provider operation
+                # reached a terminal failure. Reusing that operation id would
+                # merely reconcile the same failed job forever instead of
+                # submitting the failed step again.
+                step.remote_operation_id = None
+                step.remote_provider = None
                 step.updated_at = now()
             build.status = "queued"
             build.message = "Retry queued"
@@ -640,6 +921,9 @@ class InMemoryVideoProjectRepository:
                 timeline_version_id=timeline_version_id,
                 selections=next_selections,
                 change_request_id=plan.change_request_id,
+                video_spec_revision_id=(
+                    plan.video_spec_revision_id or current.video_spec_revision_id
+                ),
             )
             self._commit_version(project, version)
             self.validations[build.id] = deepcopy(validation_results)
@@ -767,7 +1051,7 @@ class InMemoryVideoProjectRepository:
         return deepcopy([
             build for build in self.builds.values()
             if build.project_id == project_id
-            and build.status in {"queued", "running", "waiting_external"}
+            and build.status in {"queued", "running", "waiting_external", "waiting_agent"}
         ])
 
     async def list_builds(self, project_id: str) -> list[Build]:

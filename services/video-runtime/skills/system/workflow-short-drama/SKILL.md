@@ -10,6 +10,15 @@ metadata:
   workflow:
     title: Short Drama / dialogue-driven production
     mode: short_drama
+    planning:
+      mode: staged
+      checkpoints:
+        - id: story_ready
+          after_phase: story_intent
+          next_phase: visual_production
+          required_artifacts: [story_draft]
+          resolves: [characters, shots, audio]
+          instruction: Complete dialogue and parallel shot specifications from the generated story draft.
     entrypoints: [text, image, audio, video]
     parameters:
       shot_workflow_mode: reference_t2v
