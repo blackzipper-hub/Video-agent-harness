@@ -21,7 +21,13 @@ from .repository import (
 )
 from .runtime import VideoBuildRuntime
 from .identity import IdentityResolver, ServiceOrLocalIdentityResolver
-from .models import CheckpointResolution, MediaArtifactVersion, ProjectIntent, VideoSpec
+from .models import (
+    CheckpointResolution,
+    MediaArtifactVersion,
+    MediaEditOperation,
+    ProjectIntent,
+    VideoSpec,
+)
 from .plugins import PluginDependencyError, VideoPluginManifest
 from .plugins.registry import configured_plugin_roots
 from .upload_security import verify_uploaded_file
@@ -65,6 +71,13 @@ class EditPreviewBody(ApiBody):
     idempotency_key: str = Field(min_length=1, max_length=200)
     description: str = ""
     edits: list[dict] = Field(min_length=1)
+
+
+class MediaEditPreviewBody(ApiBody):
+    base_project_version_id: str
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    operations: list[MediaEditOperation] = Field(min_length=1)
 
 
 class RebuildBody(ApiBody):
@@ -436,6 +449,25 @@ async def get_project_workspace(
     return {"data": await _workspace(build_runtime, project_id, project.user_id)}
 
 
+@router.get("/projects/{project_id}/artifacts")
+async def list_project_artifacts(
+    project_id: str,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    """Return model-safe current Artifact identities for dynamic PlanPatch inputs."""
+    await _owned_and_bound(build_runtime, project_id, identity)
+    artifacts = await build_runtime.repo.current_artifacts(project_id)
+    return {"data": [{
+        "artifactVersionId": item.id,
+        "artifactId": item.artifact_id,
+        "logicalId": _logical_artifact_id(project_id, item),
+        "type": item.type,
+        "title": item.title,
+        "summary": item.summary,
+    } for item in artifacts]}
+
+
 @router.get("/plugins")
 async def list_plugins(
     _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
@@ -567,6 +599,19 @@ async def list_workflows(
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
     return {"data": _workflow_views(build_runtime)}
+
+
+@router.get("/plan-patch-capabilities")
+@router.get("/media-capabilities", include_in_schema=False)
+async def list_media_capabilities(
+    _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    """List Workflow-independent edit operations contributed by Media Plugins."""
+    return {"data": [
+        item.model_dump(mode="json", by_alias=True)
+        for item in build_runtime.plan_patch_capability_catalog()
+    ]}
 
 
 @router.get("/workflows/{workflow_id}")
@@ -750,6 +795,33 @@ async def preview_edits(
             project_id=project_id,
             base_project_version_id=body.base_project_version_id,
             edits=body.edits,
+            description=body.description,
+            idempotency_key=body.idempotency_key,
+        )
+    except ProjectVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": _plan_payload(plan)}
+
+
+@router.post("/projects/{project_id}/plan-patches/preview")
+@router.post("/projects/{project_id}/media-edits/preview", include_in_schema=False)
+async def preview_media_edits(
+    project_id: str,
+    body: MediaEditPreviewBody,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    """Compile a Workflow-free, plugin-constrained dynamic media PlanPatch."""
+    await _owned_and_bound(build_runtime, project_id, identity)
+    try:
+        plan = await build_runtime.preview_plan_patch(
+            project_id=project_id,
+            base_project_version_id=body.base_project_version_id,
+            operations=body.operations,
             description=body.description,
             idempotency_key=body.idempotency_key,
         )

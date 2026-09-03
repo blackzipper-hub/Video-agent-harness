@@ -79,6 +79,75 @@ class VideoRuntimeApiTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 422)
 
+    def test_dynamic_media_patch_api_is_workflow_independent(self) -> None:
+        project = self.client.post(
+            "/api/video/projects",
+            headers=self.headers,
+            json={"title": "Caption later", "sessionId": "session-1"},
+        ).json()["data"]
+        video = asyncio.run(self.runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id=f"{project['projectId']}:final-video",
+            project_id=project["projectId"],
+            type="final_video",
+            uri="https://media.test/final.mp4",
+            title="Final video",
+            metadata={"plan_step_id": "final-video"},
+        )))
+        project = self.client.get(
+            f"/api/video/projects/{project['projectId']}", headers=self.headers,
+        ).json()["data"]
+
+        artifacts = self.client.get(
+            f"/api/video/projects/{project['projectId']}/artifacts",
+            headers=self.headers,
+        )
+        self.assertEqual(artifacts.status_code, 200)
+        self.assertEqual(artifacts.json()["data"][0]["artifactVersionId"], video.id)
+        self.assertNotIn("uri", artifacts.json()["data"][0])
+
+        capabilities = self.client.get(
+            "/api/video/plan-patch-capabilities", headers=self.headers,
+        )
+        self.assertEqual(capabilities.status_code, 200)
+        capability_ids = {item["capability"] for item in capabilities.json()["data"]}
+        self.assertTrue({
+            "media.transcribe", "subtitle.compose", "media.subtitle_burn",
+        } <= capability_ids)
+
+        preview = self.client.post(
+            f"/api/video/projects/{project['projectId']}/plan-patches/preview",
+            headers=self.headers,
+            json={
+                "baseProjectVersionId": project["currentVersionId"],
+                "idempotencyKey": "caption-preview",
+                "description": "add captions",
+                "operations": [
+                    {
+                        "step_id": "transcribe", "capability": "media.transcribe",
+                        "inputs": [{"role": "video", "artifact_version_id": video.id}],
+                    },
+                    {
+                        "step_id": "captions", "capability": "subtitle.compose",
+                        "inputs": [{"role": "transcript", "operation_step_id": "transcribe"}],
+                    },
+                    {
+                        "step_id": "burn", "capability": "media.subtitle_burn",
+                        "inputs": [
+                            {"role": "video", "artifact_version_id": video.id},
+                            {"role": "subtitle", "operation_step_id": "captions"},
+                        ],
+                    },
+                ],
+            },
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        data = preview.json()["data"]
+        self.assertEqual(data["workflowId"], "")
+        self.assertEqual(
+            [item["capability"] for item in data["steps"] if item["capability"]],
+            ["media.transcribe", "subtitle.compose", "media.subtitle_burn"],
+        )
+
     def test_project_binding_preview_idempotency_and_conflict(self) -> None:
         response = self.client.post(
             "/api/video/projects",

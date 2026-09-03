@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ..models import (
     CheckpointResolution,
+    MediaCapabilityContract,
     MediaArtifactVersion,
     PlanCheckpoint,
     ProjectIntent,
@@ -36,6 +37,10 @@ class PluginContributions(BaseModel):
     styles: list[str] = Field(default_factory=list)
     validators: list[str] = Field(default_factory=list)
     media_operators: list[str] = Field(default_factory=list)
+    # Capabilities that an Agent may append as a workflow-independent PlanPatch.
+    # This allow-list is separate from execution registration: merely installing
+    # a capability never makes it dynamically composable.
+    plan_patch_capabilities: list[str] = Field(default_factory=list)
 
 
 class PluginSandboxRuntime(BaseModel):
@@ -89,6 +94,8 @@ class PluginContext:
 
 
 class VideoPlugin(Protocol):
+    def plan_patch_capability_contracts(self) -> list[MediaCapabilityContract]: ...
+    def media_capability_contracts(self) -> list[MediaCapabilityContract]: ...
     def planning_mode(self, workflow_id: str) -> str: ...
     async def compile_build_plan(
         self, context: PluginContext, spec: VideoSpec,
@@ -128,6 +135,17 @@ class BaseVideoPlugin:
         Callable[[CapabilityExecutionEnvelope, dict[str, Any]], Awaitable[Any]],
     ]:
         return {}
+
+    def plan_patch_capability_contracts(self) -> list[MediaCapabilityContract]:
+        """Describe the explicitly allow-listed Artifact transformations.
+
+        ``media_capability_contracts`` remains as the v1 compatibility hook for
+        existing video plugins; the Harness consumes this generic hook.
+        """
+        return self.media_capability_contracts()
+
+    def media_capability_contracts(self) -> list[MediaCapabilityContract]:
+        return []
 
     async def compile_build_plan(
         self, _context: PluginContext, _spec: VideoSpec,

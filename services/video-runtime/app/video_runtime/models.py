@@ -106,6 +106,73 @@ class ChangeRequest(BaseModel):
     created_at: datetime = Field(default_factory=now)
 
 
+class MediaCapabilityInputContract(BaseModel):
+    """One project-artifact input accepted by a workflow-free media capability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    artifact_types: list[str] = Field(min_length=1)
+    parameter: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    required: bool = True
+    multiple: bool = False
+    description: str = ""
+
+
+class MediaCapabilityContract(BaseModel):
+    """Plugin-owned contract used to build post-production plans dynamically."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    capability: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{1,127}$")
+    description: str = Field(min_length=1)
+    inputs: list[MediaCapabilityInputContract] = Field(default_factory=list)
+    output_artifact_type: str = Field(min_length=1, max_length=100)
+    replaces_input_role: str | None = None
+    estimated_cost: float = Field(default=0.0, ge=0)
+    skill_id: str | None = None
+    parameters_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_roles(self):
+        roles = [item.role for item in self.inputs]
+        if len(roles) != len(set(roles)):
+            raise ValueError("media capability input roles must be unique")
+        if self.replaces_input_role and self.replaces_input_role not in roles:
+            raise ValueError("replaces_input_role must name a declared input role")
+        return self
+
+
+class MediaEditInput(BaseModel):
+    """Reference either a selected project ArtifactVersion or an earlier edit step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    artifact_version_id: str | None = None
+    operation_step_id: str | None = None
+
+    @model_validator(mode="after")
+    def require_one_source(self):
+        if bool(self.artifact_version_id) == bool(self.operation_step_id):
+            raise ValueError(
+                "media edit input requires exactly one of artifact_version_id or operation_step_id"
+            )
+        return self
+
+
+class MediaEditOperation(BaseModel):
+    """One Agent-proposed step constrained by an installed Media Plugin contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    capability: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{1,127}$")
+    inputs: list[MediaEditInput] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    title: str = Field(default="", max_length=200)
+
+
 class VideoCharacterSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -16,6 +16,8 @@ from .models import (
     CheckpointResolution,
     ChangeRequest,
     ExportRecord,
+    MediaCapabilityContract,
+    MediaEditOperation,
     MediaArtifactVersion,
     PlanCheckpoint,
     Project,
@@ -100,6 +102,28 @@ def _merge_spec_patch(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, 
         else:
             merged[key] = deepcopy(value)
     return merged
+
+
+def _artifact_matches_media_type(actual: str, accepted: list[str]) -> bool:
+    """Match Cuti's historical artifact names by media family, not Workflow."""
+    normalized = actual.lower()
+    for expected in accepted:
+        expected = expected.lower()
+        if expected == "*" or normalized == expected:
+            return True
+        if expected == "video" and "video" in normalized:
+            return True
+        if expected == "image" and any(token in normalized for token in ("image", "frame", "keyframe")):
+            return True
+        if expected == "audio" and any(
+            token in normalized for token in ("audio", "music", "narration", "bgm", "sound")
+        ):
+            return True
+        if expected == "subtitle" and any(token in normalized for token in ("subtitle", "caption")):
+            return True
+        if expected == "transcript" and "transcript" in normalized:
+            return True
+    return False
 
 
 class BuildStepExecutor(Protocol):
@@ -725,6 +749,247 @@ class VideoBuildRuntime:
         await self._resolve_plan_skills(plan)
         return await self.repo.save_change_and_plan(change, plan, idempotency_key)
 
+    def plan_patch_capability_catalog(self) -> list[MediaCapabilityContract]:
+        """Return installed Harness-wide PlanPatch operations declared by plugins."""
+        contracts: dict[str, MediaCapabilityContract] = {}
+        for loaded in self.plugins.loaded:
+            provider = getattr(
+                loaded.implementation, "plan_patch_capability_contracts", None,
+            )
+            if not callable(provider):
+                continue
+            for contract in provider():
+                if contract.capability not in loaded.manifest.contributions.capabilities:
+                    raise ValueError(
+                        f"plugin {loaded.manifest.id} exposes an undeclared media capability: "
+                        f"{contract.capability}"
+                    )
+                if (
+                    contract.capability
+                    not in loaded.manifest.contributions.plan_patch_capabilities
+                ):
+                    raise ValueError(
+                        f"plugin {loaded.manifest.id} exposes a PlanPatch contract without "
+                        f"allow-listing the capability: {contract.capability}"
+                    )
+                if contract.capability in contracts:
+                    raise ValueError(
+                        f"duplicate media capability contract: {contract.capability}"
+                    )
+                contracts[contract.capability] = contract
+        return [contracts[key] for key in sorted(contracts)]
+
+    def media_capability_catalog(self) -> list[MediaCapabilityContract]:
+        """Compatibility alias for pre-PlanPatch callers."""
+        return self.plan_patch_capability_catalog()
+
+    async def preview_plan_patch(
+        self,
+        *,
+        project_id: str,
+        base_project_version_id: str,
+        operations: list[MediaEditOperation],
+        description: str = "",
+        idempotency_key: str | None = None,
+    ) -> RebuildPlan:
+        """Compile Agent-proposed post-production steps without a generation Workflow.
+
+        The installed Media Plugin contracts define accepted inputs and output
+        behavior. Every input must be a selected project ArtifactVersion or an
+        earlier operation, so callers cannot smuggle arbitrary external URLs into
+        the Capability Execution Envelope.
+        """
+        project = await self.repo.get_project(project_id)
+        if project.current_version_id != base_project_version_id:
+            from .repository import ProjectVersionConflict
+            raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
+        if not operations:
+            raise ValueError("at least one media edit operation is required")
+        operation_ids = [item.step_id for item in operations]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("media edit operation step ids must be unique")
+
+        contracts = {
+            item.capability: item for item in self.plan_patch_capability_catalog()
+        }
+        current_artifacts = await self.repo.current_artifacts(project_id)
+        current_by_version = {item.id: item for item in current_artifacts}
+        output_types: dict[str, str] = {}
+        reuse_step_by_version: dict[str, str] = {}
+        plan_items: list[RebuildPlanItem] = []
+        replacement_ids: set[str] = set()
+
+        def reuse_step(artifact: MediaArtifactVersion) -> str:
+            existing = reuse_step_by_version.get(artifact.id)
+            if existing:
+                return existing
+            step_id = f"source-{len(reuse_step_by_version) + 1}"
+            reuse_step_by_version[artifact.id] = step_id
+            plan_items.append(RebuildPlanItem(
+                step_id=step_id,
+                artifact_version_id=artifact.id,
+                output_artifact_id=artifact.artifact_id,
+                output_artifact_type=artifact.type,
+                action="reuse",
+                order=-100 + len(reuse_step_by_version),
+                reason="Selected project Artifact used by a post-production operation",
+            ))
+            return step_id
+
+        for order, operation in enumerate(operations, start=1):
+            contract = contracts.get(operation.capability)
+            if contract is None:
+                raise ValueError(
+                    f"capability is not available for workflow-free media editing: "
+                    f"{operation.capability}"
+                )
+            reserved = {
+                key for key in operation.parameters
+                if key in {"uri", "url", "remote_operation_id"}
+                or key.endswith("_url")
+                or key.endswith("_step")
+                or key.endswith("_steps")
+            }
+            if reserved:
+                raise ValueError(
+                    "media edit parameters cannot contain direct resource references: "
+                    + ", ".join(sorted(reserved))
+                )
+            role_contracts = {item.role: item for item in contract.inputs}
+            grouped_inputs: dict[str, list] = {}
+            for supplied in operation.inputs:
+                if supplied.role not in role_contracts:
+                    raise ValueError(
+                        f"{operation.capability} does not accept input role {supplied.role}"
+                    )
+                grouped_inputs.setdefault(supplied.role, []).append(supplied)
+            for role, expected in role_contracts.items():
+                supplied_values = grouped_inputs.get(role, [])
+                if expected.required and not supplied_values:
+                    raise ValueError(
+                        f"{operation.capability} requires input role {role}"
+                    )
+                if not expected.multiple and len(supplied_values) > 1:
+                    raise ValueError(
+                        f"{operation.capability} accepts only one {role} input"
+                    )
+
+            parameters = deepcopy(operation.parameters)
+            dependencies: list[str] = []
+            artifact_inputs_by_role: dict[str, list[MediaArtifactVersion]] = {}
+            for role, supplied_values in grouped_inputs.items():
+                expected = role_contracts[role]
+                refs: list[str] = []
+                for supplied in supplied_values:
+                    if supplied.artifact_version_id:
+                        artifact = current_by_version.get(supplied.artifact_version_id)
+                        if artifact is None:
+                            raise LookupError(
+                                "media edit inputs must reference a currently selected project "
+                                f"ArtifactVersion: {supplied.artifact_version_id}"
+                            )
+                        if not _artifact_matches_media_type(
+                            artifact.type, expected.artifact_types,
+                        ):
+                            raise ValueError(
+                                f"input {role} expects {expected.artifact_types}, got {artifact.type}"
+                            )
+                        ref = reuse_step(artifact)
+                        artifact_inputs_by_role.setdefault(role, []).append(artifact)
+                    else:
+                        ref = str(supplied.operation_step_id)
+                        if ref not in output_types:
+                            raise ValueError(
+                                f"media edit input references an unknown or later operation: {ref}"
+                            )
+                        if not _artifact_matches_media_type(
+                            output_types[ref], expected.artifact_types,
+                        ):
+                            raise ValueError(
+                                f"input {role} expects {expected.artifact_types}, "
+                                f"but operation {ref} produces {output_types[ref]}"
+                            )
+                    refs.append(ref)
+                    if ref not in dependencies:
+                        dependencies.append(ref)
+                parameters[expected.parameter] = refs if expected.multiple else refs[0]
+
+            replacement: MediaArtifactVersion | None = None
+            if contract.replaces_input_role:
+                candidates = artifact_inputs_by_role.get(
+                    contract.replaces_input_role, [],
+                )
+                if len(candidates) != 1:
+                    raise ValueError(
+                        f"{operation.capability} must replace one selected project "
+                        f"{contract.replaces_input_role} ArtifactVersion"
+                    )
+                replacement = candidates[0]
+                if replacement.id in replacement_ids:
+                    raise ValueError(
+                        "a media edit plan cannot replace the same ArtifactVersion twice; "
+                        "chain later transforms in a separate confirmed build"
+                    )
+                replacement_ids.add(replacement.id)
+
+            output_type = replacement.type if replacement else contract.output_artifact_type
+            plan_items.append(RebuildPlanItem(
+                step_id=operation.step_id,
+                artifact_version_id=replacement.id if replacement else "",
+                output_artifact_id=(
+                    replacement.artifact_id
+                    if replacement
+                    else f"{project_id}:post:{operation.step_id}"
+                ),
+                output_artifact_type=output_type,
+                action="rebuild" if replacement else "create",
+                capability=operation.capability,
+                parameters={
+                    **parameters,
+                    **({"title": operation.title} if operation.title else {}),
+                },
+                depends_on=dependencies,
+                estimated_cost=contract.estimated_cost,
+                order=order,
+                reason=description or contract.description,
+                skill_ids=[contract.skill_id] if contract.skill_id else [],
+            ))
+            output_types[operation.step_id] = output_type
+
+        change = ChangeRequest(
+            project_id=project_id,
+            base_project_version_id=base_project_version_id,
+            description=description or "Dynamic post-production edit",
+            target_artifact_version_ids=sorted(replacement_ids),
+            edits=[item.model_dump(mode="json") for item in operations],
+        )
+        plan = RebuildPlan(
+            project_id=project_id,
+            kind="incremental",
+            change_request_id=change.id,
+            base_project_version_id=base_project_version_id,
+            workflow_id="",
+            items=plan_items,
+            estimated_cost=round(sum(
+                item.estimated_cost
+                for item in plan_items
+                if item.action in {"create", "rebuild"}
+            ), 6),
+        )
+        context = PluginContext(project_id=project_id, values={
+            "change_request": change,
+            "media_edit_operations": operations,
+        })
+        for loaded in self.plugins.loaded:
+            plan = await loaded.implementation.after_plan(context, plan)
+        topological_steps(plan.items)
+        await self._resolve_plan_skills(plan)
+        return await self.repo.save_change_and_plan(change, plan, idempotency_key)
+
+    async def preview_media_edits(self, **kwargs: Any) -> RebuildPlan:
+        """Compatibility alias; new callers use :meth:`preview_plan_patch`."""
+        return await self.preview_plan_patch(**kwargs)
+
     async def apply_rebuild(
         self,
         *,
@@ -1336,6 +1601,15 @@ class VideoBuildRuntime:
             for item in plan.items:
                 if item.action == "reuse":
                     state = persisted_steps[item.step_id]
+                    source = source_by_id.get(item.artifact_version_id)
+                    if source is None:
+                        raise LookupError(
+                            f"planned reuse ArtifactVersion not found: {item.artifact_version_id}"
+                        )
+                    # Dynamic media plans give selected Artifacts local aliases
+                    # (source-1, source-2, ...). Make those aliases available to
+                    # downstream plugin steps just like normal plan outputs.
+                    completed_by_step[item.step_id] = source
                     if state.status != "completed":
                         state.status = "completed"
                         state.completed_at = now()

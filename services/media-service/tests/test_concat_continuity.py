@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -83,3 +84,90 @@ async def test_concat_supports_short_continuation_crossfade():
 
         assert 44 <= output_info["nb_frames"] <= 46
         assert abs(output_info["video_duration"] - 1.875) < 0.1
+
+
+@pytest.mark.asyncio
+async def test_concat_normalize_uses_copy_for_identical_hevc_main10_streams():
+    """Seedance segments must not spend 20 minutes transcoding compatible HEVC."""
+    info = {
+        "duration": 15.072,
+        "video_duration": 15.0,
+        "width": 1920,
+        "height": 1080,
+        "fps": 24.0,
+        "nb_frames": 360,
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "has_audio": True,
+        "time_base": "1/12288",
+        "audio_codec": "aac",
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "audio_channel_layout": "stereo",
+        "audio_time_base": "1/32000",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        output = os.path.join(tmp, "output.mp4")
+        run = AsyncMock(return_value=(0, "", ""))
+        inspect = AsyncMock(return_value=info)
+        with (
+            patch("app.services.ffmpeg_service.run_ffmpeg", run),
+            patch("app.services.ffmpeg_service.get_video_info", inspect),
+        ):
+            await concat_videos(
+                [os.path.join(tmp, "one.mp4"), os.path.join(tmp, "two.mp4")],
+                output,
+                normalize=True,
+            )
+
+        command = run.await_args.args[0]
+        assert command[command.index("-c") + 1] == "copy"
+        assert "libx264" not in command
+
+
+@pytest.mark.asyncio
+async def test_concat_timestamp_corruption_forces_transcode_without_reentering_copy():
+    source_info = {
+        "duration": 10.0,
+        "video_duration": 10.0,
+        "width": 1920,
+        "height": 1080,
+        "fps": 24.0,
+        "nb_frames": 240,
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "has_audio": True,
+        "time_base": "1/12288",
+        "audio_codec": "aac",
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "audio_channel_layout": "stereo",
+        "audio_time_base": "1/32000",
+    }
+    corrupt_output_info = {**source_info, "duration": 30.0, "video_duration": 30.0}
+    with tempfile.TemporaryDirectory() as tmp:
+        output = os.path.join(tmp, "output.mp4")
+        run = AsyncMock(return_value=(0, "", ""))
+        inspect = AsyncMock(side_effect=[
+            source_info,
+            source_info,
+            corrupt_output_info,
+            source_info,
+            source_info,
+        ])
+        with (
+            patch("app.services.ffmpeg_service.run_ffmpeg", run),
+            patch("app.services.ffmpeg_service.get_video_info", inspect),
+            patch("app.services.ffmpeg_service.os.unlink"),
+        ):
+            await concat_videos(
+                [os.path.join(tmp, "one.mp4"), os.path.join(tmp, "two.mp4")],
+                output,
+                normalize=True,
+            )
+
+        assert run.await_count == 2
+        copy_command = run.await_args_list[0].args[0]
+        transcode_command = run.await_args_list[1].args[0]
+        assert copy_command[copy_command.index("-c") + 1] == "copy"
+        assert "libx264" in transcode_command

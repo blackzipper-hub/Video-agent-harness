@@ -56,6 +56,10 @@ pytest tests/ -v
 | GET | `/readyz` | 就绪探针 |
 | GET | `/metrics` | Prometheus 指标 |
 
+## 视频拼接
+
+未要求转场时，`/api/v1/video/concat` 会检查每个视频流和音频流。编码、像素格式、尺寸、帧率、音频编码、采样率、声道布局和时间基一致的输入使用 FFmpeg concat demuxer 直接复制码流，包括参数兼容的 HEVC Main10 Seedance 片段。不兼容的输入以及带转场的输入使用标准化转码。直接拼接后会检查时长；若时间戳导致结果异常，则强制执行一次转码。
+
 ## 部署
 
 ```bash

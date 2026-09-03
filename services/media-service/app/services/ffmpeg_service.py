@@ -270,6 +270,11 @@ async def get_video_info(file_path: str) -> dict:
         "pix_fmt": video_stream.get("pix_fmt"),
         "has_audio": audio_stream is not None,
         "time_base": video_stream.get("time_base", ""),
+        "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
+        "audio_sample_rate": int(audio_stream.get("sample_rate") or 0) if audio_stream else 0,
+        "audio_channels": int(audio_stream.get("channels") or 0) if audio_stream else 0,
+        "audio_channel_layout": audio_stream.get("channel_layout", "") if audio_stream else "",
+        "audio_time_base": audio_stream.get("time_base", "") if audio_stream else "",
     }
 
 
@@ -972,6 +977,7 @@ async def concat_videos(
     output_path: str,
     normalize: bool = True,
     transition_duration: float = 0.0,
+    _force_transcode: bool = False,
 ):
     if not input_paths:
         raise ValueError("No input files for concat")
@@ -984,23 +990,39 @@ async def concat_videos(
     BATCH_SIZE = 8
     infos = None
 
-    # When normalize=False, verify inputs are -c copy safe (same codec/res/fps/pix_fmt).
-    # Audio must be uniform: all silent OR all with audio (Seedance short-drama clips keep AAC).
-    # If any mismatch → auto-fallback to normalize=True so the output is always correct.
-    if not normalize and len(input_paths) > 1:
+    # A requested normalization is a compatibility guarantee, not a requirement to
+    # transcode already-identical streams.  Exact matches (including HEVC/Main10
+    # Seedance clips) can be concatenated losslessly in seconds.  Audio must be all
+    # present or all absent and, when present, have the same stream parameters.
+    if not _force_transcode and transition_duration <= 0 and len(input_paths) > 1:
         infos = [await get_video_info(p) for p in input_paths]
         ref = infos[0]
         audio_flags = [bool(info.get("has_audio")) for info in infos]
         audio_uniform = all(audio_flags) or not any(audio_flags)
-        copy_safe = audio_uniform and all(
-            info.get("codec") == "h264"
-            and info.get("pix_fmt") == "yuv420p"
+        video_copy_safe = all(
+            info.get("codec") == ref.get("codec")
+            and info.get("pix_fmt") == ref.get("pix_fmt")
             and info.get("width") == ref.get("width")
             and info.get("height") == ref.get("height")
-            and abs(info.get("fps", 0) - ref.get("fps", 0)) < 1
+            and abs(info.get("fps", 0) - ref.get("fps", 0)) < 0.001
             for info in infos
         )
+        audio_copy_safe = not any(audio_flags) or all(
+            info.get("audio_codec") == ref.get("audio_codec")
+            and info.get("audio_sample_rate") == ref.get("audio_sample_rate")
+            and info.get("audio_channels") == ref.get("audio_channels")
+            and info.get("audio_channel_layout") == ref.get("audio_channel_layout")
+            and info.get("audio_time_base") == ref.get("audio_time_base")
+            for info in infos
+        )
+        copy_safe = audio_uniform and video_copy_safe and audio_copy_safe
         if copy_safe:
+            if normalize:
+                logger.info(
+                    "concat_videos normalize fast-path: streams already compatible; "
+                    "using lossless copy"
+                )
+            normalize = False
             # time_base mismatch causes timestamp corruption in -c copy concat;
             # re-mux outliers to the most common time_base before proceeding.
             time_bases = [info.get("time_base", "") for info in infos]
@@ -1029,8 +1051,10 @@ async def concat_videos(
                     else:
                         logger.error("time_base re-mux failed for %s: %s", orig_path, fix_err[:200])
             logger.info(
-                "concat_videos copy-safe: %d videos h264/yuv420p audio=%s %dx%d fps=%.1f",
+                "concat_videos copy-safe: %d videos %s/%s audio=%s %dx%d fps=%.1f",
                 len(infos),
+                ref.get("codec"),
+                ref.get("pix_fmt"),
                 "yes" if all(audio_flags) else "no",
                 ref.get("width", 0),
                 ref.get("height", 0),
@@ -1040,11 +1064,21 @@ async def concat_videos(
             normalize = True
             _bad = next(
                 (i for i, info in enumerate(infos)
-                 if info.get("codec") != "h264"
-                 or info.get("pix_fmt") != "yuv420p"
+                 if info.get("codec") != ref.get("codec")
+                 or info.get("pix_fmt") != ref.get("pix_fmt")
                  or info.get("width") != ref.get("width")
                  or info.get("height") != ref.get("height")
-                 or abs(info.get("fps", 0) - ref.get("fps", 0)) >= 1
+                 or abs(info.get("fps", 0) - ref.get("fps", 0)) >= 0.001
+                 or (
+                     bool(info.get("has_audio"))
+                     and (
+                         info.get("audio_codec") != ref.get("audio_codec")
+                         or info.get("audio_sample_rate") != ref.get("audio_sample_rate")
+                         or info.get("audio_channels") != ref.get("audio_channels")
+                         or info.get("audio_channel_layout") != ref.get("audio_channel_layout")
+                         or info.get("audio_time_base") != ref.get("audio_time_base")
+                     )
+                 )
                  or not audio_uniform),
                 0,
             )
@@ -1211,7 +1245,12 @@ async def concat_videos(
                 actual_dur, expected_dur, actual_dur / expected_dur,
             )
             os.unlink(output_path)
-            await concat_videos(input_paths, output_path, normalize=True)
+            await concat_videos(
+                input_paths,
+                output_path,
+                normalize=True,
+                _force_transcode=True,
+            )
 
 
 async def _concat_normalize_batched(

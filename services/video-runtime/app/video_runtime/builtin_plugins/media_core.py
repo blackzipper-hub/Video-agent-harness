@@ -6,7 +6,11 @@ import json
 import re
 from typing import Any
 
-from ..models import MediaArtifactVersion
+from ..models import (
+    MediaArtifactVersion,
+    MediaCapabilityContract,
+    MediaCapabilityInputContract,
+)
 from ..plugins import BaseVideoPlugin
 from ..security import CapabilityExecutionEnvelope
 
@@ -113,7 +117,9 @@ class MediaCorePlugin(BaseVideoPlugin):
         "media.timeline.compose",
         "media.concat",
         "media.mix_audio",
+        "subtitle.compose",
         "media.subtitle.compose",
+        "media.subtitle_burn",
         "media.subtitle.burn",
         "media.hyperframes_caption",
         "media.lipsync",
@@ -121,6 +127,131 @@ class MediaCorePlugin(BaseVideoPlugin):
 
     def capability_handlers(self):
         return {capability: self._execute for capability in self.CAPABILITIES}
+
+    def media_capability_contracts(self) -> list[MediaCapabilityContract]:
+        """Describe workflow-free edits that an Agent may append to any project.
+
+        These are deliberately owned by the Media Plugin instead of a generation
+        Workflow. Installing another Media Plugin can therefore extend the edit
+        surface without changing every Workflow compiler.
+        """
+
+        def source(
+            role: str,
+            artifact_types: list[str],
+            parameter: str,
+            *,
+            multiple: bool = False,
+            description: str = "",
+        ) -> MediaCapabilityInputContract:
+            return MediaCapabilityInputContract(
+                role=role,
+                artifact_types=artifact_types,
+                parameter=parameter,
+                multiple=multiple,
+                description=description,
+            )
+
+        return [
+            MediaCapabilityContract(
+                capability="media.transcribe",
+                description="Transcribe the complete selected video into timestamped speech.",
+                inputs=[source("video", ["video"], "video_step")],
+                output_artifact_type="transcript",
+                estimated_cost=0.01,
+                skill_id="subtitle-authoring",
+            ),
+            MediaCapabilityContract(
+                capability="subtitle.compose",
+                description="Create a validated subtitle file from a timestamped transcript.",
+                inputs=[source("transcript", ["transcript"], "transcription_step")],
+                output_artifact_type="subtitle",
+                skill_id="subtitle-authoring",
+            ),
+            MediaCapabilityContract(
+                capability="media.subtitle_burn",
+                description="Burn a subtitle Artifact into a selected video as a new video version.",
+                inputs=[
+                    source("video", ["video"], "video_step"),
+                    source("subtitle", ["subtitle"], "subtitle_step"),
+                ],
+                output_artifact_type="video",
+                replaces_input_role="video",
+                estimated_cost=0.02,
+                skill_id="subtitle-authoring",
+            ),
+            MediaCapabilityContract(
+                capability="media.hyperframes_caption",
+                description="Render dynamic HyperFrames captions over a selected video.",
+                inputs=[
+                    source("video", ["video"], "video_step"),
+                    source("transcript", ["transcript"], "transcription_step"),
+                ],
+                output_artifact_type="video",
+                replaces_input_role="video",
+                estimated_cost=0.02,
+                skill_id="hyperframes-captions",
+            ),
+            MediaCapabilityContract(
+                capability="media.extract_frame",
+                description="Extract a still frame from an existing video.",
+                inputs=[source("video", ["video"], "source_video_step")],
+                output_artifact_type="image",
+            ),
+            MediaCapabilityContract(
+                capability="media.concat",
+                description="Concatenate selected videos in the supplied order.",
+                inputs=[source("videos", ["video"], "video_steps", multiple=True)],
+                output_artifact_type="video_assembled",
+                estimated_cost=0.02,
+            ),
+            MediaCapabilityContract(
+                capability="media.mix_audio",
+                description="Replace or overlay the audio of a selected video.",
+                inputs=[
+                    source("video", ["video"], "video_step"),
+                    source("audio", ["audio"], "audio_step"),
+                ],
+                output_artifact_type="video",
+                replaces_input_role="video",
+                estimated_cost=0.01,
+            ),
+            MediaCapabilityContract(
+                capability="media.lipsync",
+                description="Create a lip-synchronized version of a selected video.",
+                inputs=[
+                    source("video", ["video"], "video_step"),
+                    source("audio", ["audio"], "audio_step"),
+                ],
+                output_artifact_type="video",
+                replaces_input_role="video",
+                estimated_cost=0.35,
+            ),
+            MediaCapabilityContract(
+                capability="media.audio.analyze",
+                description="Analyze timing, beats, lyrics, and structure of selected audio.",
+                inputs=[source("audio", ["audio"], "audio_step")],
+                output_artifact_type="audio_analysis",
+            ),
+            MediaCapabilityContract(
+                capability="media.audio.trim",
+                description="Trim a selected audio Artifact without regenerating it.",
+                inputs=[source("audio", ["audio"], "audio_step")],
+                output_artifact_type="audio",
+            ),
+            MediaCapabilityContract(
+                capability="media.probe",
+                description="Inspect duration and streams of an existing media Artifact.",
+                inputs=[source("media", ["*"], "media_step")],
+                output_artifact_type="media_probe",
+            ),
+            MediaCapabilityContract(
+                capability="media.tts",
+                description="Generate narration audio from supplied text.",
+                output_artifact_type="audio_narration",
+                estimated_cost=0.05,
+            ),
+        ]
 
     async def _execute(
         self, envelope: CapabilityExecutionEnvelope, payload: dict[str, Any],
@@ -287,7 +418,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                 "audio_volume": parameters.get("audio_volume", 0.25),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
-        elif capability == "media.subtitle.compose":
+        elif capability in {"media.subtitle.compose", "subtitle.compose"}:
             from app.utils import media_service_client as msc
             cues = parameters.get("cues", [])
             transcription_step = parameters.get("transcription_step")
@@ -300,15 +431,21 @@ class MediaCorePlugin(BaseVideoPlugin):
                 cues,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 subtitle_format=str(parameters.get("format") or "srt"),
+                max_lines=int(parameters.get("max_lines") or 2),
+                max_chars_per_line=int(parameters.get("max_chars_per_line") or 42),
+                max_cps=float(parameters.get("max_cps") or 20),
             )
             result = {**result, "uri": result.get("result_url")}
-        elif capability == "media.subtitle.burn":
+        elif capability in {"media.subtitle.burn", "media.subtitle_burn"}:
             from app.utils import media_service_client as msc
             video = self._required(completed, parameters.get("video_step"))
             subtitle = self._required(completed, parameters.get("subtitle_step"))
             result = await msc.subtitle_burn(
                 str(video.uri), str(subtitle.uri),
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
+                style_preset=str(parameters.get("style_preset") or "clean"),
+                position=str(parameters.get("position") or "bottom-safe"),
+                font_name=str(parameters.get("font_name") or "") or None,
             )
             result = {**result, "uri": result.get("result_url")}
         elif capability == "media.hyperframes_caption":

@@ -379,6 +379,8 @@ export const deepAgentEn = {
   'da.progress.defaultHint': 'Shows phases, tool calls, and verifiable results—not private chain-of-thought.',
   'da.progress.completedLabel': 'Completed',
   'da.progress.runningLabel': 'Running',
+  'da.progress.collapse': 'Collapse task details',
+  'da.progress.expand': 'Expand task details',
 
   'da.trace.title': 'Live Agent trace',
   'da.trace.subtitle': 'Auditable decisions and tool calls',
@@ -808,6 +810,8 @@ export const deepAgentZh = {
   'da.progress.defaultHint': '这里展示阶段、工具调用和可验证结果，不展示模型私有思维链。',
   'da.progress.completedLabel': '已完成',
   'da.progress.runningLabel': '执行中',
+  'da.progress.collapse': '收起任务详情',
+  'da.progress.expand': '展开任务详情',
 
   'da.trace.title': 'Agent 实时轨迹',
   'da.trace.subtitle': '可审计决策与工具调用（非隐藏思维链）',

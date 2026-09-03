@@ -352,6 +352,52 @@ export function apply(ctx: Context): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'video_artifact_list',
+    description: 'List the currently selected, project-owned Artifacts that may be used as inputs to a dynamic edit. Call this before proposing any edit to an existing video; use only returned artifactVersionId values.',
+    parameters: { project_id: { type: 'string', required: true } },
+    output: {
+      schema: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.length === 0
+          ? 'This video project has no selected Artifacts.'
+          : value.map(item => `${String(item.artifactVersionId)}: ${String(item.logicalId)} (${String(item.type)}) — ${String(item.title || item.summary || '')}`).join('\n'),
+      }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.listArtifacts(
+      args.project_id, identityOf(exec.agent), exec.signal,
+    ).then(value => value as unknown as Array<Record<string, import('@cuti-ai/video-runtime').JsonValue>>),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_plan_patch_capability_list',
+    description: 'List Harness-wide Artifact transformation capabilities contributed by installed plugins. These capabilities are independent of the generation Workflow and may be appended to selected Artifacts at any time. Load a returned skill_id before planning that capability.',
+    parameters: {},
+    output: {
+      schema: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.map((item) => {
+          const inputs = Array.isArray(item.inputs)
+            ? item.inputs.map((input) => {
+              if (typeof input !== 'object' || input === null || Array.isArray(input)) return 'invalid-input'
+              const role = String(input.role ?? '')
+              const artifactTypes = Array.isArray(input.artifact_types)
+                ? input.artifact_types.map(type => String(type)).join('|')
+                : ''
+              return `${role}:${artifactTypes}`
+            }).join(', ')
+            : ''
+          return `${String(item.capability)} [${inputs || 'no artifact input'}] -> ${String(item.output_artifact_type)}${item.replaces_input_role ? `; replaces ${String(item.replaces_input_role)}` : ''}${item.skill_id ? `; load skill ${String(item.skill_id)}` : ''} — ${String(item.description)}`
+        }).join('\n'),
+      }],
+    },
+    execute: (_args, exec) => ctx.videoRuntime.listPlanPatchCapabilities(
+      identityOf(exec.agent), exec.signal,
+    ).then(value => value as unknown as Array<Record<string, import('@cuti-ai/video-runtime').JsonValue>>),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'video_change_preview',
     description: 'Preview the deterministic impact of a requested project change without modifying the project.',
     parameters: {
@@ -388,7 +434,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_edit_preview',
-    description: 'Resolve structured character, shot, music, lipsync, timeline, or artifact edits into an executable incremental plan. This only previews impact and cost; do not execute until the user confirms.',
+    description: 'Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.',
     parameters: {
       project_id: { type: 'string', required: true },
       base_project_version_id: { type: 'string', required: true },
@@ -399,7 +445,7 @@ export function apply(ctx: Context): void {
           type: 'object', additionalProperties: true, properties: {
             type: {
               type: 'string', required: true,
-              enum: ['patch_character', 'patch_scene', 'patch_shot', 'regenerate_artifact', 'replace_music', 'generate_lipsync', 'patch_timeline'],
+              enum: ['patch_character', 'patch_scene', 'patch_shot', 'regenerate_artifact', 'replace_music', 'patch_timeline'],
             },
             id: { type: 'string' },
             artifactVersionId: { type: 'string' },
@@ -422,6 +468,52 @@ export function apply(ctx: Context): void {
       idempotencyKey: args.idempotency_key,
       description: args.description,
       edits: args.edits,
+    }, identityOf(exec.agent), exec.signal).then(
+      value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
+    ),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_plan_patch_preview',
+    description: 'Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. This only previews impact and cost; wait for user confirmation before video_rebuild_apply. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.',
+    parameters: {
+      project_id: { type: 'string', required: true },
+      base_project_version_id: { type: 'string', required: true },
+      idempotency_key: { type: 'string', required: true },
+      description: { type: 'string', required: true },
+      operations: {
+        type: 'array', required: true, items: {
+          type: 'object', additionalProperties: false, properties: {
+            step_id: { type: 'string', required: true },
+            capability: { type: 'string', required: true },
+            inputs: {
+              type: 'array', required: true, items: {
+                type: 'object', additionalProperties: false, properties: {
+                  role: { type: 'string', required: true },
+                  artifact_version_id: { type: 'string' },
+                  operation_step_id: { type: 'string' },
+                },
+              },
+            },
+            parameters: { type: 'object', additionalProperties: true, properties: {} },
+            title: { type: 'string' },
+          },
+        },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Dynamic media plan ${String(value.planId)}: ${Array.isArray(value.steps) ? value.steps.length : 0} steps, estimated cost $${String(value.estimatedCost)}. Await user confirmation before applying.`,
+      }],
+    },
+    execute: (args, exec) => ctx.videoRuntime.previewPlanPatch({
+      projectId: args.project_id,
+      baseProjectVersionId: args.base_project_version_id,
+      idempotencyKey: args.idempotency_key,
+      description: args.description,
+      operations: args.operations,
     }, identityOf(exec.agent), exec.signal).then(
       value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
     ),

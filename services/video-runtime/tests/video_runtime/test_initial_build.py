@@ -14,6 +14,7 @@ from app.video_runtime.builtin_plugins.music_workflows import (
 )
 from app.video_runtime.builtin_plugins.continuity_validator import ContinuityValidatorPlugin
 from app.video_runtime.models import (
+    MediaEditOperation,
     MediaArtifactVersion,
     RebuildPlan,
     RebuildPlanItem,
@@ -779,6 +780,132 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
             ["shot-two-video", "shot-three-video", "shot-one-video"],
         )
         topological_steps(timeline.items)
+
+    async def test_workflow_free_media_plan_patch_adds_subtitles_to_any_video(self):
+        runtime = await video_runtime()
+        project, version = await runtime.create_project(user_id="user", title="Any workflow")
+        selected_video = await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id=f"{project.id}:final-video",
+            project_id=project.id,
+            type="final_video",
+            uri="https://media.test/original.mp4",
+            title="Original final video",
+            metadata={"plan_step_id": "final-video"},
+        ))
+        project = await runtime.repo.get_project(project.id)
+
+        catalog = {item.capability: item for item in runtime.plan_patch_capability_catalog()}
+        self.assertIn("media.transcribe", catalog)
+        self.assertIn("subtitle.compose", catalog)
+        self.assertIn("media.subtitle_burn", catalog)
+
+        plan = await runtime.preview_plan_patch(
+            project_id=project.id,
+            base_project_version_id=project.current_version_id,
+            description="Add clean source-language subtitles",
+            idempotency_key="caption-preview",
+            operations=[
+                MediaEditOperation.model_validate({
+                    "step_id": "transcribe",
+                    "capability": "media.transcribe",
+                    "inputs": [{
+                        "role": "video", "artifact_version_id": selected_video.id,
+                    }],
+                }),
+                MediaEditOperation.model_validate({
+                    "step_id": "captions",
+                    "capability": "subtitle.compose",
+                    "inputs": [{
+                        "role": "transcript", "operation_step_id": "transcribe",
+                    }],
+                    "parameters": {"format": "srt", "max_lines": 2},
+                }),
+                MediaEditOperation.model_validate({
+                    "step_id": "burn-captions",
+                    "capability": "media.subtitle_burn",
+                    "inputs": [
+                        {"role": "video", "artifact_version_id": selected_video.id},
+                        {"role": "subtitle", "operation_step_id": "captions"},
+                    ],
+                    "parameters": {
+                        "style_preset": "clean", "position": "bottom-safe",
+                    },
+                }),
+            ],
+        )
+        by_step = {item.step_id: item for item in plan.items}
+        self.assertEqual(plan.workflow_id, "")
+        self.assertIsNone(plan.video_spec)
+        self.assertEqual(by_step["transcribe"].depends_on, ["source-1"])
+        self.assertEqual(by_step["captions"].depends_on, ["transcribe"])
+        self.assertEqual(
+            by_step["burn-captions"].depends_on,
+            ["source-1", "captions"],
+        )
+        self.assertEqual(by_step["burn-captions"].action, "rebuild")
+        self.assertEqual(
+            by_step["burn-captions"].artifact_version_id, selected_video.id,
+        )
+        self.assertEqual(
+            [item.skill_id for item in by_step["transcribe"].resolved_skills],
+            ["subtitle-authoring"],
+        )
+        self.assertEqual(
+            [item.skill_id for item in by_step["captions"].resolved_skills],
+            ["subtitle-authoring"],
+        )
+        self.assertEqual(
+            [item.skill_id for item in by_step["burn-captions"].resolved_skills],
+            ["subtitle-authoring"],
+        )
+        self.assertEqual(
+            [item.skill_id for item in runtime.plan_patch_capability_catalog() if item.skill_id],
+            ["hyperframes-captions", "subtitle-authoring", "subtitle-authoring", "subtitle-authoring"],
+        )
+        topological_steps(plan.items)
+
+        build = await runtime.start_build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=project.current_version_id,
+            idempotency_key="caption-build",
+        )
+        completed, new_version = await runtime.execute_build(
+            project_id=project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(completed.status, "completed")
+        self.assertIsNotNone(new_version)
+        current = await runtime.repo.current_artifacts(project.id)
+        captioned = next(item for item in current if item.artifact_id == selected_video.artifact_id)
+        self.assertNotEqual(captioned.id, selected_video.id)
+        self.assertEqual(captioned.version, selected_video.version + 1)
+
+    async def test_dynamic_media_patch_rejects_direct_urls_and_unselected_artifacts(self):
+        runtime = await video_runtime()
+        project, version = await runtime.create_project(user_id="user", title="Secure edits")
+        with self.assertRaisesRegex(ValueError, "direct resource references"):
+            await runtime.preview_plan_patch(
+                project_id=project.id,
+                base_project_version_id=version.id,
+                idempotency_key="bad-url",
+                operations=[MediaEditOperation.model_validate({
+                    "step_id": "transcribe", "capability": "media.transcribe",
+                    "inputs": [{"role": "video", "artifact_version_id": "missing"}],
+                    "parameters": {"video_url": "https://attacker.invalid/video.mp4"},
+                })],
+            )
+        with self.assertRaisesRegex(LookupError, "currently selected"):
+            await runtime.preview_plan_patch(
+                project_id=project.id,
+                base_project_version_id=version.id,
+                idempotency_key="bad-artifact",
+                operations=[MediaEditOperation.model_validate({
+                    "step_id": "transcribe", "capability": "media.transcribe",
+                    "inputs": [{"role": "video", "artifact_version_id": "missing"}],
+                })],
+            )
 
     def test_plan_rejects_cycle(self):
         with self.assertRaises(BuildPlanValidationError):

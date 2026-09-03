@@ -16,6 +16,9 @@ import type {
   RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  MediaArtifactSummary,
+  PlanPatchCapabilityContract,
+  PlanPatchPreviewRequest,
   WorkflowSummary,
   WorkflowDetail,
   SkillDetail,
@@ -47,6 +50,9 @@ export abstract class VideoRuntime extends Service {
   abstract loadSkillResource(skillId: string, path: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillResourceDetail>
   abstract previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview>
   abstract previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
+  abstract listArtifacts(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<MediaArtifactSummary[]>
+  abstract listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<PlanPatchCapabilityContract[]>
+  abstract previewPlanPatch(request: PlanPatchPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract planProject(request: BuildPlanRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract startBuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>
   abstract applyRebuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>

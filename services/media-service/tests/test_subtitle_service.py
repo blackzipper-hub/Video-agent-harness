@@ -130,19 +130,56 @@ def test_hyperframes_html_uses_direct_video_audio_and_local_gsap():
     assert "旷野黄金时" in rendered
 
 
-def test_hyperframes_request_requires_authored_html():
-    from pydantic import ValidationError
-
+def test_hyperframes_request_accepts_style_intent_without_authored_html():
     from app.models.subtitle import HyperframesCaptionRequest
 
-    with pytest.raises(ValidationError):
-        HyperframesCaptionRequest(video_url="https://example.com/a.mp4", run_id="r1")
+    req = HyperframesCaptionRequest(
+        video_url="https://example.com/a.mp4",
+        run_id="r1",
+        style="caption-neon-glow",
+        cues=[{"text": "你好，欢迎回来。", "start": 0.1, "end": 1.4}],
+    )
+    assert req.style == "caption-neon-glow"
+    assert req.caption_html is None
+    assert req.composition_html is None
+
+
+def test_hyperframes_request_keeps_authored_html_override():
+    from app.models.subtitle import HyperframesCaptionRequest
+
     req = HyperframesCaptionRequest(
         video_url="https://example.com/a.mp4",
         run_id="r1",
         caption_html="<!doctype html><html></html>",
     )
     assert req.caption_html.startswith("<!doctype")
+
+
+def test_generated_hyperframes_caption_html_uses_sentence_cues_and_style():
+    groups = hyperframes_service._sentence_groups(
+        [],
+        [{"text": "你好，欢迎回来。", "start": 0.1, "end": 1.4}],
+    )
+    html = hyperframes_service._build_generated_caption_html(
+        width=1280,
+        height=720,
+        duration=2.0,
+        groups=groups,
+        style="caption-neon-glow",
+        accent="#00ffcc",
+        position="bottom-safe",
+    )
+
+    assert 'data-composition-id="overlay"' in html
+    assert "<template>" in html
+    assert html.index("<template>") < html.index("<style>") < html.index('data-composition-id="overlay"')
+    assert "你好，欢迎回来。" in html
+    assert "window.__timelines.overlay" in html
+    assert "#00ffcc" in html
+    assert "assets/source.mp4" not in html
+
+
+def test_hyperframes_playbook_bridge_still_loads():
     from app.hyperframes import compose as hf_compose
 
     data = hf_compose.load_playbook("anime-ghibli")

@@ -140,6 +140,57 @@ export interface EditPreviewRequest {
   edits: VideoEdit[]
 }
 
+export interface MediaArtifactSummary {
+  artifactVersionId: string
+  artifactId: string
+  logicalId: string
+  type: string
+  title: string
+  summary: string
+}
+
+export interface PlanPatchCapabilityInputContract {
+  role: string
+  artifact_types: string[]
+  parameter: string
+  required: boolean
+  multiple: boolean
+  description: string
+}
+
+export interface PlanPatchCapabilityContract {
+  capability: string
+  description: string
+  inputs: PlanPatchCapabilityInputContract[]
+  output_artifact_type: string
+  replaces_input_role?: string
+  estimated_cost: number
+  skill_id?: string
+  parameters_schema: Record<string, JsonValue>
+}
+
+export interface PlanPatchInput {
+  role: string
+  artifact_version_id?: string
+  operation_step_id?: string
+}
+
+export interface PlanPatchOperation {
+  step_id: string
+  capability: string
+  inputs: PlanPatchInput[]
+  parameters?: Record<string, JsonValue>
+  title?: string
+}
+
+export interface PlanPatchPreviewRequest {
+  projectId: string
+  baseProjectVersionId: string
+  idempotencyKey: string
+  description: string
+  operations: PlanPatchOperation[]
+}
+
 export interface RebuildRequest {
   projectId: string
   planId: string

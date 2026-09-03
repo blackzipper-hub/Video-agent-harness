@@ -10,6 +10,7 @@ import type {
   ChangePreviewRequest, ExportRequest, ExportResult, ProjectSnapshot, RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  MediaArtifactSummary, PlanPatchCapabilityContract, PlanPatchPreviewRequest,
   WorkflowSummary, WorkflowDetail,   SkillDetail,
   SkillResourceDetail, PlanCheckpoint, CheckpointResolutionRequest,
 } from '@cuti-ai/video-runtime'
@@ -63,6 +64,31 @@ class FakeVideoRuntime extends VideoRuntime {
       planId: 'edit-plan-1', projectId: request.projectId, kind: 'incremental', status: 'preview',
       baseProjectVersionId: request.baseProjectVersionId, workflowId: 'cuti.seedance-story',
       videoSpec: {} as NonNullable<BuildPlanSnapshot['videoSpec']>, shotCount: 0, estimatedCost: 0, steps: [],
+      schemaVersion: 1, planRevision: 1, currentPhase: 'full',
+    })
+  }
+  listArtifacts(): Promise<MediaArtifactSummary[]> {
+    return Promise.resolve([{
+      artifactVersionId: 'video-version-1', artifactId: 'video-final',
+      logicalId: 'video:final', type: 'final_video', title: 'Final video', summary: 'ready',
+    }])
+  }
+  listPlanPatchCapabilities(): Promise<PlanPatchCapabilityContract[]> {
+    return Promise.resolve([{
+      capability: 'media.transcribe', description: 'Transcribe video',
+      inputs: [{
+        role: 'video', artifact_types: ['video'], parameter: 'video_step',
+        required: true, multiple: false, description: '',
+      }],
+      output_artifact_type: 'transcript', estimated_cost: 0.01,
+      skill_id: 'subtitle-authoring', parameters_schema: {},
+    }])
+  }
+  previewPlanPatch(request: PlanPatchPreviewRequest): Promise<BuildPlanSnapshot> {
+    return Promise.resolve({
+      planId: 'media-plan-1', projectId: request.projectId, kind: 'incremental', status: 'preview',
+      baseProjectVersionId: request.baseProjectVersionId, workflowId: '',
+      shotCount: 0, estimatedCost: 0.01, steps: request.operations as unknown as Array<Record<string, import('@cuti-ai/video-runtime').JsonValue>>,
       schemaVersion: 1, planRevision: 1, currentPhase: 'full',
     })
   }
@@ -121,7 +147,9 @@ describe('video tool composition', () => {
       'video_workflow_list', 'video_workflow_load', 'video_skill_load',
       'video_skill_read_resource',
       'video_project_create', 'video_project_plan', 'video_project_build',
-      'video_project_open', 'video_project_inspect', 'video_change_preview', 'video_edit_preview', 'video_rebuild_apply',
+      'video_project_open', 'video_project_inspect', 'video_artifact_list',
+      'video_plan_patch_capability_list', 'video_change_preview', 'video_edit_preview',
+      'video_plan_patch_preview', 'video_rebuild_apply',
       'video_build_status', 'video_checkpoint_inspect', 'video_checkpoint_resolve',
       'video_build_retry_checkpoint', 'video_build_cancel', 'video_artifact_select', 'video_export',
     ]

@@ -1,4 +1,5 @@
-import { AlertTriangle, CheckCircle2, Circle, Loader2, Wrench } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, Wrench } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useLanguage } from '@/i18n/LanguageContext'
 import { capabilityLabel, interpolate, planStepLabel, skillDisplayName } from './labels'
@@ -46,6 +47,7 @@ export function AgentProductionProgress({
   language?: 'zh' | 'en'
 }) {
   const { language, t } = useLanguage()
+  const [expanded, setExpanded] = useState(true)
   const zh = language === 'zh'
   const completedCallIds = new Set(
     events.filter(event => event.type === 'agent.tool.completed')
@@ -102,80 +104,100 @@ export function AgentProductionProgress({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="font-medium">{heading}</p>
-            <span className="shrink-0 text-[11px] text-muted-foreground">
-              {Math.round(progressValue)}%
-            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                {Math.round(progressValue)}%
+              </span>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-purple/60"
+                aria-expanded={expanded}
+                aria-label={expanded ? t('da.progress.collapse') : t('da.progress.expand')}
+                title={expanded ? t('da.progress.collapse') : t('da.progress.expand')}
+                onClick={() => setExpanded(value => !value)}
+              >
+                {expanded ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
           <Progress value={progressValue} className="mt-2 h-1.5" />
-          <p className="mt-2 text-xs text-muted-foreground">
-            {stoppedWithoutBuild
-              ? t('da.progress.noBuildHint')
-              : runtime?.message || t('da.progress.defaultHint')}
-          </p>
-
-          {runtime?.checkpoint && (
-            <div className="mt-2 rounded-md border border-accent-purple/20 bg-background/60 px-2.5 py-2 text-xs">
-              <p className="font-medium">
-                {zh ? '当前阶段' : 'Current phase'}: {runtime.phase || runtime.checkpoint.nextPhase}
+          {expanded && (
+            <>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {stoppedWithoutBuild
+                  ? t('da.progress.noBuildHint')
+                  : runtime?.message || t('da.progress.defaultHint')}
               </p>
-              <p className="mt-1 text-muted-foreground">
-                {zh
-                  ? `已获得 ${runtime.checkpoint.artifactCount} 个真实产物，正在补全：${runtime.checkpoint.unresolvedSections.join('、') || '下一阶段参数'}`
-                  : `${runtime.checkpoint.artifactCount} real artifacts ready; resolving ${runtime.checkpoint.unresolvedSections.join(', ') || 'next-phase parameters'}`}
-              </p>
-            </div>
-          )}
 
-          {tools.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {tools.map((tool) => {
-                const done = completedCallIds.has(tool.id)
-                return (
-                  <div key={tool.id} className="flex items-center gap-2 text-xs">
-                    {done ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                    ) : (
-                      <Wrench className="h-3.5 w-3.5 text-accent-purple" />
-                    )}
-                    <span>{capabilityLabel(tool.name, t)}</span>
-                    <span className="ml-auto text-[10px] text-muted-foreground">
-                      {done ? t('da.progress.completedLabel') : t('da.progress.runningLabel')}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {runtime && runtime.steps.length > 0 && (
-            <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-              {runtime.steps.map(step => (
-                <div key={step.id} className="min-w-0 text-xs">
-                  <div className="flex min-w-0 items-center gap-2">
-                    {step.status === 'completed' ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                    ) : ['running', 'waiting_external'].includes(step.status) ? (
-                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-accent-purple" />
-                    ) : (
-                      <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="truncate" title={step.error || step.name}>
-                      {planStepLabel(step.name, t)}
-                    </span>
-                  </div>
-                  {step.skills.length > 0 && (
-                    <p
-                      className="ml-5 mt-0.5 truncate text-[10px] text-muted-foreground"
-                      title={step.skills.join(', ')}
-                    >
-                      {interpolate(t('da.workspace.skillPrefix'), {
-                        skills: step.skills.map(id => skillDisplayName(id, t)).join(', '),
-                      })}
-                    </p>
-                  )}
+              {runtime?.checkpoint && (
+                <div className="mt-2 rounded-md border border-accent-purple/20 bg-background/60 px-2.5 py-2 text-xs">
+                  <p className="font-medium">
+                    {zh ? '当前阶段' : 'Current phase'}: {runtime.phase || runtime.checkpoint.nextPhase}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {zh
+                      ? `已获得 ${runtime.checkpoint.artifactCount} 个真实产物，正在补全：${runtime.checkpoint.unresolvedSections.join('、') || '下一阶段参数'}`
+                      : `${runtime.checkpoint.artifactCount} real artifacts ready; resolving ${runtime.checkpoint.unresolvedSections.join(', ') || 'next-phase parameters'}`}
+                  </p>
                 </div>
-              ))}
-            </div>
+              )}
+
+              {tools.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {tools.map((tool) => {
+                    const done = completedCallIds.has(tool.id)
+                    return (
+                      <div key={tool.id} className="flex items-center gap-2 text-xs">
+                        {done ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        ) : (
+                          <Wrench className="h-3.5 w-3.5 text-accent-purple" />
+                        )}
+                        <span>{capabilityLabel(tool.name, t)}</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {done ? t('da.progress.completedLabel') : t('da.progress.runningLabel')}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {runtime && runtime.steps.length > 0 && (
+                <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                  {runtime.steps.map(step => (
+                    <div key={step.id} className="min-w-0 text-xs">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {step.status === 'completed' ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        ) : ['running', 'waiting_external'].includes(step.status) ? (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-accent-purple" />
+                        ) : (
+                          <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="truncate" title={step.error || step.name}>
+                          {planStepLabel(step.name, t)}
+                        </span>
+                      </div>
+                      {step.skills.length > 0 && (
+                        <p
+                          className="ml-5 mt-0.5 truncate text-[10px] text-muted-foreground"
+                          title={step.skills.join(', ')}
+                        >
+                          {interpolate(t('da.workspace.skillPrefix'), {
+                            skills: step.skills.map(id => skillDisplayName(id, t)).join(', '),
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

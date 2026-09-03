@@ -18,6 +18,9 @@ import type {
   RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
+  MediaArtifactSummary,
+  PlanPatchCapabilityContract,
+  PlanPatchPreviewRequest,
   WorkflowSummary,
   WorkflowDetail,
   SkillDetail,
@@ -124,6 +127,20 @@ export class HttpVideoRuntime extends VideoRuntime {
 
   previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot> {
     return this.request(`/api/video/projects/${encodeURIComponent(request.projectId)}/edits/preview`, identity, {
+      method: 'POST', body: request, signal,
+    })
+  }
+
+  listArtifacts(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<MediaArtifactSummary[]> {
+    return this.request(`/api/video/projects/${encodeURIComponent(projectId)}/artifacts`, identity, { signal })
+  }
+
+  listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<PlanPatchCapabilityContract[]> {
+    return this.request('/api/video/plan-patch-capabilities', identity, { signal })
+  }
+
+  previewPlanPatch(request: PlanPatchPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot> {
+    return this.request(`/api/video/projects/${encodeURIComponent(request.projectId)}/plan-patches/preview`, identity, {
       method: 'POST', body: request, signal,
     })
   }

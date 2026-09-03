@@ -56,6 +56,10 @@ pytest tests/ -v
 | GET | `/readyz` | Readiness probe |
 | GET | `/metrics` | Prometheus metrics |
 
+## Concatenation
+
+`/api/v1/video/concat` probes every video and audio stream when no transition is requested. Inputs with identical codec, pixel format, dimensions, frame rate, audio codec, sample rate, channel layout, and time base use the FFmpeg concat demuxer with stream copy, including compatible HEVC Main10 Seedance segments. Incompatible inputs and transitions use normalized transcoding. A duration check after stream-copy concat forces one transcoding pass if timestamps produce an invalid result.
+
 ## Deployment
 
 ```bash

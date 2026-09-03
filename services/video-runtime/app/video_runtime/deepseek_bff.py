@@ -464,8 +464,11 @@ def _selection_context(workflow_id: str | None, activated_skill_ids: list[str]) 
         "workflow_id": workflow_id,
         "activated_skill_ids": activated_skill_ids,
         "instruction": (
-            "Preserve non-null workflow_id and activated_skill_ids in every VideoSpec or edit/rebuild "
-            "tool call. If workflow_id is null, inspect the existing project instead of changing it."
+            "Preserve non-null workflow_id and activated_skill_ids when editing the creative "
+            "VideoSpec. Post-production on existing Artifacts is workflow-independent: call "
+            "video_artifact_list and video_plan_patch_capability_list, load the recommended Skill, "
+            "then use video_plan_patch_preview without switching or recompiling the generation "
+            "Workflow. If workflow_id is null, inspect the existing project instead of changing it."
         ),
     }, ensure_ascii=False, sort_keys=True)
 
