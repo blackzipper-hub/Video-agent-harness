@@ -56,6 +56,13 @@ services/video-runtime/ee/
 .worktrees/
 worktrees/
 .agents/worktrees/
+# Upstream DeepSeek Agent Notes are development-history records, not product
+# runtime inputs. Keep the lightweight authoring instructions, but do not copy
+# the large active/archive corpus back into the product branch.
+.agents/notes/implemented/
+.agents/notes/archived/
+.agents/notes/proposed/
+.agents/notes/rejected/
 .typert-*/
 .runtime-deps/
 *.egg-info/
