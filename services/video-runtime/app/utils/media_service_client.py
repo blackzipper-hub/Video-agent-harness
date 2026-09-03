@@ -265,6 +265,7 @@ async def hyperframes_caption(
     *,
     words: list[dict],
     cues: list[dict],
+    style: str = "caption-highlight",
     accent_color: str = "#ff1745",
     position: str = "bottom-safe",
     playbook: str | None = None,
@@ -277,6 +278,7 @@ async def hyperframes_caption(
         "run_id": run_id,
         "words": words,
         "cues": cues,
+        "style": style,
         "accent_color": accent_color,
         "position": position,
     }

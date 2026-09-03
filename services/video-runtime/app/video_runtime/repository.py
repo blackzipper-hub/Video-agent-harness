@@ -754,10 +754,12 @@ class InMemoryVideoProjectRepository:
             if build.status != "failed":
                 raise ValueError("only failed builds can be retried")
             for step in self.build_steps[build_id].values():
-                if step.status != "failed":
+                if step.status == "completed":
                     continue
+                terminal_step_failure = step.status == "failed"
                 step.status = "pending"
-                step.attempt = 0
+                if terminal_step_failure or not step.remote_operation_id:
+                    step.attempt = 0
                 step.error = None
                 step.started_at = None
                 step.completed_at = None
@@ -765,8 +767,9 @@ class InMemoryVideoProjectRepository:
                 # reached a terminal failure. Reusing that operation id would
                 # merely reconcile the same failed job forever instead of
                 # submitting the failed step again.
-                step.remote_operation_id = None
-                step.remote_provider = None
+                if terminal_step_failure:
+                    step.remote_operation_id = None
+                    step.remote_provider = None
                 step.updated_at = now()
             build.status = "queued"
             build.message = "Retry queued"

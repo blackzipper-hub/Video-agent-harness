@@ -17,7 +17,7 @@ metadata:
           after_phase: story_intent
           next_phase: visual_production
           required_artifacts: [story_draft]
-          resolves: [characters, shots, audio]
+          resolves: [characters, scenes, shots, audio]
           instruction: Complete dialogue and parallel shot specifications from the generated story draft.
     entrypoints: [text, image, audio, video]
     parameters:

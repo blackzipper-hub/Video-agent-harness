@@ -26,8 +26,19 @@ def _dest_file(path: str) -> bytes:
     )
 
 
+def _dest_ref_available() -> bool:
+    return subprocess.run(
+        ["git", "-C", str(REPO), "cat-file", "-e", f"{DEST_REF}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0
+
+
 class TestDestMvSkillCopy(unittest.TestCase):
     def test_copied_skills_match_dest_archive_bytes(self) -> None:
+        if not _dest_ref_available():
+            self.skipTest(f"optional archive ref is not present: {DEST_REF}")
         pairs = (
             (
                 "services/agent/skills/external/mv/reference.md",
@@ -110,6 +121,8 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
         plan = await self._compile(subtitles=True)
         by_id = {item.step_id: item for item in plan.items}
         self.assertNotIn("research", by_id)
+        self.assertNotIn("script", by_id)
+        self.assertNotIn("storyboard", by_id)
         self.assertEqual(by_id["music"].capability, "suno.generate")
         self.assertEqual(by_id["music"].parameters["prompt"], "sung pop chorus")
         self.assertNotIn("duration", by_id["music"].parameters)
@@ -120,6 +133,7 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id["character-hero-reference"].capability, "atomic.image.generate")
         self.assertFalse(by_id["character-hero-reference"].skill_ids)
         self.assertEqual(by_id["characters"].capability, "runtime.artifact.persist")
+        self.assertEqual(by_id["mv-shot-plan"].capability, "runtime.artifact.persist")
         self.assertEqual(by_id["music-analysis"].capability, "media.audio_analyze")
         self.assertEqual(by_id["music-cut"].capability, "media.audio_cut")
         self.assertNotIn("music-window", by_id)
@@ -138,14 +152,19 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("start_image_from_step", clip.parameters)
             self.assertEqual(clip.parameters["audio_reference_from_step"], "music-cut")
             self.assertEqual(clip.parameters["reference_from_steps"], ["character-hero-reference"])
-            self.assertNotIn("audio_segment_index", clip.parameters)
+            self.assertEqual(
+                clip.parameters["audio_segment_index"],
+                int(clip.step_id.split("-")[1]) - 1,
+            )
             self.assertFalse(clip.skill_ids)
         self.assertNotIn("shot-1-tail", by_id)
         self.assertEqual(by_id["assembled-video"].capability, "media.concat")
-        self.assertEqual(by_id["final-video"].capability, "media.mix_audio")
-        self.assertEqual(by_id["final-video"].parameters["audio_step"], "music-cut")
-        self.assertEqual(by_id["final-video"].parameters["mode"], "replace")
-        self.assertNotIn("transcription", by_id)
+        self.assertEqual(by_id["mixed-video"].capability, "media.mix_audio")
+        self.assertEqual(by_id["mixed-video"].parameters["audio_step"], "music-cut")
+        self.assertEqual(by_id["mixed-video"].parameters["mode"], "replace")
+        self.assertEqual(by_id["transcription"].capability, "media.transcribe")
+        self.assertEqual(by_id["final-video"].capability, "media.hyperframes_caption")
+        self.assertEqual(by_id["final-video"].parameters["style"], "caption-highlight")
 
     async def test_look_generate_uses_uploaded_identity(self) -> None:
         identity = MediaArtifactVersion(
@@ -193,7 +212,7 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             ["character-hero-reference", "source-1"],
         )
 
-    async def test_captions_require_authored_html(self) -> None:
+    async def test_captions_keep_original_style_path_and_allow_html_override(self) -> None:
         spec = VideoSpec.model_validate({
             "title": "dest mv captions",
             "target_duration_seconds": 5,
@@ -225,7 +244,38 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             by_id["final-video"].parameters["caption_html"],
             "<!doctype html><html></html>",
         )
-        self.assertNotIn("style", by_id["final-video"].parameters)
+        self.assertEqual(
+            by_id["final-video"].parameters["style"],
+            "caption-highlight",
+        )
+
+    async def test_captions_do_not_require_html(self) -> None:
+        spec = VideoSpec.model_validate({
+            "title": "dest mv original captions",
+            "target_duration_seconds": 5,
+            "workflow_id": "mv",
+            "providers": {"video": "minimax-h3"},
+            "characters": [{
+                "id": "hero", "name": "Hero", "appearance": "black hair",
+            }],
+            "shots": [{
+                "id": "1", "order": 1, "duration_seconds": 5,
+                "beat": "beat", "visual_prompt": "shot",
+                "character_ids": ["hero"],
+            }],
+            "audio": {"bgm_prompt": "song", "subtitles": True},
+        })
+        plan = await self.plugin.compile_build_plan(
+            PluginContext(project_id="project-1", values={
+                "base_project_version_id": "version-1",
+            }),
+            spec,
+        )
+        by_id = {item.step_id: item for item in plan.items}
+        self.assertEqual(by_id["transcription"].capability, "media.transcribe")
+        self.assertEqual(by_id["final-video"].capability, "media.hyperframes_caption")
+        self.assertEqual(by_id["final-video"].parameters["style"], "caption-highlight")
+        self.assertNotIn("caption_html", by_id["final-video"].parameters)
 
     async def test_dest_tool_fields_land_on_the_matching_step(self) -> None:
         spec = VideoSpec.model_validate({
@@ -307,9 +357,33 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             item for item in plan.items if item.capability == "api.provider.generate"
         )
         self.assertEqual(clip.parameters["model"], "doubao-seedance-2-0")
-        self.assertEqual(clip.parameters["audio_reference_from_step"], "music-cut")
+        self.assertNotIn("audio_reference_from_step", clip.parameters)
+        self.assertNotIn("audio_segment_index", clip.parameters)
         self.assertFalse(clip.skill_ids)
         self.assertNotIn("shot-1-tail", {item.step_id for item in plan.items})
+
+    async def test_h3_without_an_image_fails_before_provider_submission(self) -> None:
+        spec = VideoSpec.model_validate({
+            "title": "invalid image-free H3 MV",
+            "target_duration_seconds": 5,
+            "workflow_id": "mv",
+            "providers": {"video": "minimax-h3"},
+            "shots": [{
+                "id": "1", "order": 1, "duration_seconds": 5,
+                "beat": "chorus", "visual_prompt": "an abstract pulse",
+            }],
+            "audio": {"bgm_prompt": "song", "subtitles": False},
+        })
+        with self.assertRaisesRegex(
+            ValueError,
+            "MiniMax H3 shots require at least one image reference",
+        ):
+            await self.plugin.compile_build_plan(
+                PluginContext(project_id="project-1", values={
+                    "base_project_version_id": "version-1",
+                }),
+                spec,
+            )
 
 
 class TestDestMvCompileWithInstalledPlugins(unittest.IsolatedAsyncioTestCase):
@@ -367,6 +441,8 @@ class TestDestMvCompileWithInstalledPlugins(unittest.IsolatedAsyncioTestCase):
                 "media.timeline.compose",
                 "media.concat",
                 "media.mix_audio",
+                "media.transcribe",
+                "media.hyperframes_caption",
             ],
         )
         self.assertNotIn("character-hero-reference", {item.step_id for item in plan.items})

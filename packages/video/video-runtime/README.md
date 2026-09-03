@@ -6,6 +6,8 @@ Service definition for the project-oriented video runtime. DeepSeek owns dialogu
 
 Schema-version-2 builds are append-only staged plans. The Runtime persists `ProjectIntent`, `VideoSpecRevision`, `BuildPlanRevision`, and semantic checkpoints; it never plans with an LLM. A BFF delivery worker wakes the bound DeepSeek Session when real media changes the next creative decision.
 
+Independent provider steps may declare a durable `execution_group` and `max_parallelism` in the BuildPlan. The Runtime schedules that group concurrently while applying the deployment-wide `DEEP_AGENT_V2_MAX_PARALLEL_GENERATION_TASKS` cap (default `2`). Dependencies, retries, remote operation IDs, cancellation, and staged Artifact commits remain identical to sequential steps.
+
 ## Model Experience
 
 ### Runtime service

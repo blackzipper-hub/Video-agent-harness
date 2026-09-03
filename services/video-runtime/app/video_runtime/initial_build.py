@@ -293,6 +293,28 @@ class SeedanceStoryWorkflow:
 
 
 class SeedanceStoryPlugin(BaseVideoPlugin):
+    def describe_workflows(self) -> list[dict]:
+        """Keep the migrated prototype readable for old projects, not selectable for new ones."""
+        return [{
+            "id": SeedanceStoryWorkflow.id,
+            "title": "Legacy Cuti Seedance Story compatibility",
+            "mode": "legacy_compatibility",
+            "parameters": {},
+            "pipeline": [],
+            "requiresKeyframe": True,
+            "entrypoints": [],
+            "skillDependencies": ["workflow-keyframe-pipeline"],
+            "source": "plugin",
+            "pluginId": "cuti.seedance-story",
+            "available": True,
+            "unavailableReason": None,
+            "requiredCapabilities": [],
+            "missingCapabilities": [],
+            "userSelectable": False,
+            "executionKind": "legacy_compatibility",
+            "compiler": "SeedanceStoryPlugin.compile_build_plan",
+        }]
+
     def planning_mode(self, _workflow_id: str) -> str:
         return "staged"
 
@@ -370,7 +392,11 @@ class SeedanceStoryPlugin(BaseVideoPlugin):
             WorkflowPlanningSpec,
             WorkflowSpec,
         )
-        from .staged_planning import append_phase, copy_plan_with_appended_phase
+        from .staged_planning import (
+            append_phase,
+            copy_plan_with_appended_phase,
+            failed_checkpoint_step_ids,
+        )
 
         workflow = WorkflowSpec(
             skill_name=plan.workflow_id,
@@ -403,6 +429,7 @@ class SeedanceStoryPlugin(BaseVideoPlugin):
             workflow=workflow,
             checkpoint_id=checkpoint.phase,
             proposed_steps=resolution.proposed_steps,
+            repair_step_ids=failed_checkpoint_step_ids(checkpoint),
         )
         return copy_plan_with_appended_phase(
             plan,

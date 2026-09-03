@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from collections.abc import AsyncIterator
@@ -19,9 +21,10 @@ from .repository import (
 )
 from .runtime import VideoBuildRuntime
 from .identity import IdentityResolver, ServiceOrLocalIdentityResolver
-from .models import CheckpointResolution, ProjectIntent, VideoSpec
+from .models import CheckpointResolution, MediaArtifactVersion, ProjectIntent, VideoSpec
 from .plugins import PluginDependencyError, VideoPluginManifest
 from .plugins.registry import configured_plugin_roots
+from .upload_security import verify_uploaded_file
 
 
 router = APIRouter(prefix="/api/video", tags=["video-runtime"])
@@ -41,6 +44,15 @@ class ApiBody(BaseModel):
 class CreateProjectBody(ApiBody):
     title: str = Field(min_length=1, max_length=200)
     session_id: str | None = None
+
+
+class AttachSourceBody(ApiBody):
+    media_type: Literal["image", "audio", "video"]
+    uri: str = Field(min_length=1)
+    title: str = "Uploaded source"
+    upload_receipt: str = Field(min_length=1)
+    artifact_id: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class PreviewBody(ApiBody):
@@ -165,10 +177,33 @@ async def _owned_and_bound(
     identity: tuple[str, str | None],
 ):
     user_id, session_id = identity
-    project = await _owned_project(build_runtime, project_id, user_id)
+    try:
+        project = await _owned_project(build_runtime, project_id, user_id)
+    except HTTPException as exc:
+        # The local Video Studio and the DeepSeek tool process can be started
+        # with different development-only default user ids.  A Session binding
+        # was created by the BFF before the Agent was prompted, so it is the
+        # authoritative link for that local tool call.  Production remains
+        # fail-closed and always requires the caller's user identity to match.
+        if (
+            exc.status_code != 403
+            or not session_id
+            or os.getenv("VIDEO_RUNTIME_ENVIRONMENT", "development").lower()
+            == "production"
+        ):
+            raise
+        project = await build_runtime.repo.get_project(project_id)
+        try:
+            bound_project, _binding = await build_runtime.repo.project_for_session(
+                session_id, project.user_id,
+            )
+        except LookupError:
+            raise exc
+        if bound_project.id != project_id:
+            raise exc
     if session_id:
         await build_runtime.bind_session(
-            project_id=project_id, session_id=session_id, user_id=user_id,
+            project_id=project_id, session_id=session_id, user_id=project.user_id,
         )
     return project
 
@@ -342,14 +377,53 @@ async def create_project(
     return {"data": await _snapshot(build_runtime, project.id, user_id)}
 
 
+@router.post("/projects/{project_id}/sources")
+async def attach_project_source(
+    project_id: str,
+    body: AttachSourceBody,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    """Attach a receipt-verified upload as an immutable project Source Artifact."""
+    project = await _owned_and_bound(build_runtime, project_id, identity)
+    if not verify_uploaded_file(
+        project.user_id, body.media_type, body.uri, body.upload_receipt,
+    ):
+        raise HTTPException(status_code=422, detail="upload receipt is missing or invalid")
+    logical_id = body.artifact_id or (
+        f"source:{hashlib.sha256(body.uri.encode()).hexdigest()[:24]}"
+    )
+    if not logical_id.startswith("source:"):
+        raise HTTPException(status_code=422, detail="source artifact id must start with source:")
+    current = {
+        item.artifact_id: item
+        for item in await build_runtime.repo.current_artifacts(project_id)
+    }
+    artifact = current.get(logical_id)
+    if artifact is None:
+        artifact = await build_runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id=logical_id,
+            project_id=project_id,
+            type=f"source_{body.media_type}",
+            uri=body.uri,
+            title=body.title,
+            summary="Project-owned uploaded source media",
+            content_digest=hashlib.sha256(body.uri.encode()).hexdigest(),
+            provider_id="cuti-upload",
+            provenance={"uploaded_by": project.user_id},
+            metadata={**body.metadata, "media_type": body.media_type, "source": "upload"},
+        ))
+    return {"data": artifact.model_dump(mode="json")}
+
+
 @router.get("/projects/{project_id}")
 async def get_project(
     project_id: str,
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
-    return {"data": await _snapshot(build_runtime, project_id, identity[0])}
+    project = await _owned_and_bound(build_runtime, project_id, identity)
+    return {"data": await _snapshot(build_runtime, project_id, project.user_id)}
 
 
 @router.get("/projects/{project_id}/workspace")
@@ -358,8 +432,8 @@ async def get_project_workspace(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
-    return {"data": await _workspace(build_runtime, project_id, identity[0])}
+    project = await _owned_and_bound(build_runtime, project_id, identity)
+    return {"data": await _workspace(build_runtime, project_id, project.user_id)}
 
 
 @router.get("/plugins")
@@ -403,12 +477,15 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
             "skillDependencies": list(loaded.manifest.skills),
             "source": "plugin",
             "pluginId": loaded.manifest.id,
-            "available": True,
-            "unavailableReason": None,
+            "available": False,
+            "unavailableReason": (
+                "Workflow plugin does not expose an explicit runtime contract"
+            ),
             "requiredCapabilities": [],
             "missingCapabilities": [],
-            "userSelectable": True,
-            "executionKind": "plugin",
+            "userSelectable": False,
+            "executionKind": "unavailable",
+            "compiler": None,
         } for workflow_id in loaded.manifest.contributions.workflows)
     for item in workflows:
         if build_runtime.skills.catalog.has(item["id"]):
@@ -503,15 +580,22 @@ async def get_workflow(
         raise HTTPException(status_code=404, detail="workflow not found")
     instructions = ""
     resources: list[str] = []
-    if build_runtime.skills.catalog.has(workflow_id):
-        loaded = build_runtime.skills.catalog.load(workflow_id)
+    instruction_skill_id = str(view.get("instructionSkillId") or workflow_id)
+    if build_runtime.skills.catalog.has(instruction_skill_id):
+        loaded = build_runtime.skills.catalog.load(instruction_skill_id)
         instructions = loaded.instructions
-        resources, resource_contents = _skill_resources(build_runtime, workflow_id)
+        appendix = str(view.get("instructionAppendix") or "").strip()
+        if appendix:
+            instructions = f"{instructions.rstrip()}\n\n{appendix}"
+        resources, resource_contents = _skill_resources(
+            build_runtime, instruction_skill_id,
+        )
     else:
         resource_contents = []
     return {"data": {
         **view,
         "instructions": instructions,
+        "resourceOwnerSkillId": instruction_skill_id,
         "resources": resources,
         "resourceContents": resource_contents,
     }}
@@ -533,6 +617,7 @@ async def get_skill(
         "description": loaded.metadata.description,
         "kind": str(raw.get("kind") or "helper"),
         "instructions": loaded.instructions,
+        "resourceOwnerSkillId": skill_id,
         "resources": resources,
         "resourceContents": resource_contents,
     }}
@@ -726,7 +811,7 @@ async def start_build(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
+    project = await _owned_and_bound(build_runtime, project_id, identity)
     try:
         build = await build_runtime.start_build(
             project_id=project_id,
@@ -734,7 +819,7 @@ async def start_build(
             base_project_version_id=body.base_project_version_id,
             idempotency_key=body.idempotency_key,
             session_id=identity[1],
-            user_id=identity[0],
+            user_id=project.user_id,
         )
     except ProjectVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -816,14 +901,14 @@ async def inspect_build_checkpoint(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
+    project = await _owned_and_bound(build_runtime, project_id, identity)
     try:
         checkpoint = await build_runtime.inspect_checkpoint(
             project_id=project_id,
             build_id=build_id,
             checkpoint_id=checkpoint_id,
             session_id=identity[1],
-            user_id=identity[0],
+            user_id=project.user_id,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -843,7 +928,7 @@ async def resolve_build_checkpoint(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
+    project = await _owned_and_bound(build_runtime, project_id, identity)
     if identity[1] is None:
         raise HTTPException(status_code=400, detail="DeepSeek Session identity is required")
     try:
@@ -854,7 +939,7 @@ async def resolve_build_checkpoint(
             checkpoint_id=checkpoint_id,
             resolution=resolution,
             session_id=identity[1],
-            user_id=identity[0],
+            user_id=project.user_id,
         )
     except (PlanRevisionConflict, VideoSpecRevisionConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -877,13 +962,13 @@ async def retry_build_checkpoint(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
+    project = await _owned_and_bound(build_runtime, project_id, identity)
     try:
         checkpoint = await build_runtime.inspect_checkpoint(
             project_id=project_id,
             build_id=build_id,
             checkpoint_id=checkpoint_id,
-            user_id=identity[0],
+            user_id=project.user_id,
         )
         if checkpoint.status != "failed":
             raise ValueError("only failed checkpoints can be retried")
@@ -921,7 +1006,7 @@ async def apply_rebuild(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    await _owned_and_bound(build_runtime, project_id, identity)
+    project = await _owned_and_bound(build_runtime, project_id, identity)
     try:
         build = await build_runtime.apply_rebuild(
             project_id=project_id,
@@ -929,7 +1014,7 @@ async def apply_rebuild(
             base_project_version_id=body.base_project_version_id,
             idempotency_key=body.idempotency_key,
             session_id=identity[1],
-            user_id=identity[0],
+            user_id=project.user_id,
         )
     except ProjectVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

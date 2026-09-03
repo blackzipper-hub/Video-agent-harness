@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.video_runtime.plugins import PluginDependencyError, VideoPluginRegistry
+from app.video_runtime.plugins import PluginContext, PluginDependencyError, VideoPluginRegistry
 from app.video_runtime.capabilities import RuntimeCapabilityRegistry
 from app.video_runtime.execution import CapabilityExecutionGateway
 from app.video_runtime.security import CapabilityGrant, CapabilityGrantSigner
 from app.video_runtime.models import MediaArtifactVersion
 from app.video_runtime.runtime import VideoBuildRuntime
 from app.video_runtime.builtin_plugins.cuti_provider import CutiAtomicProviderPlugin
+from app.video_runtime.builtin_plugins.continuity_validator import ContinuityValidatorPlugin
+from app.video_runtime.builtin_plugins.continuity_validator import _inspect_scene_reference, _video_info
 from app.orchestration.skills import ResolvedSkillRef, SkillContext
 from app.video_runtime.builtin_plugins.media_core import resolve_tts_voice_id
 from app.models.image_result import VoiceID
@@ -292,6 +296,10 @@ permissions:
             metadata={
                 "prompt": "A hero enters",
                 "rebuild_capability": "atomic.video.generate",
+                "generation_parameters": {
+                    "prompt": "A hero enters",
+                    "reference_from_steps": ["product", "character", "scene", "product-sheet"],
+                },
                 "skill_context": SkillContext(
                     instructions="Keep the hero identity stable.",
                     applied_skills=[ResolvedSkillRef(
@@ -323,13 +331,437 @@ permissions:
             {
                 "build": {"id": "build-1"},
                 "source": source.model_dump(mode="json"),
-                "completed_replacements": {},
+                "completed_replacements": {
+                    step: MediaArtifactVersion(
+                        project_id="project-1",
+                        artifact_id=f"ref:{step}",
+                        type="image",
+                        uri=f"https://cdn.example.test/{step}.png",
+                    ).model_dump(mode="json")
+                    for step in ("product", "character", "scene", "product-sheet")
+                },
             },
         )
         self.assertEqual(captured["task"].capability_id, "atomic.video.generate")
-        self.assertIn("A hero enters", captured["task"].parameters["prompt"])
-        self.assertIn("Keep the hero identity stable", captured["task"].parameters["prompt"])
+        self.assertEqual(captured["task"].parameters["prompt"], "A hero enters")
+        self.assertNotIn("Keep the hero identity stable", captured["task"].parameters["prompt"])
         self.assertEqual(captured["task"].resolved_skills[0].skill_id, "video-director")
         self.assertEqual(result.artifact_id, "shot-1")
         self.assertEqual(result.provenance["remote_operation_id"], "provider-task-1")
         self.assertEqual(result.provenance["skills"][0]["skill_id"], "video-director")
+        self.assertEqual(len(captured["task"].parameters["images"]), 4)
+        self.assertEqual(
+            result.metadata["resolved_generation_parameters"]["images"],
+            [
+                f"https://cdn.example.test/{step}.png"
+                for step in ("product", "character", "scene", "product-sheet")
+            ],
+        )
+        self.assertFalse(result.metadata["skill_prompt_applied"])
+
+    async def test_cuti_image_provider_keeps_leaf_prompt_isolated_from_workflow_skill(self):
+        captured = {}
+
+        async def fake_atomic(**kwargs):
+            captured.update(kwargs)
+            return "provider-image-1", {
+                "title": "Empty apartment",
+                "summary": "done",
+                "uri": "https://cdn.example.test/scene.webp",
+                "metadata": {},
+            }
+
+        context = SkillContext(
+            instructions=(
+                "Generate a character sheet, a scene sheet, and a product sheet."
+            ),
+            applied_skills=[ResolvedSkillRef(
+                skill_id="cuti-scenario-product-workflow",
+                version="1.0.0",
+                content_hash="workflow-hash",
+                source="workflow",
+            )],
+        )
+        source = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="scene-setting-reference",
+            type="image",
+            title="Scene setting reference",
+            metadata={
+                "generation_parameters": {
+                    "prompt": "Create ONLY an empty apartment environment. Zero people or products.",
+                },
+                "skill_context": context.model_dump(mode="json"),
+            },
+        )
+        envelope = CapabilityGrant(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            plugin_id="cuti.atomic-providers",
+            capability="atomic.image.generate",
+            allowed_capabilities=["atomic.image.generate"],
+            max_cost_usd=1,
+            timeout_seconds=30,
+            idempotency_key="scene-image-1",
+            audit_id="audit-image-1",
+            nonce="nonce-image-1",
+            expires_at=int(time.time()) + 60,
+        )
+        from app.video_runtime.security import CapabilityExecutionEnvelope
+
+        result = await CutiAtomicProviderPlugin(fake_atomic).capability_handlers()[
+            "atomic.image.generate"
+        ](
+            CapabilityExecutionEnvelope(envelope),
+            {"build": {"id": "build-1"}, "source": source.model_dump(mode="json")},
+        )
+
+        self.assertEqual(
+            captured["task"].parameters["prompt"],
+            "Create ONLY an empty apartment environment. Zero people or products.",
+        )
+        self.assertNotIn(
+            "Generate a character sheet",
+            captured["task"].parameters["prompt"],
+        )
+        self.assertEqual(
+            captured["task"].resolved_skills[0].skill_id,
+            "cuti-scenario-product-workflow",
+        )
+        self.assertFalse(result.metadata["skill_prompt_applied"])
+
+    async def test_cuti_provider_resolves_seedance_multimodal_step_references(self):
+        captured = {}
+
+        async def fake_atomic(**kwargs):
+            captured.update(kwargs)
+            return "provider-multimodal-1", {
+                "title": "Multimodal clip",
+                "summary": "done",
+                "uri": "https://cdn.example.test/result.mp4",
+                "metadata": {},
+            }
+
+        source = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="shot-1",
+            type="video_clip",
+            title="Shot one",
+            metadata={
+                "generation_parameters": {
+                    "prompt": "中文多模态视频提示词",
+                    "video_reference_from_steps": ["motion"],
+                    "audio_reference_from_steps": ["rhythm"],
+                },
+            },
+        )
+        completed = {
+            "motion": MediaArtifactVersion(
+                project_id="project-1", artifact_id="source:motion",
+                type="source_video", uri="https://cdn.example.test/motion.mp4",
+            ).model_dump(mode="json"),
+            "rhythm": MediaArtifactVersion(
+                project_id="project-1", artifact_id="source:rhythm",
+                type="source_audio", uri="https://cdn.example.test/rhythm.mp3",
+            ).model_dump(mode="json"),
+        }
+        envelope = CapabilityGrant(
+            project_id="project-1", session_id="session-1", user_id="user-1",
+            plugin_id="cuti.atomic-providers", capability="atomic.video.generate",
+            allowed_capabilities=["atomic.video.generate"], max_cost_usd=1,
+            timeout_seconds=30, idempotency_key="multimodal-shot-1",
+            audit_id="audit-multimodal-1", nonce="nonce-multimodal-1",
+            expires_at=int(time.time()) + 60,
+        )
+        from app.video_runtime.security import CapabilityExecutionEnvelope
+
+        result = await CutiAtomicProviderPlugin(fake_atomic).capability_handlers()[
+            "atomic.video.generate"
+        ](
+            CapabilityExecutionEnvelope(envelope),
+            {
+                "build": {"id": "build-1"},
+                "source": source.model_dump(mode="json"),
+                "completed_replacements": completed,
+            },
+        )
+
+        parameters = captured["task"].parameters
+        self.assertEqual(parameters["videos"], ["https://cdn.example.test/motion.mp4"])
+        self.assertEqual(parameters["reference_videos"], parameters["videos"])
+        self.assertEqual(parameters["audios"], ["https://cdn.example.test/rhythm.mp3"])
+        self.assertEqual(parameters["reference_audios"], parameters["audios"])
+        self.assertNotIn("video_reference_from_steps", parameters)
+        self.assertNotIn("audio_reference_from_steps", parameters)
+        self.assertEqual(
+            result.metadata["resolved_generation_parameters"]["video_urls"],
+            parameters["videos"],
+        )
+
+    async def test_scene_reference_isolation_validator_guards_provider_boundary(self):
+        prompt = (
+            "Create exactly one unoccupied environment-only setting reference. "
+            "Render a single coherent wide architectural view."
+        )
+        clean = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="scene-setting-reference",
+            type="image",
+            uri="https://cdn.example.test/scene.webp",
+            metadata={
+                "generation_parameters": {
+                    "prompt": prompt,
+                    "artifact_role": "scene_setting_reference",
+                },
+                "resolved_generation_parameters": {"prompt": prompt},
+                "final_prompt": prompt,
+                "skill_prompt_applied": False,
+            },
+        )
+        validator = ContinuityValidatorPlugin()
+        clean_results = await validator.validate_artifact(
+            PluginContext(project_id="project-1", build_id="build-1"), clean,
+        )
+        self.assertEqual(len(clean_results), 1)
+        self.assertTrue(clean_results[0].passed)
+        self.assertEqual(
+            clean_results[0].validator_id,
+            "cuti.continuity.scene-reference-isolation",
+        )
+        self.assertIn("continuity", clean_results[0].validator_id)
+
+        contaminated = clean.model_copy(deep=True)
+        contaminated.metadata["skill_prompt_applied"] = True
+        contaminated.metadata["final_prompt"] = (
+            prompt + " Create a character sheet and a product sheet."
+        )
+        contaminated.metadata["resolved_generation_parameters"]["images"] = [
+            "https://cdn.example.test/product.png",
+        ]
+        failed = await validator.validate_artifact(
+            PluginContext(project_id="project-1", build_id="build-1"), contaminated,
+        )
+        self.assertFalse(failed[0].passed)
+        self.assertTrue(any("image inputs" in issue for issue in failed[0].issues))
+        self.assertTrue(any("Skill instructions" in issue for issue in failed[0].issues))
+        self.assertTrue(any("differs" in issue for issue in failed[0].issues))
+
+    async def test_scene_reference_isolation_checks_rendered_pixels(self):
+        prompt = (
+            "Create exactly one unoccupied environment-only setting reference. "
+            "Render a single coherent wide architectural view."
+        )
+        artifact = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="scene-setting-reference",
+            type="image",
+            uri="https://cdn.example.test/scene.webp",
+            metadata={
+                "generation_parameters": {
+                    "prompt": prompt,
+                    "artifact_role": "scene_setting_reference",
+                },
+                "resolved_generation_parameters": {"prompt": prompt},
+                "final_prompt": prompt,
+                "skill_prompt_applied": False,
+            },
+        )
+        visual_result = {
+            "people_present": True,
+            "product_present": True,
+            "contact_sheet_present": False,
+            "reason": "A person holds a staged bottle.",
+        }
+        with (
+            patch.dict(
+                "os.environ",
+                {"VIDEO_SCENE_REFERENCE_VISUAL_VALIDATION_ENABLED": "true"},
+            ),
+            patch(
+                "app.video_runtime.builtin_plugins.continuity_validator._inspect_scene_reference",
+                new=AsyncMock(return_value=visual_result),
+            ) as inspect,
+        ):
+            results = await ContinuityValidatorPlugin().validate_artifact(
+                PluginContext(project_id="project-1", build_id="build-1"),
+                artifact,
+            )
+        inspect.assert_awaited_once_with(artifact.uri)
+        self.assertFalse(results[0].passed)
+        self.assertIn(
+            "rendered scene setting reference contains people or characters",
+            results[0].issues,
+        )
+        self.assertIn(
+            "rendered scene setting reference contains a staged product",
+            results[0].issues,
+        )
+        self.assertEqual(results[0].metadata["visual_result"], visual_result)
+
+    async def test_character_reference_rejects_a_rendered_identity_mismatch(self):
+        prompt = (
+            "Create ONLY one clean recurring-character identity reference sheet. "
+            "Characters from the approved script: Lin, a 25-year-old East Asian woman, "
+            "shoulder-length black hair, cream cardigan. Do not include the advertised "
+            "product, environment panels, readable text, labels, captions, logos, "
+            "watermarks, storyboard borders, or shot frames."
+        )
+        artifact = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="character-setting-reference",
+            type="image",
+            uri="https://cdn.example.test/character.webp",
+            metadata={
+                "generation_parameters": {
+                    "prompt": prompt,
+                    "artifact_role": "character_setting_reference",
+                },
+                "resolved_generation_parameters": {"prompt": prompt},
+                "final_prompt": prompt,
+                "skill_prompt_applied": False,
+            },
+        )
+        visual_result = {
+            "character_present": True,
+            "matches_expected_description": False,
+            "product_present": False,
+            "environment_dominant": False,
+            "reason": "The image shows a young man rather than the locked woman.",
+        }
+        with (
+            patch.dict(
+                "os.environ",
+                {"VIDEO_SCENE_REFERENCE_VISUAL_VALIDATION_ENABLED": "true"},
+            ),
+            patch(
+                "app.video_runtime.builtin_plugins.continuity_validator._inspect_character_reference",
+                new=AsyncMock(return_value=visual_result),
+            ) as inspect,
+        ):
+            results = await ContinuityValidatorPlugin().validate_artifact(
+                PluginContext(project_id="project-1", build_id="build-1"),
+                artifact,
+            )
+        inspect.assert_awaited_once_with(artifact.uri, prompt)
+        self.assertFalse(results[0].passed)
+        self.assertIn("continuity", results[0].validator_id)
+        self.assertTrue(any("locked character definition" in value for value in results[0].issues))
+        self.assertEqual(results[0].metadata["visual_result"], visual_result)
+
+    async def test_scene_visual_inspection_inlines_local_storage_url(self):
+        captured = {}
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"output": [{"content": [{"text": json.dumps({
+                    "people_present": False,
+                    "product_present": False,
+                    "contact_sheet_present": False,
+                    "reason": "empty room",
+                })}]}]}
+
+        class Client:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, url, **kwargs):
+                captured["url"] = url
+                captured["body"] = kwargs["json"]
+                return Response()
+
+        data_uri = "data:image/webp;base64,AAAA"
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch(
+                "app.utils.file_utils.inline_local_image_url_for_llm",
+                new=AsyncMock(return_value=data_uri),
+            ) as inline,
+            patch(
+                "app.video_runtime.builtin_plugins.continuity_validator.httpx.AsyncClient",
+                Client,
+            ),
+        ):
+            result = await _inspect_scene_reference(
+                "http://127.0.0.1:8001/files/images/scene.webp",
+            )
+
+        inline.assert_awaited_once()
+        self.assertEqual(
+            captured["body"]["input"][0]["content"][1]["image_url"],
+            data_uri,
+        )
+        self.assertFalse(result["people_present"])
+
+    async def test_product_video_identity_validation_is_disabled(self):
+        artifact = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="shot-1",
+            type="video_clip",
+            uri="https://cdn.example.test/shot.mp4",
+            metadata={
+                "generation_parameters": {
+                    "prompt": "Product hero orbit",
+                    "product_identity_contract": {"verification_required": True},
+                },
+            },
+        )
+        results = await ContinuityValidatorPlugin().validate_artifact(
+            PluginContext(project_id="project-1", build_id="build-1"),
+            artifact,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].passed)
+        self.assertEqual(results[0].issues, [])
+        self.assertEqual(results[0].metadata["mode"], "structural")
+
+    async def test_local_final_video_probe_uses_ffprobe_without_media_service(self):
+        class Process:
+            returncode = 0
+
+            async def communicate(self):
+                return (
+                    json.dumps({
+                        "format": {"duration": "15.0"},
+                        "streams": [
+                            {"codec_type": "video", "width": 854, "height": 480,
+                             "r_frame_rate": "24/1"},
+                            {"codec_type": "audio"},
+                        ],
+                    }).encode(),
+                    b"",
+                )
+
+        with (
+            patch("app.utils.s3_utils._storage_is_local", return_value=True),
+            patch("app.utils.s3_utils.is_our_cdn_url", return_value=True),
+            patch("app.utils.s3_utils.s3_utils.cdn_url_to_s3_key", return_value="videos/final.mp4"),
+            patch(
+                "app.utils.s3_utils.s3_utils._local_dir",
+                "/tmp/video-runtime",
+                create=True,
+            ),
+            patch(
+                "app.video_runtime.builtin_plugins.continuity_validator.asyncio.create_subprocess_exec",
+                new=AsyncMock(return_value=Process()),
+            ) as ffprobe,
+            patch("app.utils.media_service_client.video_info", new=AsyncMock()) as media_service,
+        ):
+            info = await _video_info(
+                "http://127.0.0.1:8001/files/videos/final.mp4",
+            )
+
+        self.assertEqual(info["duration"], 15.0)
+        self.assertTrue(info["has_video"])
+        self.assertTrue(info["has_audio"])
+        ffprobe.assert_awaited_once()
+        media_service.assert_not_awaited()

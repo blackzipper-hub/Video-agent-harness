@@ -20,7 +20,10 @@
       config:
         baseUrl: !!js process.env.VIDEO_RUNTIME_URL ?? 'http://127.0.0.1:8001'
         serviceToken: !!js process.env.VIDEO_RUNTIME_SERVICE_TOKEN
-        userId: !!js process.env.VIDEO_RUNTIME_USER_ID ?? 'local-user'
+        # Local bundle identity. Keep this separate from production/Cuti user
+        # variables so a stale shell value cannot make Agent tools own a
+        # different user than the local Video Studio BFF.
+        userId: !!js process.env.VIDEO_RUNTIME_TOOL_USER_ID ?? process.env.VIDEO_RUNTIME_USER_ID ?? process.env.VIDEO_RUNTIME_LOCAL_USER_ID ?? 'local-user'
         timeoutMs: !!js Number(process.env.VIDEO_RUNTIME_TIMEOUT_MS ?? 30000)
 
     - id: cuti-tool-video

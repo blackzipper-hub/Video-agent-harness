@@ -19,9 +19,13 @@ metadata:
           after_phase: story_intent
           next_phase: visual_production
           required_artifacts: [story_draft]
-          resolves: [characters, shots, audio]
+          resolves: [characters, scenes, shots, audio]
           instruction: Complete dialogue, shared references, and parallel shot specifications from the story draft.
     entrypoints: [text, image, audio, video]
+    dependencies:
+      # Planning guidance only. Runtime leaf steps still carry no legacy
+      # Director Skill injection and remain owned by this Workflow compiler.
+      skills: [seedance2]
     parameters:
       shot_workflow_mode: seedance2_short_drama
       content_category: short_drama

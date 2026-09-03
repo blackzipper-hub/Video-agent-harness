@@ -27,7 +27,12 @@ metadata:
           next_phase: visual_production
           required_artifacts: [product_analysis, source_image]
           resolves: [shots, product_constraints]
-          instruction: Build a causal product story from verified product facts without changing product identity.
+          instruction: >-
+            Build a causal product story from the real product analysis. Return complete 15-second
+            shots and set workflow_parameters.primary_selling_point plus one exact
+            workflow_parameters.segment_proofs entry per shot. Keep the final Seedance prompts in
+            Chinese with native synchronized audio; do not add TTS, BGM, subtitles, keyframes, or
+            Director Skills.
     entrypoints: [text, image]
     dependencies:
       skills: [seedance2]

@@ -15,6 +15,7 @@ from app.video_runtime.api import _logical_artifact_id, router, set_runtime
 from app.video_runtime.models import MediaArtifactVersion
 from app.video_runtime.runtime import VideoBuildRuntime
 from app.video_runtime.skill_workflows import load_workflow_skills
+from app.video_runtime.upload_security import sign_uploaded_file
 
 
 class VideoRuntimeApiTest(unittest.TestCase):
@@ -42,6 +43,41 @@ class VideoRuntimeApiTest(unittest.TestCase):
             metadata={},
         )
         self.assertEqual(_logical_artifact_id("project-1", artifact), "video:final")
+
+    def test_receipt_verified_source_can_be_attached_idempotently(self) -> None:
+        project = self.client.post(
+            "/api/video/projects",
+            headers=self.headers,
+            json={"title": "Recovered", "sessionId": "session-1"},
+        ).json()["data"]
+        project_id = project["projectId"]
+        uri = "http://127.0.0.1:8001/files/images/product.webp"
+        body = {
+            "mediaType": "image",
+            "uri": uri,
+            "title": "product.webp",
+            "artifactId": "source:product",
+            "uploadReceipt": sign_uploaded_file("user-1", "image", uri),
+        }
+        first = self.client.post(
+            f"/api/video/projects/{project_id}/sources",
+            headers=self.headers,
+            json=body,
+        )
+        repeated = self.client.post(
+            f"/api/video/projects/{project_id}/sources",
+            headers=self.headers,
+            json=body,
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(first.json()["data"]["id"], repeated.json()["data"]["id"])
+        denied = self.client.post(
+            f"/api/video/projects/{project_id}/sources",
+            headers=self.headers,
+            json={**body, "uploadReceipt": "forged"},
+        )
+        self.assertEqual(denied.status_code, 422)
 
     def test_project_binding_preview_idempotency_and_conflict(self) -> None:
         response = self.client.post(
@@ -75,6 +111,53 @@ class VideoRuntimeApiTest(unittest.TestCase):
             ).status_code,
             403,
         )
+
+        # In the local single-user profile the BFF-created Session binding is
+        # authoritative for Agent tool calls, even if a stale tool process has
+        # a different development default user id. An unrelated Session must
+        # still be rejected.
+        recovered = self.client.post(
+            f"/api/video/projects/{project_id}/edits/resolve",
+            headers={
+                "X-Video-User-Id": "stale-tool-user",
+                "X-Video-Session-Id": "session-1",
+            },
+            json={
+                "baseProjectVersionId": project["currentVersionId"],
+                "idempotencyKey": "recover-bound-session",
+                "edits": [{"op": "patch_shot"}],
+            },
+        )
+        self.assertEqual(recovered.status_code, 200)
+        recovered_project = self.client.get(
+            f"/api/video/projects/{project_id}",
+            headers={
+                "X-Video-User-Id": "stale-tool-user",
+                "X-Video-Session-Id": "session-1",
+            },
+        )
+        self.assertEqual(recovered_project.status_code, 200)
+        recovered_workspace = self.client.get(
+            f"/api/video/projects/{project_id}/workspace",
+            headers={
+                "X-Video-User-Id": "stale-tool-user",
+                "X-Video-Session-Id": "session-1",
+            },
+        )
+        self.assertEqual(recovered_workspace.status_code, 200)
+        unrelated = self.client.post(
+            f"/api/video/projects/{project_id}/edits/resolve",
+            headers={
+                "X-Video-User-Id": "stale-tool-user",
+                "X-Video-Session-Id": "unbound-session",
+            },
+            json={
+                "baseProjectVersionId": project["currentVersionId"],
+                "idempotencyKey": "reject-unbound-session",
+                "edits": [{"op": "patch_shot"}],
+            },
+        )
+        self.assertEqual(unrelated.status_code, 403)
 
         preview_response = self.client.post(
             f"/api/video/projects/{project_id}/changes/preview",

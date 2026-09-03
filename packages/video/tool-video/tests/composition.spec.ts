@@ -24,13 +24,22 @@ class FakeVideoRuntime extends VideoRuntime {
   createProject(_request: CreateProjectRequest, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
   openProject(_id: string, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
   inspectProject(_id: string, _identity: RequestIdentity): Promise<ProjectSnapshot> { return Promise.resolve(project) }
-  listWorkflows(): Promise<WorkflowSummary[]> { return Promise.resolve([]) }
+  listWorkflows(): Promise<WorkflowSummary[]> {
+    return Promise.resolve([{
+      id: 'demo-workflow', title: 'Demo', description: 'demo workflow', mode: 'test',
+      available: true, requiredCapabilities: [], missingCapabilities: [],
+      userSelectable: true, executionKind: 'dedicated_compiler',
+      compiler: 'compile_demo_workflow', entrypoints: ['text'],
+    }])
+  }
   loadWorkflow(workflowId: string): Promise<WorkflowDetail> {
     return Promise.resolve({
       id: workflowId, title: workflowId, description: '', mode: 'test', available: true,
       requiredCapabilities: [], missingCapabilities: [], userSelectable: true,
-      executionKind: 'adapter', entrypoints: [], parameters: {}, pipeline: [],
-      skillDependencies: [], instructions: 'Call video_skill_load("helper-skill").',
+      executionKind: 'dedicated_compiler', compiler: 'compile_demo_workflow',
+      entrypoints: [], parameters: {}, pipeline: [],
+      skillDependencies: ['helper-skill'], instructions: 'Call video_skill_load("helper-skill").',
+      resourceOwnerSkillId: workflowId,
       resources: ['reference.md'],
       resourceContents: [{ path: 'reference.md', content: 'should not reach the model' }],
     })
@@ -38,6 +47,7 @@ class FakeVideoRuntime extends VideoRuntime {
   loadSkill(skillId: string): Promise<SkillDetail> {
     return Promise.resolve({
       id: skillId, description: '', kind: 'helper', instructions: 'Read note.md.',
+      resourceOwnerSkillId: skillId,
       resources: ['references/note.md'],
       resourceContents: [{ path: 'references/note.md', content: 'should not reach the model' }],
     })
@@ -116,6 +126,15 @@ describe('video tool composition', () => {
       'video_build_retry_checkpoint', 'video_build_cancel', 'video_artifact_select', 'video_export',
     ]
     for (const name of names) expect(ctx.tools.get(name)).toBeDefined()
+    const workflows = await ctx.tools.execute({
+      callId: CallId('video-call-workflows'), name: 'video_workflow_list',
+      arguments: {}, signal: new AbortController().signal,
+    })
+    expect(workflows.isError).toBe(false)
+    expect(workflows.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('selectable=true; mode=test; execution=dedicated_compiler; compiler=compile_demo_workflow'),
+    })]))
     const result = await ctx.tools.execute({
       callId: CallId('video-call-1'), name: 'video_project_open',
       arguments: { project_id: 'project-1' }, signal: new AbortController().signal,
@@ -135,7 +154,7 @@ describe('video tool composition', () => {
           style_id: 'cuti.cinematic', characters: [],
           shots: [{
             id: 'shot-1', order: 1, duration_seconds: 5, beat: 'Opening',
-            visual_prompt: 'An actor enters', character_ids: [],
+            visual_prompt: 'An actor enters', narration: null, character_ids: [],
           }],
           audio: { narration_voice: 'default', bgm_prompt: '', subtitles: false },
           providers: { video: 'seedance-2.0', image: 'gpt-image-2', music: 'suno' },
@@ -147,6 +166,9 @@ describe('video tool composition', () => {
     expect(legacyWorkflowPlan.isError).toBe(false)
     expect((legacyWorkflowPlan.value as unknown as BuildPlanSnapshot).workflowId)
       .toBe('workflow-short-drama')
+    expect(
+      (legacyWorkflowPlan.value as unknown as BuildPlanSnapshot).videoSpec?.shots[0],
+    ).not.toHaveProperty('narration')
 
     const loadedSkill = await ctx.tools.execute({
       callId: CallId('video-call-3'), name: 'video_skill_load',
@@ -156,6 +178,7 @@ describe('video tool composition', () => {
     expect(loadedSkill.value).toMatchObject({
       id: 'helper-skill',
       instructions: 'Read note.md.',
+      resourceOwnerSkillId: 'helper-skill',
       resources: ['references/note.md'],
     })
     expect(loadedSkill.value).not.toHaveProperty('resourceContents')
@@ -177,8 +200,28 @@ describe('video tool composition', () => {
     expect(loadedWorkflow.isError).toBe(false)
     expect(loadedWorkflow.value).toMatchObject({
       id: 'demo-workflow',
+      compiler: 'compile_demo_workflow',
+      resourceOwnerSkillId: 'demo-workflow',
       resources: ['reference.md'],
+      skillDependencies: ['helper-skill'],
     })
     expect(loadedWorkflow.value).not.toHaveProperty('resourceContents')
+    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('Required Skill dependencies (load each with video_skill_load): helper-skill'),
+    })]))
+    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('Compiler: compile_demo_workflow'),
+    })]))
+    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('using skill_id=demo-workflow'),
+    })]))
+    const workflowText = loadedWorkflow.content.find(item => item.type === 'text')?.text ?? ''
+    expect(workflowText).toContain('RESOURCE OWNER (mandatory): demo-workflow')
+    expect(workflowText).toContain('- reference.md')
+    expect(workflowText.indexOf('RESOURCE OWNER (mandatory): demo-workflow'))
+      .toBeLessThan(workflowText.indexOf('Call video_skill_load("helper-skill").'))
   })
 })

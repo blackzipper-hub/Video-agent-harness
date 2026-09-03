@@ -53,6 +53,20 @@ class DeepSeekHarnessClient:
             raise DeepSeekHarnessError("session.create returned no sessionId")
         return value
 
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """Return the lightweight DeepSeek Session catalog.
+
+        The compatibility BFF uses this before binding a caller-supplied
+        ``/create/{threadId}`` route.  ``session.create`` is intentionally
+        idempotent in DeepSeek Harness, so it cannot distinguish a fresh route
+        id from an existing, orphaned conversation by itself.
+        """
+        result = await self.rpc("session.list", {})
+        items = result.get("items")
+        if not isinstance(items, list):
+            raise DeepSeekHarnessError("session.list returned no items")
+        return [item for item in items if isinstance(item, dict)]
+
     async def prompt(
         self,
         session_id: str,

@@ -12,19 +12,58 @@ from ..models import (
     VideoSpec,
 )
 from ..plugins import BaseVideoPlugin, PluginContext
-from ..workflow_plans import compile_mv
+from ..workflow_plans import compile_mv_compat
 
 
 class MusicVideoWorkflowPlugin(BaseVideoPlugin):
+    workflow_id = "cuti.music-video"
+    workflow_title = "Cuti Music Video"
+    compiler_name = "MusicVideoWorkflowPlugin.compile_build_plan"
+    extra_capabilities: tuple[str, ...] = ()
+    instruction_skill_id = "mv"
+    instruction_appendix = ""
+
     def planning_mode(self, _workflow_id: str) -> str:
         return "staged"
+
+    def describe_workflows(self) -> list[dict]:
+        workflow = self._workflow(self.workflow_id)
+        pipeline = list(dict.fromkeys([*workflow.pipeline, *self.extra_capabilities]))
+        return [{
+            "id": self.workflow_id,
+            "title": self.workflow_title,
+            "mode": workflow.mode,
+            "parameters": dict(workflow.parameters),
+            "pipeline": pipeline,
+            "requiresKeyframe": workflow.requires_keyframe,
+            "entrypoints": ["text", "image", "audio", "video"],
+            "skillDependencies": [],
+            "source": "plugin",
+            "pluginId": self.workflow_id,
+            "available": True,
+            "unavailableReason": None,
+            "requiredCapabilities": pipeline,
+            "missingCapabilities": [],
+            "userSelectable": True,
+            "executionKind": "dedicated_plugin_compiler",
+            "compiler": self.compiler_name,
+            # This alias executes the original Cuti $mv contract.  Planning
+            # instructions and linked resources therefore remain owned by the
+            # real mv Skill instead of an instruction-less synthetic id.
+            "instructionSkillId": self.instruction_skill_id,
+            "instructionAppendix": self.instruction_appendix,
+            "planning": {"mode": "staged", "checkpoints": []},
+        }]
 
     @staticmethod
     def _workflow(workflow_id: str) -> WorkflowSpec:
         return WorkflowSpec(
             skill_name=workflow_id,
             title="Cuti Music Video",
-            mode="seedance_mv",
+            # This plugin uses the same Suno + smart-cut contract as $mv.
+            # Labeling it seedance_mv made its initial staged phase call
+            # atomic.music.generate while its final compiler called Suno.
+            mode="mv",
             parameters={"workflow_mode": "music_video", "content_category": "music_video"},
             pipeline=(
                 "suno.generate", "media.audio_analyze", "media.audio_cut",
@@ -35,7 +74,7 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
         )
 
     async def compile_build_plan(self, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
-        return compile_mv(self._workflow(spec.workflow_id), context, spec)
+        return compile_mv_compat(self._workflow(spec.workflow_id), context, spec)
 
     async def compile_initial(
         self, context: PluginContext, intent: ProjectIntent,
@@ -53,7 +92,11 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
         resolution: CheckpointResolution,
         plan: RebuildPlan,
     ) -> RebuildPlan:
-        from ..staged_planning import append_phase, copy_plan_with_appended_phase
+        from ..staged_planning import (
+            append_phase,
+            copy_plan_with_appended_phase,
+            failed_checkpoint_step_ids,
+        )
 
         full_plan = await self.compile_build_plan(context, resolution.video_spec)
         added, next_checkpoint = append_phase(
@@ -62,6 +105,7 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             workflow=self._workflow(plan.workflow_id),
             checkpoint_id=checkpoint.phase,
             proposed_steps=resolution.proposed_steps,
+            repair_step_ids=failed_checkpoint_step_ids(checkpoint),
         )
         return copy_plan_with_appended_phase(
             plan,
@@ -73,6 +117,17 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
 
 
 class LipsyncMusicVideoWorkflowPlugin(MusicVideoWorkflowPlugin):
+    workflow_id = "cuti.lipsync-music-video"
+    workflow_title = "Cuti Lipsync Music Video"
+    compiler_name = "LipsyncMusicVideoWorkflowPlugin.compile_build_plan"
+    extra_capabilities = ("media.tts", "media.lipsync")
+    instruction_appendix = (
+        "\n\n## Cuti lipsync extension\n"
+        "After the original $mv music-video master is complete, create the requested "
+        "narration track and apply one media.lipsync pass. Do not replace the original "
+        "$mv planning, music analysis, cast locking, shot generation, or final mix stages."
+    )
+
     async def compile_build_plan(self, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
         if not any(shot.narration.strip() for shot in spec.shots):
             raise BuildPlanValidationError("lipsync workflow requires narration")
@@ -100,7 +155,7 @@ class LipsyncMusicVideoWorkflowPlugin(MusicVideoWorkflowPlugin):
                 parameters={
                     "text": "\n".join(shot.narration for shot in spec.shots if shot.narration),
                     "voice_id": spec.audio.narration_voice,
-                }, depends_on=["script"], estimated_cost=0.05,
+                }, depends_on=["mv-shot-plan"], estimated_cost=0.05,
                 reason="Create the requested lipsync voice track",
             )
             plan.items.append(narration)

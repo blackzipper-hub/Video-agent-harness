@@ -24,6 +24,13 @@ def _video_spec(workflow_id: str) -> VideoSpec:
         "title": "Workflow adapter",
         "target_duration_seconds": 10,
         "workflow_id": workflow_id,
+        "workflow_parameters": {
+            "scenes": [{
+                "id": "main-location",
+                "name": "Main location",
+                "description": "A stable recurring interior with clear spatial geography",
+            }],
+        },
         "characters": [{
             "id": "hero",
             "name": "Hero",
@@ -35,7 +42,7 @@ def _video_spec(workflow_id: str) -> VideoSpec:
                 "order": 1,
                 "duration_seconds": 5,
                 "beat": "arrives",
-                "visual_prompt": "Hero arrives",
+                "visual_prompt": "0-5秒，主角进入画面并完成一次清晰动作。",
                 "character_ids": ["hero"],
             },
             {
@@ -43,7 +50,7 @@ def _video_spec(workflow_id: str) -> VideoSpec:
                 "order": 2,
                 "duration_seconds": 5,
                 "beat": "leaves",
-                "visual_prompt": "Hero leaves",
+                "visual_prompt": "0-5秒，主角离开画面，动作完整收束。",
                 "character_ids": ["hero"],
             },
         ],
@@ -118,10 +125,11 @@ class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
         second_clip = next(
             item for item in short_drama.items if item.step_id == "shot-2-video"
         )
-        self.assertEqual(
-            second_clip.parameters["start_image_from_step"],
-            "shot-1-tail",
-        )
+        self.assertNotIn("start_image_from_step", second_clip.parameters)
+        self.assertEqual(second_clip.parameters["generation_mode"], "t2v")
+        self.assertFalse(any(
+            item.capability == "media.extract_frame" for item in short_drama.items
+        ))
         self.assertEqual(second_clip.parameters["workflow_mode"], "short_drama")
 
         if "seedance2" in loaded.implementation._workflows:
@@ -149,12 +157,15 @@ class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(item.parameters["generate_audio"] for item in clips))
             self.assertTrue(all(not item.skill_ids for item in clips))
             self.assertNotIn("character_reference_from_steps", clips[0].parameters)
-            self.assertEqual(clips[0].depends_on, ["storyboard"])
-            self.assertEqual(clips[1].depends_on, ["storyboard", "shot-1-tail"])
-            self.assertEqual(clips[1].parameters["start_image_from_step"], "shot-1-tail")
+            self.assertEqual(clips[0].depends_on, ["seedance-prompts"])
+            self.assertEqual(clips[1].depends_on, ["seedance-prompts"])
+            self.assertNotIn("start_image_from_step", clips[1].parameters)
+            self.assertFalse(any(
+                item.capability == "media.extract_frame" for item in seedance2.items
+            ))
             final = next(item for item in seedance2.items if item.step_id == "final-video")
             self.assertEqual(final.output_artifact_type, "final_video")
-            self.assertEqual(final.parameters["transition_duration"], 0.125)
+            self.assertEqual(final.parameters["transition_duration"], 0.0)
 
     async def test_seedance2_does_not_inherit_generic_cuti_director_skills(self):
         skills = VideoSkillRuntime()
@@ -226,7 +237,7 @@ instructions
             with self.assertRaisesRegex(ValueError, "unknown capability"):
                 VideoSkillRuntime([root])
 
-    async def test_runtime_freezes_workflow_supervisor_and_director_skills(self):
+    async def test_runtime_freezes_product_workflow_without_unrelated_director(self):
         skills = VideoSkillRuntime()
         if not skills.catalog.has("product-ad-video"):
             self.skipTest("product-ad-video Skill is not installed in this checkout")
@@ -255,7 +266,7 @@ instructions
         )
         skill_ids = [item.skill_id for item in video.resolved_skills]
         self.assertIn("product-ad-video", skill_ids)
-        self.assertIn("video-director", skill_ids)
+        self.assertNotIn("video-director", skill_ids)
         self.assertIn("product identity", video.skill_context.instructions)
 
     async def test_project_skill_lock_is_runtime_owned_and_frozen_into_steps(self):
@@ -293,8 +304,11 @@ instructions
             [item.skill_id for item in persisted],
             ["character-director", "product-ad-video"],
         )
-        character_step = next(item for item in plan.items if item.step_id == "characters")
-        resolved = {item.skill_id: item for item in character_step.resolved_skills}
+        # product-ad-video is intentionally a direct I2V workflow and no longer
+        # creates the generic `characters` stage.  A project lock is still
+        # frozen into its own workflow-specific planning artifact.
+        brief_step = next(item for item in plan.items if item.step_id == "commercial-brief")
+        resolved = {item.skill_id: item for item in brief_step.resolved_skills}
         self.assertEqual(resolved["character-director"].source, "project_lock")
 
         continued = await runtime.plan_project(
@@ -359,6 +373,7 @@ class SkillWorkflowApiTest(unittest.TestCase):
                 headers={"X-Video-User-Id": "user-1"},
             ).json()["data"]
         self.assertIn("你不是模板填充器", detail["instructions"])
+        self.assertEqual(detail["resourceOwnerSkillId"], "seedance2")
         resources = {item["path"]: item["content"] for item in detail["resourceContents"]}
         self.assertIn("reference.md", resources)
 
@@ -370,9 +385,70 @@ class SkillWorkflowApiTest(unittest.TestCase):
         self.assertEqual(helper_response.status_code, 200, helper_response.text)
         helper = helper_response.json()["data"]
         self.assertEqual(helper["kind"], "helper")
+        self.assertEqual(helper["resourceOwnerSkillId"], "seedance-20")
         self.assertGreater(len(helper["resources"]), len(helper["resourceContents"]))
         self.assertTrue(all(isinstance(item["content"], str) for item in helper["resourceContents"]))
 
         catalog = {item["name"]: item for item in skills.prompt_view()}
         self.assertEqual(catalog["seedance2"]["kind"], "workflow")
         self.assertEqual(catalog["seedance-20"]["kind"], "helper")
+
+    def test_complete_catalog_has_no_implicit_plugin_compiler(self):
+        runtime = VideoBuildRuntime()
+        asyncio.run(runtime.plugins.load_directories([
+            Path(__file__).resolve().parents[2] / "plugins",
+        ]))
+        asyncio.run(load_workflow_skills(runtime.plugins, runtime.skills))
+        set_runtime(runtime)
+        app = FastAPI()
+        app.include_router(router)
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/video/workflows",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+            music_detail = client.get(
+                "/api/video/workflows/cuti.music-video",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+            lipsync_detail = client.get(
+                "/api/video/workflows/cuti.lipsync-music-video",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(music_detail.status_code, 200, music_detail.text)
+        self.assertEqual(lipsync_detail.status_code, 200, lipsync_detail.text)
+        workflows = {item["id"]: item for item in response.json()["data"]}
+        self.assertEqual(
+            workflows["cuti.music-video"]["compiler"],
+            "MusicVideoWorkflowPlugin.compile_build_plan",
+        )
+        self.assertEqual(
+            workflows["cuti.lipsync-music-video"]["compiler"],
+            "LipsyncMusicVideoWorkflowPlugin.compile_build_plan",
+        )
+        music = music_detail.json()["data"]
+        lipsync = lipsync_detail.json()["data"]
+        self.assertEqual(music["instructionSkillId"], "mv")
+        self.assertEqual(music["resourceOwnerSkillId"], "mv")
+        self.assertIn("MV", music["instructions"])
+        self.assertNotIn("Cuti lipsync extension", music["instructions"])
+        self.assertEqual(lipsync["instructionSkillId"], "mv")
+        self.assertEqual(lipsync["resourceOwnerSkillId"], "mv")
+        self.assertIn("Cuti lipsync extension", lipsync["instructions"])
+        self.assertEqual(
+            workflows["cuti.seedance-story"]["executionKind"],
+            "legacy_compatibility",
+        )
+        self.assertFalse(workflows["cuti.seedance-story"]["userSelectable"])
+        self.assertFalse([
+            item["id"] for item in workflows.values()
+            if item["executionKind"] == "plugin"
+        ])
+        for item in workflows.values():
+            if item["available"] and item["userSelectable"]:
+                self.assertIn(
+                    item["executionKind"],
+                    {"dedicated_compiler", "dedicated_plugin_compiler"},
+                    item["id"],
+                )

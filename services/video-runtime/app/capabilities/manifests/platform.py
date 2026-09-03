@@ -363,7 +363,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
         ),
         _manifest(
             "media.hyperframes_caption",
-            "Render LLM-authored HyperFrames HTML (captions / titles) over a selected video. caption_html is required.",
+            "Render sentence-synchronized HyperFrames captions over a selected video. Use an explicit Cuti style; authored HTML remains an optional advanced override.",
             "local.service",
             "video",
             alias="media-hyperframes-caption",
@@ -371,9 +371,22 @@ def platform_capabilities() -> list[CapabilityManifest]:
             required=["video", "transcript"],
             parameters_schema={
                 "type": "object",
-                "required": ["caption_html"],
                 "properties": {
                     "video_url": {"type": "string"},
+                    "style": {
+                        "type": "string",
+                        "enum": [
+                            "caption-highlight", "caption-pill-karaoke",
+                            "caption-editorial-emphasis", "caption-glitch-rgb",
+                            "caption-kinetic-slam", "caption-neon-glow",
+                            "caption-neon-accent", "caption-clip-wipe",
+                            "caption-gradient-fill", "caption-matrix-decode",
+                            "caption-emoji-pop", "caption-parallax-layers",
+                            "caption-particle-burst", "caption-texture",
+                            "caption-weight-shift",
+                        ],
+                        "default": "caption-highlight",
+                    },
                     "caption_html": {
                         "type": "string",
                         "minLength": 1,

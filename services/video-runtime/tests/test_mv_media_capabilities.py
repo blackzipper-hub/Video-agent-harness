@@ -710,7 +710,7 @@ def test_mv_skill_files_and_workflow_contract():
         None,
     )
     assert is_workflow_skill("mv")
-    assert not is_workflow_skill("seedance-mv")
+    assert is_workflow_skill("seedance-mv")
     seedance2 = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance2" / "SKILL.md"
     if seedance2.is_file():
         assert is_workflow_skill("seedance2")
@@ -785,13 +785,11 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert skill.contract is None
     assert not is_workflow_skill("hyperframes-captions")
     assert "media.hyperframes_caption" in skill.instructions
-    assert "caption_html" in skill.instructions
-    assert "不要只报一个 registry 组件名" in skill.instructions
-    assert "hyperframes-core" in skill.instructions
-    assert "hyperframes-media" in skill.instructions
-    assert "subtitle-authoring" in skill.instructions
-    assert "never animate" not in skill.instructions.lower()
-    assert not (root / "references" / "styles.md").exists()
+    assert "Always" in skill.instructions
+    assert "style" in skill.instructions
+    assert "references/styles.md" in skill.instructions
+    assert "never animate" in skill.instructions.lower()
+    assert (root / "references" / "styles.md").exists()
     for name in (
         "hyperframes-core",
         "hyperframes-cli",
@@ -809,10 +807,11 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert "references/captions/authoring.md" in catalog.list_resources("hyperframes-media")
 
 
-def test_hyperframes_caption_schema_requires_authored_html():
+def test_hyperframes_caption_schema_keeps_original_style_contract():
     registry = build_registry(include_platform=True)
     schema = registry.get("media.hyperframes_caption").parameters_schema
+    assert "style" in schema["properties"]
+    assert schema["properties"]["style"]["default"] == "caption-highlight"
     assert "caption_html" in schema["properties"]
     assert "composition_html" in schema["properties"]
-    assert "style" not in schema["properties"]
-    assert "caption_html" in schema.get("required", [])
+    assert "caption_html" not in schema.get("required", [])

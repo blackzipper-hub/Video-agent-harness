@@ -337,6 +337,27 @@ class S3Utils:
         从URL下载视频并上传到S3（带重试机制）。
         Media Service 一次 FFmpeg 完成: resize + fps + strip audio + trim + watermark。
         """
+        # The extracted self-hosted Video Runtime deliberately does not require
+        # Cuti Media Service. Provider outputs already use the requested
+        # resolution/duration, so local storage can preserve the immutable MP4
+        # directly; later Media Plugin steps still perform concat/export checks.
+        if self._is_local:
+            timeout = aiohttp.ClientTimeout(total=1200.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(video_url) as response:
+                    response.raise_for_status()
+                    video_data = await response.read()
+            if len(video_data) < 100:
+                raise BusinessException(
+                    BusinessExceptionCode.BUSINESS_ERROR,
+                    "下载视频失败：Provider 返回空文件",
+                )
+            filename = os.path.basename(urlparse(video_url).path) or "provider-output.mp4"
+            return await self.upload_video(
+                video_data,
+                filename=filename,
+                generation_id=generation_id,
+            )
         result = await msc.pipeline_ensure_on_s3(
             video_url=video_url,
             run_id=generation_id or str(uuid.uuid4()),

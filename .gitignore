@@ -64,6 +64,8 @@ worktrees/
 logs/
 *.log
 data/
+.local-media/
+.local-state/
 tmp-*.png
 deploy/.env.__probe__
 deploy/harness-test/

@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { RequestIdentity } from '@cuti-ai/video-runtime'
+import type { RequestIdentity, VideoSpec } from '@cuti-ai/video-runtime'
 
 export const name = 'cuti-tool-video'
 export const inject = ['tools', 'videoRuntime']
@@ -124,7 +124,15 @@ const videoSpecParameters = {
           duration_seconds: { type: 'number' as const, required: true },
           beat: { type: 'string' as const, required: true },
           visual_prompt: { type: 'string' as const, required: true },
-          narration: { type: 'string' as const },
+          // Models commonly use JSON null for an intentionally absent
+          // voice-over. Accept that harmless representation at the tool
+          // boundary and remove it before calling the strict Runtime model.
+          narration: {
+            oneOf: [
+              { type: 'string' as const },
+              { type: 'null' as const },
+            ],
+          },
           character_ids: { type: 'array' as const, items: { type: 'string' as const } },
           reference_asset_ids: { type: 'array' as const, items: { type: 'string' as const } },
           transition: { type: 'string' as const },
@@ -154,6 +162,20 @@ const videoSpecParameters = {
   },
 } as const
 
+function normalizeVideoSpec(value: unknown): VideoSpec {
+  const spec = value as VideoSpec & {
+    shots: Array<VideoSpec['shots'][number] & { narration?: string | null }>
+  }
+  return {
+    ...spec,
+    shots: spec.shots.map((shot) => {
+      if (shot.narration !== null) return shot
+      const { narration: _omitted, ...withoutNullNarration } = shot
+      return withoutNullNarration
+    }),
+  }
+}
+
 function identityOf(agent: { session: { header: { id: unknown } } } | undefined): RequestIdentity {
   return agent === undefined ? {} : { sessionId: String(agent.session.header.id) }
 }
@@ -165,9 +187,18 @@ function withoutInjectedResources(
   return rest
 }
 
-function bundledResourceText(value: Record<string, import('@cuti-ai/video-runtime').JsonValue>): string {
+function bundledResourceHeader(value: Record<string, import('@cuti-ai/video-runtime').JsonValue>): string {
   const resources = Array.isArray(value.resources) ? value.resources.map(item => String(item)) : []
-  return resources.length === 0 ? '' : `\n\nResources:\n${resources.join('\n')}`
+  if (resources.length === 0) return ''
+  const owner = String(value.resourceOwnerSkillId ?? value.id ?? '')
+  return [
+    `RESOURCE OWNER (mandatory): ${owner}`,
+    `Every resource path listed below belongs to ${owner}.`,
+    `Read it only with video_skill_read_resource using skill_id=${owner}; never use a dependency Skill id.`,
+    'Resources:',
+    ...resources.map(path => `- ${path}`),
+    '',
+  ].join('\n')
 }
 
 function projectText(value: { projectId: string; currentVersionId: string; artifactCount: number; summary: string }): string {
@@ -182,13 +213,17 @@ function buildText(value: { buildId: string; status: string; progress: number; m
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'video_workflow_list',
-    description: 'List Video Runtime workflows before planning. In automatic mode choose only an available user-selectable workflow whose description matches the user request.',
+    description: 'List Video Runtime workflows before planning. In automatic mode choose only an available user-selectable workflow whose description matches the user request. Never use a hidden compatibility workflow or invent a compiler.',
     parameters: {},
     output: {
       schema: { type: 'array', items: { type: 'object', additionalProperties: true } },
       render: (_args, value) => [{
         type: 'text',
-        text: value.map(item => `${item.id}: ${item.available ? 'available' : `unavailable (${item.unavailableReason})`} — ${item.description}`).join('\n'),
+        text: value.map((item) => {
+          const availability = item.available ? 'available' : `unavailable (${item.unavailableReason})`
+          const compiler = item.compiler == null ? 'none' : String(item.compiler)
+          return `${item.id}: ${availability}; selectable=${String(item.userSelectable)}; mode=${String(item.mode)}; execution=${String(item.executionKind)}; compiler=${compiler} — ${item.description}`
+        }).join('\n'),
       }],
     },
     execute: (_args, exec) => ctx.videoRuntime.listWorkflows(identityOf(exec.agent), exec.signal)
@@ -197,13 +232,13 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_workflow_load',
-    description: 'Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec. Follow any video_skill_load names in those instructions.',
+    description: 'Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec. Then call video_skill_load for every returned skillDependencies entry and for any additional Skill named by the instructions. Any returned resource path belongs to resourceOwnerSkillId (normally the workflow id), not to the most recently loaded dependency.',
     parameters: { workflow_id: { type: 'string', required: true } },
     output: {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.title)}\nMode: ${String(value.mode)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n\n${String(value.instructions ?? '')}${bundledResourceText(value)}`,
+        text: `${String(value.title)}\nMode: ${String(value.mode)}\nExecution: ${String(value.executionKind)}\nCompiler: ${value.compiler == null ? 'none' : String(value.compiler)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n${bundledResourceHeader(value)}Required Skill dependencies (load each with video_skill_load): ${Array.isArray(value.skillDependencies) && value.skillDependencies.length > 0 ? value.skillDependencies.join(', ') : 'none'}\n\nAUTHORITATIVE WORKFLOW INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadWorkflow(args.workflow_id, identityOf(exec.agent), exec.signal)
@@ -212,13 +247,13 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_skill_load',
-    description: "Load one installed Skill's full Markdown instructions after it is selected, named by another Skill, or explicitly requested. Returns bundled resource paths; read those files with video_skill_read_resource when the instructions require them.",
+    description: "Load one installed Skill's full Markdown instructions after it is selected, named by another Skill, or explicitly requested. Returns resourceOwnerSkillId and bundled paths; read each path with video_skill_read_resource using that exact owner id.",
     parameters: { skill_id: { type: 'string', required: true } },
     output: {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.id)}\n${String(value.instructions ?? '')}${bundledResourceText(value)}`,
+        text: `${String(value.id)}\n${bundledResourceHeader(value)}AUTHORITATIVE SKILL INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadSkill(args.skill_id, identityOf(exec.agent), exec.signal)
@@ -227,7 +262,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_skill_read_resource',
-    description: 'Read one bundled text file from an installed Skill when its instructions require that file.',
+    description: 'Read one bundled text file from an installed Skill when its instructions require that file. Pass the resourceOwnerSkillId returned alongside the path; never substitute a dependency or the most recently loaded Skill id.',
     parameters: {
       skill_id: { type: 'string', required: true },
       path: { type: 'string', required: true },
@@ -275,7 +310,7 @@ export function apply(ctx: Context): void {
       projectId: args.project_id,
       baseProjectVersionId: args.base_project_version_id,
       idempotencyKey: args.idempotency_key,
-      ...(args.video_spec === undefined ? {} : { videoSpec: args.video_spec }),
+      ...(args.video_spec === undefined ? {} : { videoSpec: normalizeVideoSpec(args.video_spec) }),
       ...(args.project_intent === undefined ? {} : { projectIntent: args.project_intent }),
     }, identityOf(exec.agent), exec.signal).then(
       value => value as unknown as Record<string, import('@cuti-ai/video-runtime').JsonValue>,
@@ -477,7 +512,7 @@ export function apply(ctx: Context): void {
       basePlanRevision: args.base_plan_revision,
       baseSpecRevision: args.base_spec_revision,
       idempotencyKey: args.idempotency_key,
-      ...(args.video_spec === undefined ? {} : { videoSpec: args.video_spec }),
+      ...(args.video_spec === undefined ? {} : { videoSpec: normalizeVideoSpec(args.video_spec) }),
       ...(args.video_spec_patch === undefined ? {} : { videoSpecPatch: args.video_spec_patch }),
       ...(args.phase_inputs === undefined ? {} : { phaseInputs: args.phase_inputs }),
       ...(args.proposed_steps === undefined ? {} : { proposedSteps: args.proposed_steps }),

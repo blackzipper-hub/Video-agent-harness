@@ -17,12 +17,12 @@ metadata:
           after_phase: story_intent
           next_phase: reference_production
           required_artifacts: [story_draft]
-          resolves: [characters, shots, audio]
+          resolves: [characters, scenes, shots, audio]
           instruction: Complete the production VideoSpec from the generated story draft before references and keyframes.
         - id: references_ready
           after_phase: reference_production
           next_phase: keyframe_production
-          required_artifacts: [character_reference]
+          required_artifacts: [character_reference, scene_reference]
           resolves: [keyframe_prompts]
           instruction: Inspect the real character references and refine only keyframe composition prompts without changing locked identities.
         - id: keyframes_ready

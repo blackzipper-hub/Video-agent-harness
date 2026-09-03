@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import io
 import tempfile
@@ -32,10 +33,13 @@ class FakeDeepSeekClient:
         self.missing_sessions: set[str] = set()
         self.session_count = 0
 
-    async def create_session(self, **_options) -> str:
+    async def list_sessions(self) -> list[dict]:
+        return [{"sessionId": session_id} for session_id in self.events]
+
+    async def create_session(self, **options) -> str:
         self.session_count += 1
-        session_id = f"dsh-session-{self.session_count}"
-        self.events[session_id] = []
+        session_id = options.get("session_id") or f"dsh-session-{self.session_count}"
+        self.events.setdefault(session_id, [])
         return session_id
 
     async def prompt(self, session_id: str, text: str, **_options) -> None:
@@ -128,6 +132,8 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertIn('"duration": 15', prompt)
         self.assertNotIn(uploaded_url, prompt)
         self.assertIn("source:", prompt)
+        self.assertIn("never normalize Seedance 2.5 to Seedance 2.0", prompt)
+        self.assertIn("never send JSON null", prompt)
 
         snapshot = self.client.get(
             f"/chat-v1/service/v2/runs/{run['id']}",
@@ -165,6 +171,47 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["data"][0]["id"], created["id"])
         self.assertEqual(response.json()["data"][0]["thread_id"], created["thread_id"])
+
+    def test_orphaned_create_route_gets_a_fresh_deepseek_session(self) -> None:
+        replacement = FakeDeepSeekClient()
+        replacement.events["orphaned-route-session"] = [{
+            "type": "assistant/message",
+            "seq": 0,
+            "time": 1000,
+            "data": {"message": {"content": [{"type": "text", "text": "stale"}]}},
+        }]
+        self.deepseek = replacement
+        set_deepseek_client(replacement)
+
+        response = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Restart an orphaned Create route",
+                "idempotency_key": "orphaned-route-request",
+                "thread_id": "orphaned-route-session",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        run = response.json()["data"]
+        self.assertEqual(run["thread_id"], "dsh-session-1")
+        self.assertNotEqual(run["thread_id"], "orphaned-route-session")
+        self.assertEqual(replacement.prompts[0][0], run["thread_id"])
+
+    def test_unused_create_route_keeps_its_requested_session_id(self) -> None:
+        response = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Start from a fresh Create route",
+                "idempotency_key": "fresh-route-request",
+                "thread_id": "fresh-route-session",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        run = response.json()["data"]
+        self.assertEqual(run["thread_id"], "fresh-route-session")
+        self.assertEqual(self.deepseek.prompts[0][0], "fresh-route-session")
 
     def test_old_studio_paths_keep_thread_based_navigation(self) -> None:
         created = self.client.post(
@@ -286,6 +333,17 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertEqual(unavailable.status_code, 409, unavailable.text)
         self.assertIn("unavailable", unavailable.json()["detail"].lower())
 
+        hidden_legacy = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Use the old generic compiler",
+                "idempotency_key": "workflow-hidden-legacy-1",
+                "workflow_id": "cuti.seedance-story",
+            },
+        )
+        self.assertEqual(hidden_legacy.status_code, 409, hidden_legacy.text)
+        self.assertIn("hidden legacy", hidden_legacy.json()["detail"].lower())
+
         ambiguous = self.client.post(
             "/chat-v1/service/v2/runs",
             json={
@@ -294,6 +352,24 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             },
         )
         self.assertEqual(ambiguous.status_code, 422, ambiguous.text)
+
+    def test_dedicated_plugin_workflow_can_be_selected_without_a_synthetic_skill(self) -> None:
+        asyncio.run(self.runtime.plugins.load_directories([
+            Path(__file__).resolve().parents[2] / "plugins",
+        ]))
+        selected = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Create a music video",
+                "idempotency_key": "plugin-workflow-selection-1",
+                "workflow_id": "cuti.music-video",
+            },
+        )
+        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertEqual(
+            selected.json()["data"]["workflow_id"],
+            "cuti.music-video",
+        )
 
     def test_empty_project_follow_up_reapplies_create_contract(self) -> None:
         created = self.client.post(

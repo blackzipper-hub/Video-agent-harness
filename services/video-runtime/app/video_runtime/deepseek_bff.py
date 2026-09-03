@@ -21,7 +21,8 @@ from .api import get_runtime
 from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
-from .workflow_plans import SUPPORTED_WORKFLOW_MODES, UNAVAILABLE_WORKFLOW_MODES
+from .upload_security import sign_uploaded_file as _sign_uploaded_file
+from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
 from app.chat.utils.file_utils import process_uploaded_files
 
 
@@ -81,11 +82,6 @@ class StudioSkillEnableBody(BaseModel):
 
 def success(data: Any) -> dict[str, Any]:
     return {"code": 0, "message": "success", "data": data}
-
-
-def _sign_uploaded_file(user_id: str, kind: str, url: str) -> str:
-    secret = os.getenv("VIDEO_CAPABILITY_GRANT_SECRET", "local-video-upload-receipt-secret-32b").encode()
-    return hmac.new(secret, f"{user_id}\n{kind}\n{url}".encode(), hashlib.sha256).hexdigest()
 
 
 def _prompt_input_files(input_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -268,17 +264,49 @@ def _validate_workflow_selection(
     runtime: VideoBuildRuntime,
     workflow: str | None,
 ) -> None:
-    if not workflow or workflow == "cuti.seedance-story":
+    if not workflow:
         return
+    if workflow == "cuti.seedance-story":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Workflow is unavailable: cuti.seedance-story is a hidden legacy "
+                "compatibility workflow; select an installed Cuti Workflow Skill"
+            ),
+        )
     if not runtime.skills.catalog.has(workflow):
-        raise HTTPException(status_code=422, detail=f"Workflow Skill is not installed: {workflow}")
+        # Dedicated Video Plugins may expose a Workflow alias without adding a
+        # synthetic SKILL.md (for example cuti.music-video).  Accept it only
+        # when the loaded plugin publishes an explicit, selectable compiler
+        # contract; a bare contributions.workflows entry still fails closed.
+        views = []
+        for loaded in runtime.plugins.loaded:
+            describe = getattr(loaded.implementation, "describe_workflows", None)
+            if callable(describe):
+                views.extend(describe())
+        view = next((item for item in views if item.get("id") == workflow), None)
+        if view is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Workflow Skill or plugin is not installed: {workflow}",
+            )
+        if not view.get("available") or not view.get("userSelectable") or not view.get("compiler"):
+            reason = view.get("unavailableReason") or "no dedicated selectable compiler"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workflow is unavailable: {workflow}: {reason}",
+            )
+        return
     metadata = runtime.skills.catalog.load(workflow).metadata
     if (metadata.metadata or {}).get("kind") != "workflow":
         raise HTTPException(status_code=422, detail=f"Skill is not a workflow: {workflow}")
     spec = runtime.skills.workflows.get(workflow)
     mode = spec.mode if spec is not None else ""
-    if mode not in SUPPORTED_WORKFLOW_MODES:
-        reason = UNAVAILABLE_WORKFLOW_MODES.get(mode) or f"No installed compiler for workflow mode {mode}"
+    contract = WORKFLOW_ID_COMPILERS.get(workflow)
+    if contract is None or contract[0] != mode:
+        reason = UNAVAILABLE_WORKFLOW_MODES.get(mode) or (
+            f"No dedicated compiler for workflow {workflow} with mode {mode}"
+        )
         raise HTTPException(status_code=409, detail=f"Workflow is unavailable: {workflow}: {reason}")
 
 
@@ -350,14 +378,19 @@ def _initial_video_build_prompt(
         ),
         "Respect duration, aspect ratio, resolution, selected image/video providers, and attachments when present.",
         (
-            "Normalize UI provider names for VideoSpec: auto or seedance_2_* means "
-            "providers.video seedance-2.0; gpt_image_2 means providers.image gpt-image-2; "
-            "use providers.music suno unless the user explicitly requests another installed provider."
+            "Normalize UI provider names for VideoSpec: seedance_2_* means providers.video "
+            "seedance-2.0; gpt_image_2 means providers.image gpt-image-2. If the UI value is "
+            "auto, follow the loaded Workflow's default. An exact model named by the visible "
+            "user request has higher priority: in particular, never normalize Seedance 2.5 "
+            "to Seedance 2.0. Use providers.music suno unless the user explicitly requests "
+            "another installed provider."
         ),
+        "Optional string fields must be omitted or set to an empty string; never send JSON null.",
         (
             "After video_workflow_load, follow that Skill's instructions, including any "
-            "video_skill_load and video_skill_read_resource calls it names, markdown links "
-            "to bundled files, and paths under references/. Helper Skills stay in context; "
+            "video_skill_load and video_skill_read_resource calls it names. Also call "
+            "video_skill_load once for every returned skillDependencies entry. Read markdown "
+            "links to bundled files and required paths under references/. Helper Skills stay in context; "
             "do not copy them into activated_skill_ids unless the user or a "
             "project lock already activated them."
         ),
@@ -561,6 +594,33 @@ async def _history(dsh: DeepSeekHarnessClient, session_id: str) -> list[dict[str
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+async def _create_route_session(
+    dsh: DeepSeekHarnessClient,
+    requested_session_id: str | None,
+) -> str:
+    """Create the route Session, replacing only an orphaned id collision.
+
+    A local Runtime snapshot can be restored from an older backup while the
+    DeepSeek Session store still contains the URL's Session. That URL has no
+    authoritative Project binding, so keeping its id would mix two project
+    histories. Start a fresh Session and let the returned ``thread_id`` move
+    Create Space to the new durable binding.
+    """
+    preset = os.getenv("VIDEO_AGENT_PRESET", "video")
+    if requested_session_id:
+        existing_session_ids = {
+            str(item.get("sessionId"))
+            for item in await dsh.list_sessions()
+            if item.get("sessionId")
+        }
+        if requested_session_id in existing_session_ids:
+            return await dsh.create_session(agent_preset=preset)
+    return await dsh.create_session(
+        session_id=requested_session_id,
+        agent_preset=preset,
+    )
+
+
 async def _snapshot(
     runtime: VideoBuildRuntime,
     dsh: DeepSeekHarnessClient,
@@ -640,10 +700,7 @@ async def create_run(
     )
     _validate_workflow_selection(runtime, requested_workflow)
     try:
-        session_id = await dsh.create_session(
-            session_id=body.thread_id,
-            agent_preset=os.getenv("VIDEO_AGENT_PRESET", "video"),
-        )
+        session_id = await _create_route_session(dsh, body.thread_id)
         project, initial_version = await runtime.create_project(
             user_id=user_id,
             title=body.objective[:200],

@@ -1013,6 +1013,13 @@ class PostgresVideoProjectRepository:
                 WHERE build_id=$1 AND project_id=$2 AND status='failed'""",
                 build_id, project_id, now(),
             )
+            await connection.execute(
+                f"""UPDATE {self.schema}.build_steps
+                SET status='pending',error=NULL,started_at=NULL,completed_at=NULL,updated_at=$3
+                WHERE build_id=$1 AND project_id=$2
+                  AND status NOT IN ('completed','failed')""",
+                build_id, project_id, now(),
+            )
             build.status = "queued"
             build.message = "Retry queued"
             build.error = None

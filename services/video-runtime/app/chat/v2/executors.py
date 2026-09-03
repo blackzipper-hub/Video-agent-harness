@@ -831,20 +831,16 @@ class CapabilityExecutor:
                 if isinstance(parameters.get("composition_html"), str)
                 else None
             )
-            authored = bool((caption_html or "").strip() or (composition_html or "").strip())
-            if not video_url or not transcript:
+            if not video_url or not transcript or (not words and not cues):
                 raise ValueError(
-                    "media.hyperframes_caption requires selected video and transcript artifacts"
-                )
-            if not authored:
-                raise ValueError(
-                    "media.hyperframes_caption requires caption_html"
+                    "media.hyperframes_caption requires selected video and timestamped transcript artifacts"
                 )
             rendered = await msc.hyperframes_caption(
                 str(video_url),
                 run_id=remote_run_id,
                 words=words,
                 cues=cues,
+                style=str(parameters.get("style") or "caption-highlight"),
                 accent_color=str(parameters.get("accent_color") or "#ff1745"),
                 position=str(parameters.get("position") or "bottom-safe"),
                 playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,
@@ -853,13 +849,18 @@ class CapabilityExecutor:
                 composition_html=composition_html,
             )
             playbook_name = parameters.get("playbook")
+            style_name = str(parameters.get("style") or "caption-highlight")
+            authored = bool((caption_html or "").strip() or (composition_html or "").strip())
             result = {
                 **rendered,
                 "uri": rendered.get("result_url"),
                 "video_url": rendered.get("result_url"),
                 "title": "HyperFrames captioned video",
                 "summary": (
-                    "Rendered HyperFrames overlay (authored HTML)"
+                    (
+                        "Rendered HyperFrames overlay (authored HTML)"
+                        if authored else f"Rendered animated captions with {style_name}"
+                    )
                     + (f" / {playbook_name}" if playbook_name else "")
                 ),
                 "source_transcript_artifact_id": transcript.id,

@@ -30,6 +30,8 @@ metadata:
           resolves: [shots, product_constraints]
           instruction: Continue only with the verified product analysis and installed Ink Press template runtime.
     entrypoints: [text, image, video]
+    dependencies:
+      skills: [video-shotcraft]
     parameters:
       workflow_mode: ink_press_product_workflow
       content_category: product_ad

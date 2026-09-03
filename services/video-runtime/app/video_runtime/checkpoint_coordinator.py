@@ -37,6 +37,9 @@ def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
         "Do not create a project, switch Workflow, or repeat completed media steps.",
         "Call video_workflow_load for the exact workflow_id below, then call "
         "video_checkpoint_inspect with the exact project/build/checkpoint ids.",
+        "From video_workflow_load, call video_skill_load for every returned "
+        "skillDependencies entry and read every referenced bundled resource required by "
+        "the Workflow before resolving the checkpoint.",
         "Use the real artifact summaries to complete the unresolved creative fields.",
         "Then call video_checkpoint_resolve once with either a complete revised VideoSpec "
         "or a video_spec_patch that completes this phase, the exact base revisions, and "

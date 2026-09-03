@@ -11,8 +11,6 @@ dependencies:
 contributions:
   workflows:
     - cuti.lipsync-music-video
-skills:
-  - workflow-keyframe-pipeline
 permissions:
   network_domains: []
   credentials: []

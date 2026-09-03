@@ -74,7 +74,7 @@ class VideoSkillRuntime:
 
     def prompt_view(self) -> list[dict]:
         """Return the public catalog shape consumed by the migrated Cuti UI."""
-        from .workflow_plans import SUPPORTED_WORKFLOW_MODES, UNAVAILABLE_WORKFLOW_MODES
+        from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
         capabilities_by_skill = {
             item.skill_name: item
             for item in self.capabilities.list(include_disabled=True)
@@ -107,11 +107,17 @@ class VideoSkillRuntime:
             if kind == "workflow":
                 workflow = self.workflows.get(metadata.name)
                 mode = workflow.mode if workflow is not None else ""
+                contract = WORKFLOW_ID_COMPILERS.get(metadata.name)
+                available = (
+                    workflow is not None
+                    and contract is not None
+                    and contract[0] == mode
+                )
                 view.update({
-                    "available": mode in SUPPORTED_WORKFLOW_MODES,
+                    "available": available,
                     "unavailable_reason": UNAVAILABLE_WORKFLOW_MODES.get(mode) or (
-                        None if mode in SUPPORTED_WORKFLOW_MODES
-                        else f"No installed compiler for workflow mode {mode}"
+                        None if available
+                        else f"No dedicated compiler for workflow {metadata.name} with mode {mode}"
                     ),
                     "workflow_mode": mode,
                 })

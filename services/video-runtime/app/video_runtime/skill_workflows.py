@@ -8,6 +8,7 @@ from app.orchestration.workflow_compiler.registry import (
     WorkflowSpec,
 )
 
+from .initial_build import BuildPlanValidationError
 from .models import CheckpointResolution, PlanCheckpoint, ProjectIntent, RebuildPlan, VideoSpec
 from .plugins import BaseVideoPlugin, PluginContext, VideoPluginRegistry
 from .plugins.models import (
@@ -17,16 +18,19 @@ from .plugins.models import (
 )
 from .skills import VideoSkillRuntime
 from .workflow_plans import (
-    SUPPORTED_WORKFLOW_MODES,
     UNAVAILABLE_WORKFLOW_CAPABILITIES,
     UNAVAILABLE_WORKFLOW_MODES,
+    WORKFLOW_ID_COMPILERS,
     compile_skill_workflow,
+    validate_agentic_workflow_plan,
+    validate_original_cuti_workflow_contract,
 )
 from .staged_planning import (
     append_phase,
     compile_initial_phase,
     copy_plan_with_appended_phase,
     effective_planning_mode,
+    failed_checkpoint_step_ids,
 )
 
 
@@ -43,11 +47,29 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
         workflow = self._workflows.get(workflow_id)
         if workflow is None:
             raise LookupError(f"workflow Skill is not installed: {workflow_id}")
+        validate_original_cuti_workflow_contract(workflow)
         return effective_planning_mode(workflow, workflow_id)
 
     def describe_workflows(self) -> list[dict[str, Any]]:
-        return [
-            {
+        result: list[dict[str, Any]] = []
+        for spec in self._workflows.values():
+            contract = WORKFLOW_ID_COMPILERS.get(spec.skill_name)
+            contract_error: str | None = None
+            try:
+                validate_original_cuti_workflow_contract(spec)
+            except BuildPlanValidationError as exc:
+                contract_error = str(exc)
+            compiler = (
+                contract[1]
+                if (
+                    contract is not None
+                    and contract[0] == spec.mode
+                    and contract_error is None
+                )
+                else None
+            )
+            available = compiler is not None
+            result.append({
                 "id": spec.skill_name,
                 "title": spec.title,
                 "mode": spec.mode,
@@ -58,17 +80,23 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
                 "skillDependencies": list(spec.skill_dependencies),
                 "source": "skill",
                 "pluginId": SKILL_WORKFLOW_PLUGIN_ID,
-                "available": spec.mode in SUPPORTED_WORKFLOW_MODES,
-                "unavailableReason": UNAVAILABLE_WORKFLOW_MODES.get(spec.mode) or (
-                    None if spec.mode in SUPPORTED_WORKFLOW_MODES
-                    else f"No installed compiler for workflow mode {spec.mode}"
+                "available": available,
+                "unavailableReason": UNAVAILABLE_WORKFLOW_MODES.get(spec.mode) or contract_error or (
+                    None if available
+                    else (
+                        f"No dedicated compiler for workflow {spec.skill_name} "
+                        f"with mode {spec.mode}"
+                    )
                 ),
                 "requiredCapabilities": list(spec.pipeline),
                 "missingCapabilities": list(
                     UNAVAILABLE_WORKFLOW_CAPABILITIES.get(spec.mode, [])
                 ),
-                "userSelectable": True,
-                "executionKind": "adapter",
+                "userSelectable": available,
+                "executionKind": (
+                    "dedicated_compiler" if available else "unavailable"
+                ),
+                "compiler": compiler.__name__ if compiler is not None else None,
                 "planning": {
                     "mode": spec.planning.mode,
                     "checkpoints": [
@@ -82,9 +110,8 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
                         for item in spec.planning.checkpoints
                     ],
                 },
-            }
-            for spec in self._workflows.values()
-        ]
+            })
+        return result
 
     async def compile_build_plan(
         self,
@@ -104,6 +131,7 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
         workflow = self._workflows.get(intent.workflow_id)
         if workflow is None:
             raise LookupError(f"workflow Skill is not installed: {intent.workflow_id}")
+        validate_original_cuti_workflow_contract(workflow)
         return compile_initial_phase(workflow=workflow, context=context, intent=intent)
 
     async def compile_phase(
@@ -116,6 +144,7 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
         workflow = self._workflows.get(plan.workflow_id)
         if workflow is None:
             raise LookupError(f"workflow Skill is not installed: {plan.workflow_id}")
+        validate_original_cuti_workflow_contract(workflow)
         full_plan = compile_skill_workflow(workflow, context, resolution.video_spec)
         added, next_checkpoint = append_phase(
             existing_plan=plan,
@@ -123,14 +152,18 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
             workflow=workflow,
             checkpoint_id=checkpoint.phase,
             proposed_steps=resolution.proposed_steps,
+            repair_step_ids=failed_checkpoint_step_ids(checkpoint),
         )
-        return copy_plan_with_appended_phase(
+        updated = copy_plan_with_appended_phase(
             plan,
             spec=resolution.video_spec,
             added_items=added,
             spec_revision_id=str(context.values["video_spec_revision_id"]),
             next_checkpoint=next_checkpoint,
         )
+        if effective_planning_mode(workflow, plan.workflow_id) == "agentic":
+            validate_agentic_workflow_plan(workflow, updated)
+        return updated
 
 async def load_workflow_skills(
     plugins: VideoPluginRegistry,

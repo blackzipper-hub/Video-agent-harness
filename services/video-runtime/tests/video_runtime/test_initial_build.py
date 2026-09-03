@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -11,8 +12,10 @@ from app.video_runtime.builtin_plugins.music_workflows import (
     LipsyncMusicVideoWorkflowPlugin,
     MusicVideoWorkflowPlugin,
 )
+from app.video_runtime.builtin_plugins.continuity_validator import ContinuityValidatorPlugin
 from app.video_runtime.models import (
     MediaArtifactVersion,
+    RebuildPlan,
     RebuildPlanItem,
     ValidationResult,
     VideoSpec,
@@ -22,8 +25,12 @@ from app.video_runtime.plugins import PluginContext
 from app.video_runtime.skill_workflows import load_workflow_skills
 
 
-async def video_runtime() -> VideoBuildRuntime:
-    runtime = VideoBuildRuntime()
+async def video_runtime(
+    *, max_parallel_generation_tasks: int | None = None,
+) -> VideoBuildRuntime:
+    runtime = VideoBuildRuntime(
+        max_parallel_generation_tasks=max_parallel_generation_tasks,
+    )
     await runtime.plugins.load_directories([
         Path(__file__).resolve().parents[2] / "plugins",
     ])
@@ -40,6 +47,13 @@ def video_spec() -> VideoSpec:
         "resolution": "1080p",
         "workflow_id": "cuti.seedance-story",
         "style_id": "cuti.cinematic",
+        "workflow_parameters": {
+            "scenes": [{
+                "id": "station",
+                "name": "Railway station",
+                "description": "A quiet night railway station with a clock and blue platform lights",
+            }],
+        },
         "characters": [{
             "id": "hero", "name": "Hero", "appearance": "short black hair",
             "clothing": "blue coat",
@@ -47,17 +61,17 @@ def video_spec() -> VideoSpec:
         "shots": [
             {
                 "id": "one", "order": 1, "duration_seconds": 5,
-                "beat": "arrives", "visual_prompt": "Hero arrives at a station",
+                "beat": "arrives", "visual_prompt": "0-5秒，主角抵达车站，镜头平稳推进。",
                 "narration": "他抵达车站。", "character_ids": ["hero"],
             },
             {
                 "id": "two", "order": 2, "duration_seconds": 5,
-                "beat": "waits", "visual_prompt": "Hero waits under the clock",
+                "beat": "waits", "visual_prompt": "0-5秒，主角在时钟下等待，灯光缓慢变化。",
                 "narration": "时间慢慢过去。", "character_ids": ["hero"],
             },
             {
                 "id": "three", "order": 3, "duration_seconds": 5,
-                "beat": "leaves", "visual_prompt": "Hero boards the train",
+                "beat": "leaves", "visual_prompt": "0-5秒，主角登上列车，镜头随动作收束。",
                 "narration": "列车终于到来。", "character_ids": ["hero"],
             },
         ],
@@ -135,16 +149,117 @@ class FakePlanExecutor:
         )
 
 
+class ConcurrencyProbeExecutor(FakePlanExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_group_steps = 0
+        self.max_active_group_steps = 0
+
+    async def execute_plan_step(
+        self, *, build, step, completed_artifacts, idempotency_key,
+        report_remote_operation=None,
+    ) -> MediaArtifactVersion:
+        if not step.execution_group:
+            return await super().execute_plan_step(
+                build=build,
+                step=step,
+                completed_artifacts=completed_artifacts,
+                idempotency_key=idempotency_key,
+                report_remote_operation=report_remote_operation,
+            )
+        self.active_group_steps += 1
+        self.max_active_group_steps = max(
+            self.max_active_group_steps,
+            self.active_group_steps,
+        )
+        try:
+            # Give sibling tasks a deterministic chance to enter the provider
+            # call. A serial executor can never observe more than one here.
+            await asyncio.sleep(0.02)
+            return await super().execute_plan_step(
+                build=build,
+                step=step,
+                completed_artifacts=completed_artifacts,
+                idempotency_key=idempotency_key,
+                report_remote_operation=report_remote_operation,
+            )
+        finally:
+            self.active_group_steps -= 1
+
+
+class FailOneParallelExecutor(FakePlanExecutor):
+    def __init__(self, failed_step_id: str) -> None:
+        super().__init__()
+        self.failed_step_id = failed_step_id
+
+    async def execute_plan_step(
+        self, *, build, step, completed_artifacts, idempotency_key,
+        report_remote_operation=None,
+    ) -> MediaArtifactVersion:
+        if step.execution_group:
+            await asyncio.sleep(0.02)
+        if step.step_id == self.failed_step_id:
+            self.calls.append(step.step_id)
+            raise RuntimeError("deterministic parallel test failure")
+        return await super().execute_plan_step(
+            build=build,
+            step=step,
+            completed_artifacts=completed_artifacts,
+            idempotency_key=idempotency_key,
+            report_remote_operation=report_remote_operation,
+        )
+
+
+class ContaminatedSceneExecutor(FakePlanExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.video_started = False
+
+    async def execute_plan_step(
+        self, *, build, step, completed_artifacts, idempotency_key,
+        report_remote_operation=None,
+    ) -> MediaArtifactVersion:
+        if step.output_artifact_type == "video_clip":
+            self.video_started = True
+        artifact = await super().execute_plan_step(
+            build=build,
+            step=step,
+            completed_artifacts=completed_artifacts,
+            idempotency_key=idempotency_key,
+            report_remote_operation=report_remote_operation,
+        )
+        if step.step_id == "scene-setting-reference":
+            artifact.metadata.update({
+                "final_prompt": step.parameters["prompt"] + " Add the product and cast.",
+                "resolved_generation_parameters": {
+                    **step.parameters,
+                    "images": ["https://media.test/product.png"],
+                },
+                "skill_prompt_applied": True,
+            })
+        return artifact
+
 class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
     async def test_music_workflow_uses_independent_music_timeline(self):
         spec = video_spec()
+        identity = MediaArtifactVersion(
+            id="identity-version-1",
+            artifact_id="source:identity",
+            project_id="project-1",
+            type="source_image",
+            uri="https://media.test/identity.png",
+        )
         spec = spec.model_copy(update={
             "workflow_id": "cuti.music-video",
             "providers": spec.providers.model_copy(update={"video": "minimax-h3"}),
+            "source_asset_ids": [identity.artifact_id],
             "audio": spec.audio.model_copy(update={"subtitles": False}),
         })
         plan = await MusicVideoWorkflowPlugin().compile_build_plan(
-            PluginContext(project_id="project-1", values={"base_project_version_id": "version-1"}),
+            PluginContext(project_id="project-1", values={
+                "base_project_version_id": "version-1",
+                "source_artifacts": {identity.artifact_id: identity},
+            }),
             spec,
         )
         ordered = topological_steps(plan.items)
@@ -154,7 +269,7 @@ class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("music-analysis", step_ids)
         self.assertIn("music-cut", step_ids)
         self.assertNotIn("research", step_ids)
-        self.assertNotIn("character-hero-reference", step_ids)
+        self.assertIn("character-hero-reference", step_ids)
         self.assertNotIn("look", step_ids)
         self.assertNotIn("shot-one-tail", step_ids)
         music = next(item for item in plan.items if item.step_id == "music")
@@ -165,10 +280,14 @@ class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
             and item.capability == "api.provider.generate"
         )
         self.assertEqual(mv_clip.parameters["model"], "minimax-h3")
-        self.assertEqual(mv_clip.parameters["prompt"], "Hero arrives at a station")
+        self.assertEqual(mv_clip.parameters["prompt"], spec.shots[0].visual_prompt)
         self.assertNotIn("@音频1", mv_clip.parameters["prompt"])
         self.assertFalse(mv_clip.parameters["generate_audio"])
         self.assertEqual(mv_clip.parameters["audio_reference_from_step"], "music-cut")
+        self.assertEqual(
+            mv_clip.parameters["reference_from_steps"],
+            ["character-hero-reference", "source-1"],
+        )
         mixed = next(item for item in plan.items if item.capability == "media.mix_audio")
         self.assertEqual(mixed.parameters["mode"], "replace")
         self.assertEqual(mixed.parameters["audio_step"], "music-cut")
@@ -213,6 +332,207 @@ class FakeRebuildExecutor:
 
 
 class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
+    def test_video_spec_requires_explicit_workflow_selection(self) -> None:
+        raw = video_spec().model_dump(mode="json")
+        raw.pop("workflow_id")
+        with self.assertRaisesRegex(ValueError, "workflow_id"):
+            VideoSpec.model_validate(raw)
+
+    async def test_scene_reference_isolation_fails_before_video_generation(self):
+        runtime = await video_runtime()
+        project, version = await runtime.create_project(
+            user_id="user", title="Scene isolation",
+        )
+        prompt = (
+            "Create exactly one unoccupied environment-only setting reference. "
+            "Render a single coherent wide architectural view."
+        )
+        plan = RebuildPlan(
+            project_id=project.id,
+            kind="initial",
+            base_project_version_id=version.id,
+            workflow_id="cuti-scenario-product-workflow",
+            items=[
+                RebuildPlanItem(
+                    step_id="scene-setting-reference",
+                    action="create",
+                    capability="atomic.image.generate",
+                    output_artifact_id="scene:main:reference",
+                    output_artifact_type="image",
+                    parameters={
+                        "prompt": prompt,
+                        "artifact_role": "scene_setting_reference",
+                    },
+                ),
+                RebuildPlanItem(
+                    step_id="validate-setting-references",
+                    action="validate",
+                    capability="cuti.continuity.validate",
+                    output_artifact_type="setting_reference_validation",
+                    depends_on=["scene-setting-reference"],
+                ),
+                RebuildPlanItem(
+                    step_id="shot-one-video",
+                    action="create",
+                    capability="atomic.video.generate",
+                    output_artifact_id="shot:one:clip",
+                    output_artifact_type="video_clip",
+                    depends_on=[
+                        "scene-setting-reference",
+                        "validate-setting-references",
+                    ],
+                    execution_group="scenario-product-segments",
+                    max_parallelism=2,
+                ),
+            ],
+        )
+        plan = await runtime.repo.save_plan(plan, "scene-isolation-plan")
+        build = await runtime.start_build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=version.id,
+            idempotency_key="scene-isolation-build",
+        )
+        validator = ContinuityValidatorPlugin()
+
+        async def validate(*, build_id, artifact):
+            return await validator.validate_artifact(
+                PluginContext(project_id=project.id, build_id=build_id), artifact,
+            )
+
+        runtime.validate_artifact = validate
+        executor = ContaminatedSceneExecutor()
+        with self.assertRaisesRegex(ValueError, "initial build validation failed"):
+            await runtime.execute_build(
+                project_id=project.id,
+                build_id=build.id,
+                executor=executor,
+            )
+        self.assertFalse(executor.video_started)
+        states = {
+            item.plan_step_id: item
+            for item in await runtime.repo.list_build_steps(project.id, build.id)
+        }
+        self.assertEqual(states["validate-setting-references"].status, "failed")
+        self.assertEqual(states["shot-one-video"].status, "pending")
+
+    async def test_declared_short_drama_segments_execute_in_parallel(self):
+        runtime = await video_runtime(max_parallel_generation_tasks=2)
+        project, version = await runtime.create_project(user_id="user", title="Parallel drama")
+        base = video_spec()
+        spec = base.model_copy(deep=True, update={
+            "workflow_id": "short-drama-workflow",
+            "target_duration_seconds": 45,
+            "shots": [
+                shot.model_copy(update={"duration_seconds": 15})
+                for shot in base.shots
+            ],
+            "audio": base.audio.model_copy(update={"subtitles": False}),
+            "providers": base.providers.model_copy(update={"video": "seedance-2.5"}),
+        })
+        plan = await runtime.plan_project(
+            project_id=project.id,
+            base_project_version_id=version.id,
+            video_spec=spec,
+            idempotency_key="parallel-drama-plan",
+        )
+        clips = [item for item in plan.items if item.output_artifact_type == "video_clip"]
+        self.assertEqual(len(clips), 3)
+        self.assertTrue(all(item.execution_group == "short-drama-segments" for item in clips))
+
+        build = await runtime.start_build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=version.id,
+            idempotency_key="parallel-drama-build",
+        )
+
+        async def validate(*, build_id, artifact):
+            return [ValidationResult(
+                project_id=project.id,
+                build_id=build_id,
+                artifact_version_id=artifact.id,
+                validator_id="test",
+                passed=True,
+            )]
+
+        runtime.validate_artifact = validate
+        executor = ConcurrencyProbeExecutor()
+        completed, committed = await runtime.execute_build(
+            project_id=project.id,
+            build_id=build.id,
+            executor=executor,
+        )
+        self.assertEqual(completed.status, "completed")
+        self.assertIsNotNone(committed)
+        # The Workflow declares all three clips independent, while the
+        # deployment-level Cuti safety cap limits live provider work to two.
+        self.assertEqual(executor.max_active_group_steps, 2)
+
+    async def test_parallel_failure_preserves_successful_segments_for_retry(self):
+        runtime = await video_runtime(max_parallel_generation_tasks=2)
+        project, version = await runtime.create_project(user_id="user", title="Recover drama")
+        base = video_spec()
+        spec = base.model_copy(deep=True, update={
+            "workflow_id": "short-drama-workflow",
+            "target_duration_seconds": 45,
+            "shots": [
+                shot.model_copy(update={"duration_seconds": 15})
+                for shot in base.shots
+            ],
+            "audio": base.audio.model_copy(update={"subtitles": False}),
+            "providers": base.providers.model_copy(update={"video": "seedance-2.5"}),
+        })
+        plan = await runtime.plan_project(
+            project_id=project.id,
+            base_project_version_id=version.id,
+            video_spec=spec,
+            idempotency_key="recover-parallel-plan",
+        )
+        build = await runtime.start_build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=version.id,
+            idempotency_key="recover-parallel-build",
+        )
+        with self.assertRaisesRegex(RuntimeError, "parallel test failure"):
+            await runtime.execute_build(
+                project_id=project.id,
+                build_id=build.id,
+                executor=FailOneParallelExecutor("shot-two-video"),
+            )
+        failed_states = {
+            item.plan_step_id: item
+            for item in await runtime.repo.list_build_steps(project.id, build.id)
+        }
+        self.assertEqual(failed_states["shot-one-video"].status, "completed")
+        self.assertEqual(failed_states["shot-two-video"].status, "failed")
+        self.assertEqual(failed_states["shot-three-video"].status, "completed")
+
+        await runtime.retry_failed_build(project_id=project.id, build_id=build.id)
+
+        async def validate(*, build_id, artifact):
+            return [ValidationResult(
+                project_id=project.id,
+                build_id=build_id,
+                artifact_version_id=artifact.id,
+                validator_id="test",
+                passed=True,
+            )]
+
+        runtime.validate_artifact = validate
+        retry_executor = FakePlanExecutor()
+        completed, committed = await runtime.execute_build(
+            project_id=project.id,
+            build_id=build.id,
+            executor=retry_executor,
+        )
+        self.assertEqual(completed.status, "completed")
+        self.assertIsNotNone(committed)
+        self.assertIn("shot-two-video", retry_executor.calls)
+        self.assertNotIn("shot-one-video", retry_executor.calls)
+        self.assertNotIn("shot-three-video", retry_executor.calls)
+
     async def test_failed_build_retry_preserves_completed_steps(self):
         runtime = await video_runtime()
         project, version = await runtime.create_project(user_id="user", title="Retry film")
@@ -237,6 +557,11 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         steps[1].remote_operation_id = "terminal-provider-job"
         steps[1].remote_provider = "fake-provider"
         await runtime.repo.update_build_step(steps[1])
+        steps[2].status = "running"
+        steps[2].attempt = 3
+        steps[2].remote_operation_id = "orphaned-provider-job"
+        steps[2].remote_provider = "fake-provider"
+        await runtime.repo.update_build_step(steps[2])
         build.status = "failed"
         build.error = steps[1].error
         await runtime.repo.update_build(build)
@@ -251,6 +576,10 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(states[1].error)
         self.assertIsNone(states[1].remote_operation_id)
         self.assertIsNone(states[1].remote_provider)
+        self.assertEqual(states[2].status, "pending")
+        self.assertEqual(states[2].attempt, 3)
+        self.assertEqual(states[2].remote_operation_id, "orphaned-provider-job")
+        self.assertEqual(states[2].remote_provider, "fake-provider")
 
     async def test_initial_plan_executes_and_commits_once(self):
         runtime = await video_runtime()
@@ -283,6 +612,9 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
             [item.skill_id for item in video_state.resolved_skills],
         )
         video_state.status = "waiting_external"
+        # Reconciliation must remain possible after local retry accounting has
+        # been exhausted; polling an existing job is not a new paid attempt.
+        video_state.attempt = 99
         video_state.remote_operation_id = "existing-provider-job"
         video_state.remote_provider = "fake-provider"
         await runtime.repo.update_build_step(video_state)

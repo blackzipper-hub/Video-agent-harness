@@ -185,7 +185,9 @@ class VideoSpec(BaseModel):
     target_duration_seconds: float = Field(gt=0, le=600)
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     resolution: str = Field(default="1080p", pattern=r"^[0-9]{3,4}p$")
-    workflow_id: str = "cuti.seedance-story"
+    # Workflow selection is an Agent/UI decision. Never silently route an
+    # omitted value into the legacy seedance-story compatibility compiler.
+    workflow_id: str
     style_id: str = "cuti.cinematic"
     activated_skill_ids: list[str] = Field(default_factory=list)
     source_asset_ids: list[str] = Field(default_factory=list)
@@ -229,6 +231,12 @@ class RebuildPlanItem(BaseModel):
     idempotency_key: str = ""
     estimated_cost: float = Field(default=0.0, ge=0)
     order: int | None = None
+    # Steps in the same execution group are independent and may run together.
+    # This is a durable plan contract rather than an executor-side guess: Cuti
+    # workflows differ materially here (for example, short-drama segments are
+    # parallel while Seedance continuation shots are deliberately serial).
+    execution_group: str | None = None
+    max_parallelism: int | None = Field(default=None, ge=1)
     reason: str = ""
     skill_ids: list[str] = Field(default_factory=list)
     resolved_skills: list[ResolvedSkillRef] = Field(default_factory=list)

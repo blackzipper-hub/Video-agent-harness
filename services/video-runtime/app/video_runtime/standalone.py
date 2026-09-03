@@ -2,6 +2,24 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# This entrypoint is the self-hosted Video Runtime. Imported Cuti environment
+# files often declare ENVIRONMENT=development but omit ACCOUNT_BACKEND, which
+# would otherwise make local Provider calls reach AWS AppConfig. Keep explicit
+# operator choices, while making the standalone default read provider keys from
+# its process environment.
+os.environ.setdefault("ACCOUNT_BACKEND", "env")
+# The standalone distribution is self-contained by default.  Requiring every
+# developer to remember STORAGE_BACKEND=local made successfully generated
+# artifacts point at /files while that route was never mounted.  Hosted/S3
+# deployments still override these values explicitly.
+os.environ.setdefault("STORAGE_BACKEND", "local")
+os.environ.setdefault("LOCAL_STORAGE_DIR", "./data/uploads")
+# Cuti's combined backend historically listened on 8000.  The extracted
+# Video Runtime listens on 8001 in the documented self-hosted profile, so its
+# local-storage URLs must point back to this service instead of the removed
+# legacy backend. Deployments on another origin can still override the value.
+os.environ.setdefault("PUBLIC_BASE_URL", "http://127.0.0.1:8001")
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -13,6 +31,7 @@ from .deepseek_bff import (
 )
 from .deepseek_client import DeepSeekHarnessClient
 from .checkpoint_coordinator import CheckpointCoordinator
+from .local_repository import LocalJsonVideoProjectRepository
 from .postgres_repository import PostgresVideoProjectRepository
 from .plugins.registry import configured_plugin_roots
 from .runtime import VideoBuildRuntime
@@ -24,13 +43,21 @@ from .skill_workflows import load_workflow_skills
 async def lifespan(_app: FastAPI):
     repository = None
     deepseek = None
-    build_runtime = VideoBuildRuntime()
     database_url = os.getenv("VIDEO_RUNTIME_DATABASE_URL", "").strip()
     if database_url:
         repository = await PostgresVideoProjectRepository.connect(
             database_url, os.getenv("VIDEO_RUNTIME_DATABASE_SCHEMA", "cuti_video_runtime"),
         )
-        build_runtime = VideoBuildRuntime(repository=repository)
+    elif os.getenv("VIDEO_RUNTIME_IN_MEMORY", "").strip().lower() not in {
+        "1", "true", "yes",
+    }:
+        repository = LocalJsonVideoProjectRepository(
+            os.getenv(
+                "VIDEO_RUNTIME_LOCAL_STATE_PATH",
+                "./data/video-runtime-state.json",
+            ),
+        )
+    build_runtime = VideoBuildRuntime(repository=repository)
     roots = configured_plugin_roots()
     if roots:
         await build_runtime.plugins.load_directories(roots)
@@ -66,7 +93,7 @@ async def lifespan(_app: FastAPI):
         set_deepseek_client(None)
         if deepseek is not None:
             await deepseek.close()
-        if repository is not None:
+        if repository is not None and callable(getattr(repository, "close", None)):
             await repository.close()
 
 

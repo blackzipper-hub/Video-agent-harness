@@ -248,6 +248,7 @@ class VideoBuildRuntime:
         plugins: VideoPluginRegistry | None = None,
         skill_runtime: VideoSkillRuntime | None = None,
         staged_planning_enabled: bool | None = None,
+        max_parallel_generation_tasks: int | None = None,
     ) -> None:
         self.repo = repository or InMemoryVideoProjectRepository()
         self.engine = engine or IncrementalBuildEngine()
@@ -259,6 +260,14 @@ class VideoBuildRuntime:
             else os.getenv("VIDEO_STAGED_PLANNING_ENABLED", "false").strip().lower()
             in {"1", "true", "yes"}
         )
+        # Keep the established Cuti deployment limit as the global safety cap;
+        # a Workflow may declare a stricter limit but may not exceed this one.
+        configured_parallelism = (
+            max_parallel_generation_tasks
+            if max_parallel_generation_tasks is not None
+            else int(os.getenv("DEEP_AGENT_V2_MAX_PARALLEL_GENERATION_TASKS", "2"))
+        )
+        self.max_parallel_generation_tasks = max(1, configured_parallelism)
         self._default_executor: BuildStepExecutor | None = None
         self._grant_signer: CapabilityGrantSigner | None = None
         self._build_tasks: dict[str, asyncio.Task] = {}
@@ -1510,6 +1519,124 @@ class VideoBuildRuntime:
                 await self.repo.update_build(current)
             raise
 
+    async def _execute_initial_create_step(
+        self,
+        *,
+        build: Build,
+        planned: RebuildPlanItem,
+        state: BuildStep,
+        completed: dict[str, MediaArtifactVersion],
+        executor: BuildStepExecutor,
+        retry_limit: int,
+    ) -> MediaArtifactVersion:
+        """Execute and durably stage one create step.
+
+        The method is deliberately unaware of scheduling.  The initial-build
+        scheduler can therefore run a declared independent group concurrently
+        while retaining the same retry, remote-job resume and idempotency
+        behavior used by a sequential step.
+        """
+        last_error: BaseException | None = None
+        # Reconciliation is not a new paid generation attempt. Even when the
+        # local attempt counter reached its retry limit before a process crash,
+        # a durable remote operation must still be polled and collected.
+        resume_existing_remote = bool(state.remote_operation_id)
+        attempts = (
+            range(1)
+            if resume_existing_remote
+            else range(state.attempt, retry_limit + 1)
+        )
+        for _attempt in attempts:
+            state.status = "running"
+            if not resume_existing_remote:
+                state.attempt += 1
+            state.started_at = state.started_at or now()
+            state.error = None
+            await self.repo.update_build_step(state)
+            try:
+                async def report_remote(operation_id: str, provider: str) -> None:
+                    state.remote_operation_id = operation_id
+                    state.remote_provider = provider
+                    state.status = "waiting_external"
+                    await self.repo.update_build_step(state)
+                    build.status = "waiting_external"
+                    build.message = f"Waiting for {provider} operation for {planned.step_id}"
+                    await self.repo.update_build(build)
+
+                effective_step = planned
+                if state.remote_operation_id:
+                    # A provider submission survived a Runtime restart. Feed the
+                    # durable operation id back into the provider bridge so it
+                    # reconciles/polls the existing job instead of charging for a
+                    # duplicate submission.
+                    effective_step = planned.model_copy(deep=True)
+                    effective_step.parameters["remote_operation_id"] = (
+                        state.remote_operation_id
+                    )
+
+                artifact = await executor.execute_plan_step(
+                    build=build,
+                    step=effective_step,
+                    completed_artifacts={
+                        dependency: completed[dependency]
+                        for dependency in planned.depends_on
+                        if dependency in completed
+                    },
+                    idempotency_key=(
+                        planned.idempotency_key
+                        or f"{build.idempotency_key}:{planned.step_id}"
+                    ),
+                    report_remote_operation=report_remote,
+                )
+                artifact.project_id = build.project_id
+                artifact.artifact_id = planned.output_artifact_id or artifact.artifact_id
+                artifact.type = planned.output_artifact_type or artifact.type
+                artifact.status = "draft"
+                artifact.metadata = {
+                    **artifact.metadata,
+                    "build_id": build.id,
+                    "plan_step_id": planned.step_id,
+                    "capability": planned.capability,
+                    "rebuild_capability": planned.capability,
+                    "generation_parameters": dict(planned.parameters),
+                    "estimated_cost": planned.estimated_cost,
+                    "resolved_skills": [
+                        value.model_dump(mode="json")
+                        for value in planned.resolved_skills
+                    ],
+                    "skill_context": (
+                        planned.skill_context.model_dump(mode="json")
+                        if planned.skill_context is not None
+                        else None
+                    ),
+                }
+                if artifact.type == "video_spec" and isinstance(
+                    planned.parameters.get("content"), dict,
+                ):
+                    artifact.metadata["content"] = deepcopy(
+                        planned.parameters["content"],
+                    )
+                artifact = await self.repo.stage_artifact(artifact)
+                completed[planned.step_id] = artifact
+                state.status = "completed"
+                state.result_artifact_version_id = artifact.id
+                state.remote_operation_id = str(
+                    artifact.provenance.get("remote_operation_id") or ""
+                ) or None
+                state.completed_at = now()
+                await self.repo.update_build_step(state)
+                return artifact
+            except BaseException as exc:
+                last_error = exc
+                state.status = "failed"
+                state.error = str(exc) or repr(exc)
+                await self.repo.update_build_step(state)
+        if last_error is None:
+            raise RuntimeError(
+                f"retry limit exhausted for build step {planned.step_id}"
+            )
+        raise last_error
+
     async def _execute_initial_build(
         self,
         *,
@@ -1539,6 +1666,7 @@ class VideoBuildRuntime:
         await self.repo.update_build(build)
         validations: list[ValidationResult] = []
         retry_limit = plan.video_spec.automation.max_artifact_retries if plan.video_spec else 1
+        processed_parallel_groups: set[str] = set()
         for index, planned in enumerate(ordered):
             current = await self.repo.get_build(build.project_id, build.id)
             if current.status == "cancelled":
@@ -1558,6 +1686,9 @@ class VideoBuildRuntime:
                     ))
                 validations.extend(step_results)
                 if not step_results:
+                    state.status = "failed"
+                    state.error = "No validator handled the required artifacts"
+                    await self.repo.update_build_step(state)
                     raise ValueError("initial build requires at least one validator result")
                 failed_results = [item for item in step_results if not item.passed]
                 if failed_results:
@@ -1574,6 +1705,13 @@ class VideoBuildRuntime:
                         item.phase == "semantic_validation" for item in prior_checkpoints
                     )
                     if plan.schema_version != 2 or not semantic_failure or repaired_before:
+                        state.status = "failed"
+                        state.error = "; ".join(
+                            issue
+                            for result in failed_results
+                            for issue in result.issues
+                        ) or "Artifact validation failed"
+                        await self.repo.update_build_step(state)
                         raise ValueError("initial build validation failed")
                     if not plan.video_spec_revision_id:
                         raise ValueError("staged build plan has no VideoSpec revision")
@@ -1591,6 +1729,11 @@ class VideoBuildRuntime:
                     state.completed_at = now()
                     state.error = "Semantic validation requested one repair pass"
                     await self.repo.update_build_step(state)
+                    issues_by_artifact: dict[str, list[str]] = {}
+                    for result in failed_results:
+                        issues_by_artifact.setdefault(
+                            result.artifact_version_id, [],
+                        ).extend(result.issues)
                     repair = PlanCheckpoint(
                         project_id=build.project_id,
                         build_id=build.id,
@@ -1604,11 +1747,7 @@ class VideoBuildRuntime:
                         artifact_version_ids=[item.id for item in targets],
                         artifact_summaries=[_checkpoint_artifact_summary(
                             item,
-                            issues=[
-                                issue
-                                for result in failed_results
-                                for issue in result.issues
-                            ],
+                            issues=issues_by_artifact.get(item.id, []),
                         ) for item in targets],
                         resolved_sections=list(spec_revision.resolved_sections),
                         unresolved_sections=["semantic_repair"],
@@ -1635,103 +1774,95 @@ class VideoBuildRuntime:
                 state.completed_at = now()
                 await self.repo.update_build_step(state)
             else:
-                last_error: BaseException | None = None
-                for _attempt in range(state.attempt, retry_limit + 1):
-                    state.status = "running"
-                    state.attempt += 1
-                    state.started_at = state.started_at or now()
-                    state.error = None
-                    await self.repo.update_build_step(state)
-                    try:
-                        async def report_remote(operation_id: str, provider: str) -> None:
-                            state.remote_operation_id = operation_id
-                            state.remote_provider = provider
-                            state.status = "waiting_external"
-                            await self.repo.update_build_step(state)
-                            build.status = "waiting_external"
-                            build.message = f"Waiting for {provider} operation for {planned.step_id}"
-                            await self.repo.update_build(build)
+                group_name = planned.execution_group
+                if group_name and group_name not in processed_parallel_groups:
+                    grouped = [
+                        candidate for candidate in ordered
+                        if candidate.execution_group == group_name
+                    ]
+                    group_ids = {candidate.step_id for candidate in grouped}
+                    invalid_dependencies = sorted({
+                        dependency
+                        for candidate in grouped
+                        for dependency in candidate.depends_on
+                        if dependency in group_ids
+                    })
+                    if invalid_dependencies:
+                        raise ValueError(
+                            f"parallel execution group {group_name!r} contains internal "
+                            "dependencies: " + ", ".join(invalid_dependencies)
+                        )
+                    missing_dependencies = sorted({
+                        dependency
+                        for candidate in grouped
+                        for dependency in candidate.depends_on
+                        if (
+                            dependency not in persisted_steps
+                            or persisted_steps[dependency].status != "completed"
+                        )
+                    })
+                    if missing_dependencies:
+                        raise ValueError(
+                            f"parallel execution group {group_name!r} started before its "
+                            "dependencies completed: " + ", ".join(missing_dependencies)
+                        )
+                    limits = {
+                        candidate.max_parallelism
+                        for candidate in grouped
+                        if candidate.max_parallelism is not None
+                    }
+                    if len(limits) > 1:
+                        raise ValueError(
+                            f"parallel execution group {group_name!r} has inconsistent limits"
+                        )
+                    limit = min(
+                        next(iter(limits), len(grouped)),
+                        self.max_parallel_generation_tasks,
+                    )
+                    semaphore = asyncio.Semaphore(max(1, limit))
 
-                        effective_step = planned
-                        if state.remote_operation_id:
-                            # A provider submission survived a Runtime restart. Feed the
-                            # durable operation id back into the provider bridge so it
-                            # reconciles/polls the existing job instead of charging for a
-                            # duplicate submission.
-                            effective_step = planned.model_copy(deep=True)
-                            effective_step.parameters["remote_operation_id"] = (
-                                state.remote_operation_id
+                    async def run_group_step(
+                        candidate: RebuildPlanItem,
+                    ) -> MediaArtifactVersion | None:
+                        candidate_state = persisted_steps[candidate.step_id]
+                        if candidate_state.status == "completed":
+                            return completed.get(candidate.step_id)
+                        async with semaphore:
+                            return await self._execute_initial_create_step(
+                                build=build,
+                                planned=candidate,
+                                state=candidate_state,
+                                completed=completed,
+                                executor=executor,
+                                retry_limit=retry_limit,
                             )
 
-                        artifact = await executor.execute_plan_step(
-                            build=build,
-                            step=effective_step,
-                            completed_artifacts={
-                                dependency: completed[dependency]
-                                for dependency in planned.depends_on
-                                if dependency in completed
-                            },
-                            idempotency_key=(
-                                planned.idempotency_key
-                                or f"{build.idempotency_key}:{planned.step_id}"
-                            ),
-                            report_remote_operation=report_remote,
-                        )
-                        build.status = "running"
-                        artifact.project_id = build.project_id
-                        artifact.artifact_id = planned.output_artifact_id or artifact.artifact_id
-                        artifact.type = planned.output_artifact_type or artifact.type
-                        artifact.status = "draft"
-                        artifact.metadata = {
-                            **artifact.metadata,
-                            "build_id": build.id,
-                            "plan_step_id": planned.step_id,
-                            "capability": planned.capability,
-                            "rebuild_capability": planned.capability,
-                            "generation_parameters": dict(planned.parameters),
-                            "estimated_cost": planned.estimated_cost,
-                            "resolved_skills": [
-                                value.model_dump(mode="json")
-                                for value in planned.resolved_skills
-                            ],
-                            "skill_context": (
-                                planned.skill_context.model_dump(mode="json")
-                                if planned.skill_context is not None
-                                else None
-                            ),
-                        }
-                        if artifact.type == "video_spec" and isinstance(
-                            planned.parameters.get("content"), dict,
-                        ):
-                            artifact.metadata["content"] = deepcopy(
-                                planned.parameters["content"],
-                            )
-                        artifact = await self.repo.stage_artifact(artifact)
-                        completed[planned.step_id] = artifact
-                        state.status = "completed"
-                        state.result_artifact_version_id = artifact.id
-                        state.remote_operation_id = str(
-                            artifact.provenance.get("remote_operation_id") or ""
-                        ) or None
-                        state.completed_at = now()
-                        await self.repo.update_build_step(state)
-                        build.actual_cost = round(
-                            sum(
-                                candidate.estimated_cost
-                                for candidate in ordered
-                                if persisted_steps[candidate.step_id].status == "completed"
-                            ),
-                            6,
-                        )
-                        last_error = None
-                        break
-                    except BaseException as exc:
-                        last_error = exc
-                        state.status = "failed"
-                        state.error = str(exc)
-                        await self.repo.update_build_step(state)
-                if last_error is not None:
-                    raise last_error
+                    results = await asyncio.gather(
+                        *(run_group_step(candidate) for candidate in grouped),
+                        return_exceptions=True,
+                    )
+                    processed_parallel_groups.add(group_name)
+                    failures = [result for result in results if isinstance(result, BaseException)]
+                    if failures:
+                        raise failures[0]
+                elif not group_name:
+                    await self._execute_initial_create_step(
+                        build=build,
+                        planned=planned,
+                        state=state,
+                        completed=completed,
+                        executor=executor,
+                        retry_limit=retry_limit,
+                    )
+                build.status = "running"
+                build.actual_cost = round(
+                    sum(
+                        candidate.estimated_cost
+                        for candidate in ordered
+                        if persisted_steps[candidate.step_id].status == "completed"
+                    ),
+                    6,
+                )
 
             build.progress = (index + 1) / max(1, len(ordered) + 1)
             build.message = f"Completed {index + 1} of {len(ordered)} build steps"

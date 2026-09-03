@@ -239,6 +239,8 @@ export interface WorkflowSummary {
   missingCapabilities: string[]
   userSelectable: boolean
   executionKind: string
+  /** Exact Runtime compiler selected for this Workflow; absent only when unavailable. */
+  compiler?: string | null
   entrypoints: string[]
 }
 
@@ -247,6 +249,12 @@ export interface WorkflowDetail extends WorkflowSummary {
   pipeline: string[]
   skillDependencies: string[]
   instructions: string
+  /** Optional Skill whose original instructions define this plugin Workflow alias. */
+  instructionSkillId?: string
+  /** Explicit plugin-only extension appended after the source Skill instructions. */
+  instructionAppendix?: string
+  /** Skill id that must be passed to loadSkillResource for every listed path. */
+  resourceOwnerSkillId: string
   resources: string[]
   resourceContents: Array<{ path: string; content: string }>
 }
@@ -256,6 +264,8 @@ export interface SkillDetail {
   description: string
   kind: string
   instructions: string
+  /** Skill id that must be passed to loadSkillResource for every listed path. */
+  resourceOwnerSkillId: string
   resources: string[]
   resourceContents: Array<{ path: string; content: string }>
 }

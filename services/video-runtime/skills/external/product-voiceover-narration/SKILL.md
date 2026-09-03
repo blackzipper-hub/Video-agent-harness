@@ -18,6 +18,10 @@ metadata:
       - shot.video.generate
       - video.generate
       - video_gen.generate
+    artifact_types:
+      - script
+      - storyboard
+      - video_clip
   hooks: [before_stage, after_stage]
   narration:
     category: product_native_voiceover

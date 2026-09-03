@@ -9,6 +9,7 @@ from app.orchestration.workflow_compiler.registry import WorkflowSpec
 
 from .initial_build import BuildPlanValidationError, topological_steps
 from .models import (
+    PlanCheckpoint,
     PlanCheckpointDefinition,
     ProjectIntent,
     RebuildPlan,
@@ -18,13 +19,52 @@ from .models import (
 from .plugins import PluginContext
 
 
-MUSIC_MODES = {"mv", "seedance_mv"}
-PRODUCT_MODES = {
-    "product_ad_video", "cuti_product_workflow",
-    "cuti_scenario_product_workflow", "libtv_product_workflow",
+# Staged planning is bound to the authoritative Workflow identity, just like
+# the final DAG compiler.  A mode is a compatibility/contract label, not a
+# generic implementation selector: a copied or misspelled Workflow must never
+# inherit Cuti's source-analysis phase merely by declaring ``mode: mv`` (or any
+# other known mode).
+WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
+    "workflow-keyframe-pipeline": ("keyframe_pipeline", "story"),
+    "workflow-direct-video": ("direct_video", "direct"),
+    "workflow-short-drama": ("short_drama", "story"),
+    "seedance2": ("seedance2", "direct"),
+    "mv": ("mv", "music_suno"),
+    "seedance-mv": ("seedance_mv", "music_seedance"),
+    "short-drama-workflow": ("short_drama_workflow", "story"),
+    "product-ad-video": ("product_ad_video", "product_ad"),
+    "cuti-product-workflow": ("cuti_product_workflow", "product_cuti"),
+    "cuti-scenario-product-workflow": (
+        "cuti_scenario_product_workflow", "product_scenario",
+    ),
+    "libtv-product-workflow": ("libtv_product_workflow", "product_libtv"),
+    # Dedicated plugin aliases.  They deliberately reuse the original Cuti
+    # $mv planning contract but keep their own final plugin compilers.
+    "cuti.music-video": ("mv", "music_suno"),
+    "cuti.lipsync-music-video": ("mv", "music_suno"),
+    # Hidden compatibility Workflow for projects created before migration.
+    "cuti.seedance-story": ("keyframe_pipeline", "story"),
 }
-DIRECT_MODES = {"direct_video", "seedance2"}
-STORY_MODES = {"keyframe_pipeline", "short_drama", "short_drama_workflow"}
+
+
+def _planning_family(workflow: WorkflowSpec | None, workflow_id: str) -> str:
+    contract = WORKFLOW_PLANNING_CONTRACTS.get(workflow_id)
+    if contract is None:
+        raise BuildPlanValidationError(
+            f"workflow {workflow_id} has no dedicated staged-planning contract"
+        )
+    expected_mode, family = contract
+    if workflow is not None:
+        if workflow.skill_name != workflow_id:
+            raise BuildPlanValidationError(
+                f"staged-planning workflow identity mismatch: {workflow.skill_name} != {workflow_id}"
+            )
+        if workflow.mode != expected_mode:
+            raise BuildPlanValidationError(
+                f"workflow {workflow_id} declares mode {workflow.mode}, but its dedicated "
+                f"staged-planning contract requires {expected_mode}"
+            )
+    return family
 
 
 def _remap_step_references(value, remap: dict[str, str]):
@@ -52,11 +92,7 @@ def effective_planning_mode(workflow: WorkflowSpec | None, workflow_id: str) -> 
 
 
 def initial_checkpoint(workflow: WorkflowSpec | None, workflow_id: str) -> PlanCheckpointDefinition:
-    mode = workflow.mode if workflow is not None else {
-        "cuti.seedance-story": "keyframe_pipeline",
-        "cuti.music-video": "seedance_mv",
-        "cuti.lipsync-music-video": "seedance_mv",
-    }.get(workflow_id, "direct_video")
+    family = _planning_family(workflow, workflow_id)
     planning_mode = effective_planning_mode(workflow, workflow_id)
     if workflow is not None and workflow.planning.checkpoints:
         declared = workflow.planning.checkpoints[0]
@@ -69,7 +105,7 @@ def initial_checkpoint(workflow: WorkflowSpec | None, workflow_id: str) -> PlanC
             planner_instruction=declared.instruction,
             planning_mode="agentic" if planning_mode == "agentic" else "staged",
         )
-    if mode in MUSIC_MODES:
+    if family in {"music_suno", "music_seedance"}:
         return PlanCheckpointDefinition(
             id="music_ready", phase="music_analysis", next_phase="visual_production",
             required_artifact_types=["audiomap", "audio_cut"],
@@ -79,24 +115,51 @@ def initial_checkpoint(workflow: WorkflowSpec | None, workflow_id: str) -> PlanC
                 "complete VideoSpec. Do not invent timing that conflicts with the artifacts."
             ),
         )
-    if mode in PRODUCT_MODES:
+    if family.startswith("product_"):
+        if family == "product_scenario":
+            instruction = (
+                "Use the real product images and analysis to write one causal product story. "
+                "Return complete 15-second shots and set workflow_parameters.primary_selling_point "
+                "plus workflow_parameters.segment_proofs (one exact proof objective per shot). "
+                "Each shot prompt must cover 0-15s densely in Chinese; use native synchronized "
+                "dialogue/audio and do not add TTS, BGM, subtitles, keyframes, or Director Skills."
+            )
+        elif family == "product_ad":
+            instruction = (
+                "Use the real product still and analysis to create a polished product-anchored "
+                "I2V commercial. Preserve identity and supplied brand copy; do not invent claims."
+            )
+        elif family == "product_cuti":
+            instruction = (
+                "Use the real product analysis and apply the loaded helper Skills in this exact "
+                "order: product-feature-demo-script, product-component-exploded-view when "
+                "applicable, then product-voiceover-narration. Return complete independent "
+                "15-second segments. Each Seedance prompt must be Chinese and explicitly cover "
+                "0-15 seconds. Include native narration, or record the user's explicit "
+                "workflow_parameters.narration_mode=music_only decision. Do not add TTS, "
+                "keyframes, tail-frame chaining, or a second Director."
+            )
+        else:
+            instruction = (
+                "Inspect the actual product source artifacts and create shots that preserve "
+                "product identity and verified features."
+            )
         return PlanCheckpointDefinition(
             id="product_ready", phase="source_analysis", next_phase="visual_production",
             required_artifact_types=["product_analysis", "source_image"],
             resolves=["characters", "shots", "product_constraints"],
-            planner_instruction=(
-                "Inspect the actual product source artifacts and create shots that preserve "
-                "product identity and verified features."
-            ),
+            planner_instruction=instruction,
         )
-    if mode in STORY_MODES:
+    if family == "story":
         return PlanCheckpointDefinition(
             id="story_ready", phase="story_intent", next_phase="reference_production",
             required_artifact_types=["story_draft"],
-            resolves=["characters", "shots", "audio"],
+            resolves=["characters", "scenes", "shots", "audio"],
             planner_instruction=(
                 "Turn the intent into a complete story VideoSpec. Lock character identity, "
-                "scene continuity, shot order, and durations before reference generation."
+                "scene continuity, shot order, and durations before reference generation. "
+                "Put every recurring location in workflow_parameters.scenes with a stable id, "
+                "name, and visual description so the Runtime never invents a generic setting."
             ),
         )
     return PlanCheckpointDefinition(
@@ -135,6 +198,11 @@ def compile_initial_phase(
         artifact_version_id: str = "",
         cost: float = 0,
     ) -> str:
+        merged_parameters = dict(parameters or {})
+        if capability and workflow is not None:
+            for key, value in workflow.parameters.items():
+                merged_parameters.setdefault(key, value)
+            merged_parameters.setdefault("activated_workflow", workflow.skill_name)
         items.append(RebuildPlanItem(
             step_id=step_id,
             artifact_version_id=artifact_version_id,
@@ -142,7 +210,7 @@ def compile_initial_phase(
             output_artifact_type=artifact_type,
             action=action,
             capability=capability,
-            parameters=parameters or {},
+            parameters=merged_parameters,
             depends_on=depends_on or [],
             estimated_cost=cost,
             order=len(items) + 1,
@@ -165,11 +233,8 @@ def compile_initial_phase(
         )
 
     checkpoint = initial_checkpoint(workflow, intent.workflow_id)
-    mode = workflow.mode if workflow is not None else {
-        "cuti.music-video": "seedance_mv",
-        "cuti.lipsync-music-video": "seedance_mv",
-    }.get(intent.workflow_id, "")
-    if mode in MUSIC_MODES:
+    family = _planning_family(workflow, intent.workflow_id)
+    if family in {"music_suno", "music_seedance"}:
         audio_sources = [
             source_steps[logical_id]
             for logical_id in intent.source_asset_ids
@@ -183,18 +248,30 @@ def compile_initial_phase(
                 or intent.workflow_parameters.get("bgm_prompt")
                 or intent.brief
             ).strip()
-            music = add(
-                "music", "audio_bgm", "suno.generate",
-                parameters={
-                    "prompt": prompt,
-                    "title": intent.title,
-                    **{
-                        key: value for key, value in intent.workflow_parameters.items()
-                        if key in {"tags", "lyrics", "custom_mode", "instrumental", "vocal_gender"}
+            if family == "music_seedance":
+                music = add(
+                    "music", "audio_bgm", "atomic.music.generate",
+                    parameters={
+                        "prompt": prompt,
+                        "duration": intent.target_duration_seconds,
+                        "target_duration": intent.target_duration_seconds,
+                        "model": intent.providers.music,
                     },
-                },
-                depends_on=[intent_step], cost=0.10,
-            )
+                    depends_on=[intent_step], cost=0.10,
+                )
+            else:
+                music = add(
+                    "music", "audio_bgm", "suno.generate",
+                    parameters={
+                        "prompt": prompt,
+                        "title": intent.title,
+                        **{
+                            key: value for key, value in intent.workflow_parameters.items()
+                            if key in {"tags", "lyrics", "custom_mode", "instrumental", "vocal_gender"}
+                        },
+                    },
+                    depends_on=[intent_step], cost=0.10,
+                )
         analysis = add(
             "music-analysis", "audiomap", "media.audio_analyze",
             parameters={
@@ -204,16 +281,27 @@ def compile_initial_phase(
             },
             depends_on=[music],
         )
-        add(
-            "music-cut", "audio_cut", "media.audio_cut",
-            parameters={
-                "audio_step": music,
-                "analysis_step": analysis,
-                "duration": intent.target_duration_seconds,
-            },
-            depends_on=[music, analysis],
-        )
-    elif mode in PRODUCT_MODES:
+        if family == "music_seedance":
+            add(
+                "music-window", "audio_cut", "media.audio.trim",
+                parameters={
+                    "audio_step": music,
+                    "start": float(intent.workflow_parameters.get("start_sec", 0)),
+                    "duration": intent.target_duration_seconds,
+                },
+                depends_on=[music, analysis],
+            )
+        else:
+            add(
+                "music-cut", "audio_cut", "media.audio_cut",
+                parameters={
+                    "audio_step": music,
+                    "analysis_step": analysis,
+                    "duration": intent.target_duration_seconds,
+                },
+                depends_on=[music, analysis],
+            )
+    elif family.startswith("product_"):
         image_sources = [
             source_steps[logical_id]
             for logical_id in intent.source_asset_ids
@@ -221,19 +309,29 @@ def compile_initial_phase(
         ]
         if not image_sources:
             raise BuildPlanValidationError("product workflows require a source image")
+        if family == "product_scenario":
+            product_instruction = (
+                "From the user's brief, product category, visible design, likely audience, and "
+                "credible use scenarios, generate candidate consumer benefits. Choose one benefit "
+                "with strong dramatic potential and describe a visible cause-and-effect proof. "
+                "Do not invent precise specifications, measurements, prices, certifications, "
+                "awards, or competitor comparisons."
+            )
+        else:
+            product_instruction = (
+                "Extract only visually supported product identity, features, branding, "
+                "materials, and constraints. Mark unknown claims as unknown."
+            )
         add(
             "product-analysis", "product_analysis", "atomic.text.generate",
             parameters={
                 "objective": intent.brief,
                 "source_artifact_ids": list(intent.source_asset_ids),
-                "instruction": (
-                    "Extract only visually supported product identity, features, branding, "
-                    "materials, and constraints. Mark unknown claims as unknown."
-                ),
+                "instruction": product_instruction,
             },
             depends_on=[intent_step, *image_sources],
         )
-    elif mode in STORY_MODES:
+    elif family == "story":
         add(
             "story-draft", "story_draft", "atomic.text.generate",
             parameters={
@@ -299,22 +397,46 @@ def append_phase(
     workflow: WorkflowSpec | None,
     checkpoint_id: str,
     proposed_steps: Iterable[RebuildPlanItem] = (),
+    repair_step_ids: Iterable[str] = (),
 ) -> tuple[list[RebuildPlanItem], PlanCheckpointDefinition | None]:
     """Select the next safe phase from a complete compiler result."""
     existing_ids = {item.step_id for item in existing_plan.items}
     if checkpoint_id == "semantic_validation":
-        immutable_types = {
-            "project_intent", "video_spec", "script", "characters", "storyboard",
-            "outline", "scenes", "shots", "source_image", "source_audio",
-            "source_video", "audiomap", "audio_cut",
-        }
-        candidates = [
-            item.model_copy(deep=True) for item in full_plan.items
-            if (
-                item.action == "validate"
-                or (item.action == "create" and item.output_artifact_type not in immutable_types)
-            )
-        ]
+        requested = {value for value in repair_step_ids if value}
+        if requested:
+            full_ids = {item.step_id for item in full_plan.items}
+            unknown = sorted(requested - full_ids)
+            if unknown:
+                raise BuildPlanValidationError(
+                    "semantic repair references unknown steps: " + ", ".join(unknown)
+                )
+            affected = set(requested)
+            changed = True
+            while changed:
+                changed = False
+                for item in full_plan.items:
+                    if item.step_id not in affected and set(item.depends_on) & affected:
+                        affected.add(item.step_id)
+                        changed = True
+            candidates = [
+                item.model_copy(deep=True) for item in full_plan.items
+                if item.step_id in affected and item.action in {"create", "validate"}
+            ]
+        else:
+            # Compatibility fallback for old checkpoints that predate
+            # per-artifact issue attribution.
+            immutable_types = {
+                "project_intent", "video_spec", "script", "characters", "storyboard",
+                "outline", "scenes", "shots", "source_image", "source_audio",
+                "source_video", "audiomap", "audio_cut",
+            }
+            candidates = [
+                item.model_copy(deep=True) for item in full_plan.items
+                if (
+                    item.action == "validate"
+                    or (item.action == "create" and item.output_artifact_type not in immutable_types)
+                )
+            ]
         remap = {item.step_id: f"{item.step_id}-repair-1" for item in candidates}
         for item in candidates:
             original_id = item.step_id
@@ -368,17 +490,14 @@ def append_phase(
                 item for item in remaining
                 if item.step_id in {"spec", "script", "characters", "storyboard", "outline", "scenes", "shots", "narration", "bgm"}
                 or (item.step_id.startswith("character-") and item.step_id.endswith("-reference"))
+                or (item.step_id.startswith("scene-") and item.step_id.endswith("-reference"))
             ]
         elif future_phase == "keyframe_production":
-            # The original Cuti continuity graph feeds each clip's real tail into
-            # the next shot's keyframe. Producing every keyframe up front would
-            # silently remove that contract, so this semantic checkpoint uses the
-            # first real keyframe as the visual anchor. Remaining keyframes stay in
-            # the deterministic video phase, where their tail dependencies exist.
-            first_keyframe = next((
+            # Cuti's keyframe workflow completes the full keyframe stage before
+            # inspecting those real images and planning video motion.
+            selected = [
                 item for item in remaining if item.output_artifact_type == "keyframe"
-            ), None)
-            selected = [first_keyframe] if first_keyframe is not None else []
+            ]
         else:
             selected = remaining
     else:
@@ -392,6 +511,17 @@ def append_phase(
             )
     topological_steps([*existing_plan.items, *selected])
     return selected, next_checkpoint
+
+
+def failed_checkpoint_step_ids(checkpoint: PlanCheckpoint) -> list[str]:
+    """Return only plan steps whose artifacts carry validation issues."""
+    return list(dict.fromkeys(
+        str(metadata.get("plan_step_id"))
+        for summary in checkpoint.artifact_summaries
+        if summary.get("issues")
+        for metadata in [summary.get("metadata") or {}]
+        if metadata.get("plan_step_id")
+    ))
 
 
 def completed_spec_revision_sections(spec: VideoSpec) -> list[str]:

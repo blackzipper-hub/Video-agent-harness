@@ -20,6 +20,7 @@ class DeepSeekHarnessClientTest(unittest.IsolatedAsyncioTestCase):
             seen.append(body)
             values = {
                 "session.create": {"sessionId": "session-1"},
+                "session.list": {"items": [{"sessionId": "session-1"}]},
                 "session.prompt": {"accepted": True},
                 "session.history": {"events": [], "hasMore": False},
                 "session.cancel": {"accepted": True},
@@ -36,12 +37,16 @@ class DeepSeekHarnessClientTest(unittest.IsolatedAsyncioTestCase):
         )
         client = DeepSeekHarnessClient("http://deepseek.test", client=http)
         self.assertEqual(await client.create_session(), "session-1")
+        self.assertEqual(
+            await client.list_sessions(),
+            [{"sessionId": "session-1"}],
+        )
         await client.prompt("session-1", "change shot three")
         self.assertEqual((await client.history("session-1"))["events"], [])
         await client.cancel("session-1")
         self.assertEqual(
             [item["method"] for item in seen],
-            ["session.create", "session.prompt", "session.history", "session.cancel"],
+            ["session.create", "session.list", "session.prompt", "session.history", "session.cancel"],
         )
         await http.aclose()
 

@@ -920,6 +920,7 @@ export default function DeepAgentWorkspacePage() {
 
   const artifactsArea = state.snapshot ? (
     <DeepAgentArtifacts
+      key={state.snapshot.run.project_id}
       snapshot={state.snapshot}
       onSelectArtifact={id => void workspace.selectArtifact(id)}
       onExtractFrame={options => workspace.extractFrame(options)}

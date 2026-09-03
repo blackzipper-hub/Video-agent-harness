@@ -6,6 +6,8 @@
 
 Schema version 2 Build 使用只追加的分阶段计划。Runtime 持久化 `ProjectIntent`、`VideoSpecRevision`、`BuildPlanRevision` 和语义检查点，但绝不使用 LLM 进行规划；真实媒体影响下一步创作时，由 BFF 投递器唤醒绑定的 DeepSeek Session。
 
+彼此独立的 Provider Step 可以在 BuildPlan 中声明持久化的 `execution_group` 与 `max_parallelism`。Runtime 会并发调度该组，同时服从部署级 `DEEP_AGENT_V2_MAX_PARALLEL_GENERATION_TASKS` 上限（默认 `2`）；依赖、重试、远程任务 ID、取消和草稿 Artifact 提交语义与串行 Step 保持一致。
+
 ## Model Experience
 
 ### Runtime 服务

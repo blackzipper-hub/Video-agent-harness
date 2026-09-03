@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.orchestration.workflow_compiler.registry import WorkflowSpec
 from app.video_runtime.models import (
     CheckpointResolution, MediaArtifactVersion, ProjectIntent, RebuildPlan,
     RebuildPlanItem, ValidationResult,
@@ -14,7 +15,12 @@ from app.video_runtime.repository import PlanRevisionConflict
 from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator, checkpoint_prompt
 from app.video_runtime.models import PlanCheckpoint
 from app.video_runtime.runtime import _checkpoint_artifact_summary
-from app.video_runtime.staged_planning import append_phase
+from app.video_runtime.staged_planning import (
+    append_phase,
+    failed_checkpoint_step_ids,
+    initial_checkpoint,
+)
+from app.video_runtime.initial_build import BuildPlanValidationError
 
 from test_initial_build import FakePlanExecutor, video_runtime, video_spec
 
@@ -46,6 +52,37 @@ class _DeepSeek:
 
 
 class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    def test_unknown_plugin_has_no_implicit_direct_video_phase(self) -> None:
+        with self.assertRaisesRegex(
+            BuildPlanValidationError,
+            "no dedicated staged-planning contract",
+        ):
+            initial_checkpoint(None, "unknown-plugin-workflow")
+
+    def test_known_mode_cannot_select_a_default_staged_phase(self) -> None:
+        copied = WorkflowSpec(
+            skill_name="third-party-lookalike",
+            title="Not a Cuti music workflow",
+            mode="mv",
+        )
+        with self.assertRaisesRegex(
+            BuildPlanValidationError,
+            "no dedicated staged-planning contract",
+        ):
+            initial_checkpoint(copied, copied.skill_name)
+
+    def test_workflow_id_cannot_change_its_staged_planning_mode(self) -> None:
+        wrong_mode = WorkflowSpec(
+            skill_name="seedance-mv",
+            title="Seedance MV",
+            mode="mv",
+        )
+        with self.assertRaisesRegex(
+            BuildPlanValidationError,
+            "dedicated staged-planning contract requires seedance_mv",
+        ):
+            initial_checkpoint(wrong_mode, wrong_mode.skill_name)
+
     async def test_checkpoint_summary_keeps_bounded_generated_text(self) -> None:
         artifact = MediaArtifactVersion(
             project_id="project-1",
@@ -78,6 +115,8 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         prompt = deepseek.prompts[0][1]
         self.assertIn("video_checkpoint_inspect", prompt)
         self.assertIn("video_checkpoint_resolve", prompt)
+        self.assertIn("skillDependencies", prompt)
+        self.assertIn("video_skill_load", prompt)
         self.assertIn('"duration": 58', prompt)
         self.assertNotIn("chain-of-thought", checkpoint_prompt(checkpoint).lower())
 
@@ -109,6 +148,74 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             ["clip-repair-1", "validate-repair-1"],
         )
         self.assertEqual(added[1].depends_on, ["clip-repair-1"])
+
+    async def test_scene_repair_keeps_unaffected_character_and_product_references(self) -> None:
+        items = [
+            RebuildPlanItem(
+                step_id="character", action="create", capability="atomic.image.generate",
+                output_artifact_type="image",
+            ),
+            RebuildPlanItem(
+                step_id="scene", action="create", capability="atomic.image.generate",
+                output_artifact_type="image",
+            ),
+            RebuildPlanItem(
+                step_id="product", action="create", capability="atomic.image.generate",
+                output_artifact_type="image",
+            ),
+            RebuildPlanItem(
+                step_id="validate-settings", action="validate",
+                capability="cuti.continuity.validate",
+                output_artifact_type="validation",
+                depends_on=["character", "scene", "product"],
+            ),
+            RebuildPlanItem(
+                step_id="clip", action="create", capability="api.provider.generate",
+                output_artifact_type="video_clip",
+                depends_on=["character", "scene", "product", "validate-settings"],
+            ),
+            RebuildPlanItem(
+                step_id="final", action="create", capability="media.concat",
+                output_artifact_type="final_video", depends_on=["clip"],
+            ),
+        ]
+        existing = RebuildPlan(
+            project_id="project-1", base_project_version_id="version-1",
+            workflow_id="cuti-scenario-product-workflow", items=items,
+            schema_version=2,
+        )
+        checkpoint = PlanCheckpoint(
+            project_id="project-1", build_id="build-1", plan_id=existing.id,
+            workflow_id=existing.workflow_id, session_id="session-1", user_id="user-1",
+            phase="semantic_validation", next_phase="semantic_repair",
+            base_plan_revision=1, base_spec_revision=1,
+            artifact_summaries=[
+                {"metadata": {"plan_step_id": "character"}},
+                {
+                    "metadata": {"plan_step_id": "scene"},
+                    "issues": ["rendered scene contains a person"],
+                },
+                {"metadata": {"plan_step_id": "product"}},
+            ],
+        )
+        repair_ids = failed_checkpoint_step_ids(checkpoint)
+        added, next_checkpoint = append_phase(
+            existing_plan=existing,
+            full_plan=existing.model_copy(deep=True),
+            workflow=None,
+            checkpoint_id="semantic_validation",
+            repair_step_ids=repair_ids,
+        )
+
+        self.assertIsNone(next_checkpoint)
+        self.assertEqual(repair_ids, ["scene"])
+        added_ids = {item.step_id for item in added}
+        self.assertEqual(added_ids, {
+            "scene-repair-1", "validate-settings-repair-1",
+            "clip-repair-1", "final-repair-1",
+        })
+        self.assertNotIn("character-repair-1", added_ids)
+        self.assertNotIn("product-repair-1", added_ids)
 
 
 class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -205,6 +312,364 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
         resumed = await self.runtime.repo.get_build(self.project.id, build.id)
         self.assertEqual(resumed.status, "queued")
 
+    async def test_every_selectable_workflow_keeps_its_initial_phase_contract(self) -> None:
+        expected = {
+            "mv": ["intent", "music", "music-analysis", "music-cut"],
+            "cuti.music-video": ["intent", "music", "music-analysis", "music-cut"],
+            "cuti.lipsync-music-video": ["intent", "music", "music-analysis", "music-cut"],
+            "seedance-mv": ["intent", "music", "music-analysis", "music-window"],
+            "workflow-keyframe-pipeline": ["intent", "story-draft"],
+            "workflow-short-drama": ["intent", "story-draft"],
+            "short-drama-workflow": ["intent", "story-draft"],
+            "workflow-direct-video": ["intent"],
+            "seedance2": ["intent"],
+            "product-ad-video": ["intent", "source-1", "product-analysis"],
+            "cuti-product-workflow": ["intent", "source-1", "product-analysis"],
+            "cuti-scenario-product-workflow": ["intent", "source-1", "product-analysis"],
+            "libtv-product-workflow": ["intent", "source-1", "product-analysis"],
+        }
+        music = {"mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv"}
+        products = {
+            "product-ad-video", "cuti-product-workflow",
+            "cuti-scenario-product-workflow", "libtv-product-workflow",
+        }
+        for index, (workflow_id, expected_steps) in enumerate(expected.items(), start=1):
+            project, version = await self.runtime.create_project(
+                user_id="user-1", title=f"phase {workflow_id}",
+            )
+            source_ids: list[str] = []
+            if workflow_id in products:
+                source = await self.runtime.add_artifact(MediaArtifactVersion(
+                    artifact_id=f"source:product:{index}",
+                    project_id=project.id,
+                    type="source_image",
+                    uri=f"https://media.test/product-{index}.png",
+                ))
+                source_ids = [source.artifact_id]
+                project = await self.runtime.repo.get_project(project.id)
+            intent = ProjectIntent(
+                title=workflow_id,
+                brief=f"Create with {workflow_id}",
+                target_duration_seconds=15,
+                workflow_id=workflow_id,
+                source_asset_ids=source_ids,
+                workflow_parameters=(
+                    {"music_prompt": "electronic pop"}
+                    if workflow_id in music else {}
+                ),
+            )
+            plan = await self.runtime.plan_project(
+                project_id=project.id,
+                base_project_version_id=project.current_version_id or version.id,
+                project_intent=intent,
+                idempotency_key=f"initial-contract-{index}",
+            )
+            self.assertEqual(plan.workflow_id, workflow_id)
+            self.assertEqual(
+                [item.step_id for item in plan.items],
+                expected_steps,
+                workflow_id,
+            )
+            self.assertEqual(plan.schema_version, 2)
+            self.assertIsNotNone(plan.next_checkpoint)
+
+    async def test_seedance_mv_initial_phase_uses_original_music_capabilities(self) -> None:
+        intent = ProjectIntent(
+            title="Seedance MV",
+            brief="Create an original electronic song and matching MV",
+            target_duration_seconds=15,
+            workflow_id="seedance-mv",
+            workflow_parameters={"music_prompt": "electronic pop"},
+        )
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=intent,
+            idempotency_key="plan-seedance-mv",
+        )
+        by_id = {item.step_id: item for item in plan.items}
+        self.assertEqual(by_id["music"].capability, "atomic.music.generate")
+        self.assertEqual(by_id["music-analysis"].capability, "media.audio_analyze")
+        self.assertEqual(by_id["music-window"].capability, "media.audio.trim")
+        self.assertNotIn("suno.generate", {item.capability for item in plan.items})
+        self.assertFalse(any(item.output_artifact_type == "video_clip" for item in plan.items))
+
+    async def test_plugin_music_workflows_keep_suno_contract_across_phases(self) -> None:
+        for index, workflow_id in enumerate(
+            ("cuti.music-video", "cuti.lipsync-music-video"), start=1,
+        ):
+            project, version = await self.runtime.create_project(
+                user_id="user-1", title=workflow_id,
+            )
+            await self.runtime.bind_session(
+                project_id=project.id,
+                session_id=f"music-session-{index}",
+                user_id="user-1",
+            )
+            intent = ProjectIntent(
+                title=workflow_id,
+                brief="Create a sung electronic pop music video",
+                target_duration_seconds=15,
+                workflow_id=workflow_id,
+                workflow_parameters={"music_prompt": "electronic pop with vocals"},
+            )
+            plan = await self.runtime.plan_project(
+                project_id=project.id,
+                base_project_version_id=version.id,
+                project_intent=intent,
+                idempotency_key=f"plan-plugin-music-{index}",
+            )
+            by_id = {item.step_id: item for item in plan.items}
+            self.assertEqual(by_id["music"].capability, "suno.generate", workflow_id)
+            self.assertEqual(by_id["music-analysis"].capability, "media.audio_analyze")
+            self.assertEqual(by_id["music-cut"].capability, "media.audio_cut")
+            self.assertNotIn("atomic.music.generate", {item.capability for item in plan.items})
+
+    async def test_scenario_product_checkpoint_restores_original_contract(self) -> None:
+        source = await self.runtime.add_artifact(MediaArtifactVersion(
+            artifact_id="source:product",
+            project_id=self.project.id,
+            type="source_image",
+            uri="https://media.test/product.png",
+        ))
+        intent = ProjectIntent(
+            title="Scenario product ad",
+            brief="Use a noisy rehearsal to demonstrate the headphones",
+            target_duration_seconds=15,
+            workflow_id="cuti-scenario-product-workflow",
+            source_asset_ids=[source.artifact_id],
+        )
+        current = await self.runtime.repo.get_project(self.project.id)
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=current.current_version_id,
+            project_intent=intent,
+            idempotency_key="plan-scenario-product",
+        )
+        self.assertEqual(
+            [item.step_id for item in plan.items],
+            ["intent", "source-1", "product-analysis"],
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=current.current_version_id,
+            idempotency_key="build-scenario-product",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, committed = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(committed)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoint = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertIn("segment_proofs", checkpoint.planner_instruction)
+
+        base = video_spec()
+        complete_spec = base.model_copy(update={
+            "workflow_id": "cuti-scenario-product-workflow",
+            "source_asset_ids": [source.artifact_id],
+            "target_duration_seconds": 15,
+            "shots": [base.shots[0].model_copy(update={
+                "id": "one",
+                "order": 1,
+                "duration_seconds": 15,
+                "visual_prompt": "0-2秒排练被噪声打断；2-15秒戴上耳机后听清节拍并完成合奏。",
+                "narration": "",
+            })],
+            "audio": base.audio.model_copy(update={
+                "bgm_prompt": "", "subtitles": False,
+            }),
+            "workflow_parameters": {
+                "primary_selling_point": "嘈杂环境中依然清晰聆听",
+                "segment_proofs": {
+                    "one": "戴上耳机后环境噪声降低，人物听清节拍并完成合奏",
+                },
+                "dramatic_proposition": "耳机让嘈杂排练恢复清晰协作",
+            },
+        })
+        updated = await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=checkpoint.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="resolve-scenario-product",
+                video_spec=complete_spec,
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        by_id = {item.step_id: item for item in updated.items}
+        clip = by_id["shot-one-video"]
+        self.assertEqual(clip.capability, "api.provider.generate")
+        self.assertEqual(clip.parameters["duration"], 15)
+        self.assertTrue(clip.parameters["generate_audio"])
+        self.assertEqual(clip.parameters["generation_mode"], "t2v")
+        self.assertNotIn("start_image_from_step", clip.parameters)
+        self.assertEqual(
+            set(clip.parameters["reference_from_steps"]),
+            {
+                "source-1", "character-setting-reference",
+                "scene-setting-reference", "product-setting-reference",
+            },
+        )
+        self.assertTrue(all(
+            "scenario-script" in by_id[step].depends_on
+            for step in (
+                "character-setting-reference", "scene-setting-reference",
+                "product-setting-reference",
+            )
+        ))
+
+    async def test_every_single_checkpoint_workflow_appends_its_own_compiler_plan(self) -> None:
+        """Schema-v2 continuation may stage a compiler, but may never replace it."""
+        workflows = (
+            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+            "workflow-direct-video", "seedance2", "workflow-short-drama",
+            "short-drama-workflow", "product-ad-video", "cuti-product-workflow",
+            "cuti-scenario-product-workflow", "libtv-product-workflow",
+        )
+        product_workflows = {
+            "product-ad-video", "cuti-product-workflow",
+            "cuti-scenario-product-workflow", "libtv-product-workflow",
+        }
+        music_workflows = {
+            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+        }
+        for index, workflow_id in enumerate(workflows, start=1):
+            project, version = await self.runtime.create_project(
+                user_id="user-1", title=f"continuation {workflow_id}",
+            )
+            session_id = f"continuation-session-{index}"
+            await self.runtime.bind_session(
+                project_id=project.id, session_id=session_id, user_id="user-1",
+            )
+            source_ids: list[str] = []
+            if workflow_id in product_workflows:
+                source = await self.runtime.add_artifact(MediaArtifactVersion(
+                    artifact_id=f"source:product:continuation:{index}",
+                    project_id=project.id,
+                    type="source_image",
+                    uri=f"https://media.test/continuation-product-{index}.png",
+                ))
+                source_ids = [source.artifact_id]
+                project = await self.runtime.repo.get_project(project.id)
+
+            base = video_spec()
+            one_segment = workflow_id in {
+                "short-drama-workflow", "cuti-product-workflow",
+                "cuti-scenario-product-workflow",
+            }
+            shots = (
+                [base.shots[0].model_copy(update={
+                    "id": "one", "order": 1, "duration_seconds": 15,
+                    "visual_prompt": "0-15秒，人物通过连续动作完成这一段叙事。",
+                    "narration": "原生同步对白。",
+                    "reference_asset_ids": source_ids,
+                })]
+                if one_segment else [
+                    shot.model_copy(update={"reference_asset_ids": source_ids})
+                    for shot in base.shots
+                ]
+            )
+            workflow_parameters = dict(base.workflow_parameters)
+            if workflow_id in music_workflows:
+                workflow_parameters["music_prompt"] = "electronic pop"
+            if workflow_id == "cuti-scenario-product-workflow":
+                workflow_parameters = {
+                    "primary_selling_point": "嘈杂环境中保持清晰",
+                    "segment_proofs": {"one": "戴上耳机后人物听清节拍"},
+                    "dramatic_proposition": "噪声阻碍协作，产品恢复清晰",
+                    "scenario": {"setting": "空置排练室，暖色顶灯"},
+                }
+            spec = base.model_copy(update={
+                "title": workflow_id,
+                "workflow_id": workflow_id,
+                "target_duration_seconds": 15,
+                "source_asset_ids": source_ids,
+                "shots": shots,
+                "workflow_parameters": workflow_parameters,
+                "audio": base.audio.model_copy(update={
+                    "bgm_prompt": "electronic pop" if workflow_id in music_workflows else "",
+                    "subtitles": workflow_id in {"mv", "cuti.music-video"},
+                }),
+            })
+            intent = ProjectIntent(
+                title=workflow_id,
+                brief=f"Create with {workflow_id}",
+                target_duration_seconds=15,
+                workflow_id=workflow_id,
+                source_asset_ids=source_ids,
+                workflow_parameters=workflow_parameters,
+                providers=spec.providers,
+            )
+            plan = await self.runtime.plan_project(
+                project_id=project.id,
+                base_project_version_id=project.current_version_id or version.id,
+                project_intent=intent,
+                idempotency_key=f"continuation-plan-{index}",
+            )
+            build = await self.runtime.start_build(
+                project_id=project.id,
+                plan_id=plan.id,
+                base_project_version_id=project.current_version_id or version.id,
+                idempotency_key=f"continuation-build-{index}",
+                session_id=session_id,
+                user_id="user-1",
+            )
+            waiting, committed = await self.runtime.execute_build(
+                project_id=project.id, build_id=build.id, executor=FakePlanExecutor(),
+            )
+            self.assertIsNone(committed, workflow_id)
+            self.assertEqual(waiting.status, "waiting_agent", workflow_id)
+            checkpoint = (await self.runtime.repo.list_build_checkpoints(
+                project.id, build.id,
+            ))[-1]
+
+            plugin = self.runtime._workflow_plugin(workflow_id)
+            source_artifacts = {
+                item.artifact_id: item
+                for item in await self.runtime.repo.current_artifacts(project.id)
+                if item.artifact_id in source_ids
+            }
+            from app.video_runtime.plugins import PluginContext
+            expected = await plugin.implementation.compile_build_plan(
+                PluginContext(project_id=project.id, values={
+                    "base_project_version_id": project.current_version_id or version.id,
+                    "source_artifacts": source_artifacts,
+                }),
+                spec,
+            )
+            updated = await self.runtime.resolve_checkpoint(
+                project_id=project.id,
+                build_id=build.id,
+                checkpoint_id=checkpoint.id,
+                resolution=CheckpointResolution(
+                    base_plan_revision=plan.current_revision,
+                    base_spec_revision=1,
+                    idempotency_key=f"continuation-resolve-{index}",
+                    video_spec=spec,
+                ),
+                session_id=session_id,
+                user_id="user-1",
+            )
+            self.assertEqual(updated.workflow_id, workflow_id)
+            updated_by_id = {item.step_id: item for item in updated.items}
+            for expected_step in expected.items:
+                self.assertIn(expected_step.step_id, updated_by_id, workflow_id)
+                self.assertEqual(
+                    updated_by_id[expected_step.step_id].capability,
+                    expected_step.capability,
+                    f"{workflow_id}:{expected_step.step_id}",
+                )
+
     async def test_checkpoint_rejects_stale_plan_revision(self) -> None:
         intent = ProjectIntent(
             title="Direct", brief="One cinematic shot", workflow_id="seedance2",
@@ -241,6 +706,68 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     base_spec_revision=1,
                     idempotency_key="stale",
                     video_spec=video_spec().model_copy(update={"workflow_id": "seedance2"}),
+                ),
+                session_id="session-1",
+                user_id="user-1",
+            )
+
+    async def test_seedance2_agentic_phase_cannot_switch_to_another_video_model(self) -> None:
+        intent = ProjectIntent(
+            title="Seedance agentic guard",
+            brief="Create one native-audio Seedance clip",
+            workflow_id="seedance2",
+        )
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=intent,
+            idempotency_key="plan-seedance-agentic-guard",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="build-seedance-agentic-guard",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        checkpoint = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        wrong_provider_step = RebuildPlanItem(
+            step_id="wrong-video",
+            output_artifact_id=f"{self.project.id}:wrong-video",
+            output_artifact_type="video_clip",
+            action="create",
+            capability="atomic.video.generate",
+            parameters={
+                "prompt": "one shot",
+                "model": "minimax-h3",
+                "generate_audio": True,
+            },
+            depends_on=["intent"],
+        )
+        with self.assertRaisesRegex(
+            BuildPlanValidationError,
+            "must use the Seedance 2.0 provider model",
+        ):
+            await self.runtime.resolve_checkpoint(
+                project_id=self.project.id,
+                build_id=build.id,
+                checkpoint_id=checkpoint.id,
+                resolution=CheckpointResolution(
+                    base_plan_revision=1,
+                    base_spec_revision=1,
+                    idempotency_key="resolve-wrong-seedance-model",
+                    video_spec=video_spec().model_copy(update={
+                        "workflow_id": "seedance2",
+                    }),
+                    proposed_steps=[wrong_provider_step],
                 ),
                 session_id="session-1",
                 user_id="user-1",
@@ -390,9 +917,9 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 project_id=self.project.id,
                 build_id=build_id,
                 artifact_version_id=artifact.id,
-                validator_id="cuti.continuity-validator",
+                validator_id="cuti.continuity.scene-reference-isolation",
                 passed=not should_fail,
-                issues=["character clothing drift"] if should_fail else [],
+                issues=["rendered scene contains a person and staged product"] if should_fail else [],
             )]
 
         self.runtime.validate_artifact = validate
@@ -421,7 +948,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 base_spec_revision=current_spec.revision,
                 idempotency_key="resolve-semantic-repair",
                 video_spec=complete_spec,
-                reason="Keep the same identity and correct the clothing prompt",
+                reason="Regenerate only the empty environment without people or products",
             ),
             session_id="session-1",
             user_id="user-1",

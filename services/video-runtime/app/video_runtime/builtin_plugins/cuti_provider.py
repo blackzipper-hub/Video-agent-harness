@@ -77,6 +77,8 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         character_step = parameters.pop("character_reference_from_step", None)
         character_steps = parameters.pop("character_reference_from_steps", None) or []
         reference_steps = parameters.pop("reference_from_steps", None) or []
+        video_reference_steps = parameters.pop("video_reference_from_steps", None) or []
+        audio_reference_steps = parameters.pop("audio_reference_from_steps", None) or []
         audio_reference_step = parameters.pop("audio_reference_from_step", None)
         audio_segment_index = parameters.pop("audio_segment_index", None)
         start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
@@ -104,6 +106,24 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             parameters.setdefault("images", reference_urls)
             parameters.setdefault("reference_urls", reference_urls)
             parameters.setdefault("image_urls", reference_urls)
+        video_reference_urls = [
+            completed_by_step[str(step)].uri
+            for step in video_reference_steps
+            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+        ]
+        if video_reference_urls:
+            parameters.setdefault("videos", video_reference_urls)
+            parameters.setdefault("reference_videos", video_reference_urls)
+            parameters.setdefault("video_urls", video_reference_urls)
+        audio_reference_urls = [
+            completed_by_step[str(step)].uri
+            for step in audio_reference_steps
+            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+        ]
+        if audio_reference_urls:
+            parameters.setdefault("audios", audio_reference_urls)
+            parameters.setdefault("reference_audios", audio_reference_urls)
+            parameters.setdefault("audio_urls", audio_reference_urls)
         audio_reference = completed_by_step.get(str(audio_reference_step or ""))
         if audio_reference:
             audio_url = audio_reference.uri
@@ -118,8 +138,15 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
                 parameters.setdefault("audios", [audio_url])
                 parameters.setdefault("audio_url", audio_url)
                 parameters.setdefault("audio_urls", [audio_url])
+        explicit_prompt = parameters.get("prompt")
+        if not explicit_prompt:
+            objective = str(parameters.get("objective") or "").strip()
+            instruction = str(parameters.get("instruction") or "").strip()
+            explicit_prompt = "\n\n".join(
+                value for value in (objective, instruction) if value
+            )
         prompt = str(
-            parameters.get("prompt")
+            explicit_prompt
             or metadata.get("rebuild_prompt")
             or metadata.get("prompt")
             or source.summary
@@ -127,7 +154,17 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         ).strip()
         if not prompt:
             raise ValueError("Cuti provider rebuild requires a persisted prompt")
-        if skill_context is not None:
+        # Match Cuti's atomic execution boundary: Workflow/Director instructions
+        # may guide an LLM planning/text stage, but a leaf media provider must
+        # consume the already-compiled prompt exactly as written.  Appending an
+        # entire Workflow SKILL to an image/video prompt makes the provider try
+        # to render every workflow section (for example character + scene +
+        # product sheets in one image) instead of the requested artifact.
+        skill_prompt_applied = (
+            skill_context is not None
+            and envelope.grant.capability == "atomic.text.generate"
+        )
+        if skill_prompt_applied:
             prompt = skill_context.apply_to(prompt)
         parameters["prompt"] = prompt
         parameters.setdefault("artifact_title", source.title or source.type)
@@ -209,6 +246,11 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             **metadata,
             **dict(generated.get("metadata") or {}),
             "rebuild_capability": envelope.grant.capability,
+            # Keep the concrete URLs resolved from BuildStep dependencies for
+            # post-generation identity/continuity validators. The Runtime also
+            # preserves the immutable, unresolved plan parameters separately.
+            "resolved_generation_parameters": dict(parameters),
+            "skill_prompt_applied": skill_prompt_applied,
         }
         digest_payload = json.dumps(
             {"uri": generated.get("uri"), "metadata": generated_metadata},

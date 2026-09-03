@@ -322,18 +322,18 @@ class MediaCorePlugin(BaseVideoPlugin):
                 )
             caption_html = parameters.get("caption_html")
             composition_html = parameters.get("composition_html")
-            if not (
-                (isinstance(caption_html, str) and caption_html.strip())
-                or (isinstance(composition_html, str) and composition_html.strip())
-            ):
-                raise ValueError("media.hyperframes_caption requires caption_html")
             words = transcription.metadata.get("words") or []
             cues = transcription.metadata.get("segments") or []
+            if not words and not cues:
+                raise ValueError(
+                    "media.hyperframes_caption requires a timestamped transcript"
+                )
             result = await msc.hyperframes_caption(
                 str(video.uri),
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 words=words,
                 cues=cues,
+                style=str(parameters.get("style") or "caption-highlight"),
                 accent_color=str(parameters.get("accent_color") or "#ff1745"),
                 position=str(parameters.get("position") or "bottom-safe"),
                 playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,

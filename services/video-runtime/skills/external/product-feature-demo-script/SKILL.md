@@ -18,6 +18,10 @@ metadata:
       - shot.video.generate
       - video.generate
       - video_gen.generate
+    artifact_types:
+      - script
+      - storyboard
+      - video_clip
   hooks: [before_stage, after_stage]
   shot_script:
     category: product_feature_demo
