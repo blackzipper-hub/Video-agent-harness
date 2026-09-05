@@ -81,7 +81,12 @@ def _is_loopback_files_url(url: str) -> bool:
 
 
 def reachable_media_url(stored: str | None, original: str | None = None) -> str:
-    """Prefer a non-loopback URL when local storage rewrote a public source."""
+    """Prefer a non-loopback URL when a public original exists.
+
+    Do not use this for stored artifact URIs. Internal analyze/Gemini must keep
+    our storage URL (local ``/files`` or dest CDN) so fetch can copy from disk/S3.
+    External vendors go through ``resolve_outbound_media_url``.
+    """
     stored_s = (stored or "").strip()
     original_s = (original or "").strip()
     if stored_s and _is_loopback_files_url(stored_s) and original_s and not _is_loopback_files_url(original_s):

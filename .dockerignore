@@ -11,9 +11,15 @@ vendor/**/lib
 **/.pytest_cache
 **/*.pyc
 tmp
-# Copy the full external Skill catalog into the Runtime image so Studio can list it.
+# Runtime image copies services/video-runtime/ wholesale. Exclude bulky /
+# non-runtime trees so we do not have to list COPY folders by hand.
 services/video-runtime/ee
 services/video-runtime/logs
 services/video-runtime/data
+services/video-runtime/tests
+services/video-runtime/helm
+services/video-runtime/docs
+services/video-runtime/scripts
+services/video-runtime/.pytest_cache
 apps/video-studio/.env*
 services/video-runtime/.env*

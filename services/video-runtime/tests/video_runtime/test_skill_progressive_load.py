@@ -178,8 +178,8 @@ class TestSkillProgressiveLoad(unittest.TestCase):
             self._get_skill(helper)
 
         captions = self._get_skill("hyperframes-captions")["instructions"]
-        self.assertIn("references/styles.md", captions)
-        self._read("hyperframes-captions", "references/styles.md")
+        self.assertIn("caption_html", captions)
+        self.assertIn("video_skill_load", captions)
 
         suno = self._get_skill("suno-song")
         for path in (

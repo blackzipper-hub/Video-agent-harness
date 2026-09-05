@@ -228,6 +228,12 @@ _CHECKPOINT_PROMPT_MARKER = "CUTI_VIDEO_CHECKPOINT_V1"
 _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
+_UI_DEFAULTS_SEPARATOR = (
+    "\n\nUI defaults (creation controls) and inputs. "
+    "User-stated config in the message has higher priority; "
+    "keep defaults only for fields the user did not mention:\n"
+)
+_LEGACY_CONTROLS_SEPARATOR = "\n\nCurrent creation controls and inputs:\n"
 
 
 _EXPLICIT_SKILL = re.compile(r"(?<![A-Za-z0-9_-])[$/]([A-Za-z0-9][A-Za-z0-9_-]{0,63})")
@@ -314,9 +320,10 @@ def _visible_user_text(value: str) -> str:
     """Keep BFF orchestration instructions out of the legacy chat transcript."""
     if value.startswith(f"{_CHECKPOINT_PROMPT_MARKER}\n"):
         return ""
-    controls_separator = "\n\nCurrent creation controls and inputs:\n"
-    if controls_separator in value:
-        value = value.split(controls_separator, 1)[0]
+    for separator in (_UI_DEFAULTS_SEPARATOR, _LEGACY_CONTROLS_SEPARATOR):
+        if separator in value:
+            value = value.split(separator, 1)[0]
+            break
     if _SKILL_SELECTION_SEPARATOR in value:
         value = value.split(_SKILL_SELECTION_SEPARATOR, 1)[0]
     if not value.startswith(f"{_CREATE_PROMPT_MARKER}\n"):
@@ -368,7 +375,10 @@ def _initial_video_build_prompt(
             f"and bound project {project_id} to this Session. Do not create another project."
         ),
         f"The required base_project_version_id is {base_project_version_id}.",
-        f"Creation controls: {json.dumps(options, ensure_ascii=False, sort_keys=True)}",
+        (
+            "UI defaults (creation controls): "
+            f"{json.dumps(options, ensure_ascii=False, sort_keys=True)}"
+        ),
         f"Uploaded project Source Artifacts: {json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True)}",
         (
             "Use only the uploaded artifact_id values as VideoSpec.source_asset_ids and shot "
@@ -385,7 +395,12 @@ def _initial_video_build_prompt(
             f"{json.dumps(activated, ensure_ascii=False)}. "
             "Always use automation.mode automatic."
         ),
-        "Respect duration, aspect ratio, resolution, selected image/video providers, and attachments when present.",
+        (
+            "Configuration the user stated in the visible request has highest priority. "
+            "UI defaults apply only to fields the user did not mention. Do not treat UI "
+            "defaults as constraints that override the request. Do not infer a control "
+            "from creative content that did not name a setting."
+        ),
         (
             "Normalize UI provider names for VideoSpec: seedance_2_* means providers.video "
             "seedance-2.0; gpt_image_2 means providers.image gpt-image-2. If the UI value is "
@@ -857,8 +872,15 @@ async def add_message(
         )
         if not is_empty_creation and (body.user_option or imported_input_files):
             prompt += (
-                "\n\nCurrent creation controls and inputs:\n"
-                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
+                _UI_DEFAULTS_SEPARATOR
+                + json.dumps(
+                    {
+                        "user_option": body.user_option or {},
+                        "input_files": _prompt_input_files(imported_input_files),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             )
         if not is_empty_creation:
             prompt += _selection_context(workflow_id, activated_skill_ids)
@@ -1251,8 +1273,15 @@ async def studio_add_command(
         prompt = body.objective
         if body.user_option or imported_input_files:
             prompt += (
-                "\n\nCurrent creation controls and inputs:\n"
-                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
+                _UI_DEFAULTS_SEPARATOR
+                + json.dumps(
+                    {
+                        "user_option": body.user_option or {},
+                        "input_files": _prompt_input_files(imported_input_files),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             )
         await dsh.prompt(
             binding.session_id,

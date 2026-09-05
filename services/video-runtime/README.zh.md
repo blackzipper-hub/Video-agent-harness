@@ -6,10 +6,10 @@ Python Video Runtime 独立于 agent Session 或 Run 管理长期视频项目。
 
 ## 运行
 
-独立进程只需要 `requirements-runtime.txt` 中的依赖：
+独立进程安装与 Runtime 镜像相同的依赖，来源是 `pyproject.toml`：
 
 ```sh
-python -m pip install -r requirements-runtime.txt
+python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 

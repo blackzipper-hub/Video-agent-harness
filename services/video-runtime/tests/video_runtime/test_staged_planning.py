@@ -1121,3 +1121,207 @@ class ContinuousPlanPatchRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(completed.status, "completed")
         self.assertIsNotNone(version)
+
+    async def test_second_frontier_reopens_waiting_agent_checkpoint(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Continuous Cuti loop",
+                brief="Generate clips in successive frontiers",
+                workflow_id="seedance2",
+            ),
+            idempotency_key="continuous-plan-two-frontiers",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-build-two-frontiers",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        first = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=first.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-patch-1",
+                video_spec_patch={"workflow_parameters": {"shot_count": 1}},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-1",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "first frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(waiting.status, "waiting_agent")
+        second = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertEqual(second.phase, "task_frontier_completed")
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=second.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=2,
+                base_spec_revision=2,
+                idempotency_key="continuous-patch-2",
+                video_spec_patch={},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-2",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "second frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["clip-1"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoints = await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        )
+        frontiers = [
+            item for item in checkpoints if item.phase == "task_frontier_completed"
+        ]
+        self.assertEqual(len(frontiers), 2)
+        self.assertEqual(frontiers[-1].status, "pending")
+        self.assertNotEqual(frontiers[0].id, frontiers[1].id)
+
+    async def test_second_frontier_reopens_waiting_agent_checkpoint(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Continuous Cuti loop",
+                brief="Generate clips in successive frontiers",
+                workflow_id="seedance2",
+            ),
+            idempotency_key="continuous-plan-two-frontiers",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-build-two-frontiers",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        first = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=first.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-patch-1",
+                video_spec_patch={"workflow_parameters": {"shot_count": 1}},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-1",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "first frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(waiting.status, "waiting_agent")
+        second = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertEqual(second.phase, "task_frontier_completed")
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=second.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=2,
+                base_spec_revision=2,
+                idempotency_key="continuous-patch-2",
+                video_spec_patch={},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-2",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "second frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["clip-1"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoints = await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        )
+        frontiers = [
+            item for item in checkpoints if item.phase == "task_frontier_completed"
+        ]
+        self.assertEqual(len(frontiers), 2)
+        self.assertEqual(frontiers[-1].status, "pending")
+        self.assertNotEqual(frontiers[0].id, frontiers[1].id)

@@ -6,10 +6,10 @@ The Python Video Runtime owns long-lived video projects independently of an agen
 
 ## Run
 
-The standalone process needs only the dependencies in `requirements-runtime.txt`:
+Install the same Python dependencies as the Runtime image, from `pyproject.toml`:
 
 ```sh
-python -m pip install -r requirements-runtime.txt
+python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 

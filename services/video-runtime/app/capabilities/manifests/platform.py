@@ -161,8 +161,31 @@ def platform_capabilities() -> list[CapabilityManifest]:
         _manifest("shot.video.regenerate", "Regenerate selected shot videos.", "local.service", "video", alias="regenerate-shot-videos", service_target="execute_regenerate_videos", optional=["video", "keyframe", "story"]),
         _manifest("video.assemble", "Assemble selected shot segments into a final video.", "local.service", "video", alias="assemble-video", service_target="video_assembly_by_request", optional=["video"]),
         _manifest("actions.suggest", "Produce structured recommended next actions.", "local.structured", "action_suggestions", alias="suggest-actions", service_target="action_suggestions"),
-        _manifest("media.concat", "Concatenate an ordered list of videos. Set transition_duration for a short cross-fade between continuation clips.", "local.service", "video", alias="media-concat", service_target="media_concat", required=["video"], parameters_schema={"type": "object", "required": ["video_urls"], "properties": {"video_urls": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "normalize": {"type": "boolean"}, "transition_duration": {"type": "number", "minimum": 0, "maximum": 1, "default": 0}, "run_id": {"type": "string"}}, "additionalProperties": False}),
-        _manifest("media.extract_frame", "Extract a still frame from a video. Use position=last for continuation generation; it resolves the true final decoded video frame.", "local.service", "image", alias="media-extract-frame", service_target="media_extract_frame", required=["video"], parameters_schema={"type": "object", "properties": {"timestamp": {"type": "number", "minimum": 0}, "position": {"type": "string", "enum": ["timestamp", "last"], "default": "timestamp"}, "video_url": {"type": "string"}, "format": {"type": "string", "enum": ["jpeg", "png"], "default": "jpeg"}, "run_id": {"type": "string"}}, "additionalProperties": False}),
+        _manifest(
+            "media.concat",
+            "Concatenate an ordered list of videos. Set transition_duration for a short cross-fade between continuation clips.",
+            "local.service",
+            "video",
+            alias="media-concat",
+            service_target="media_concat",
+            required=["video"],
+            parameters_schema={
+                "type": "object",
+                "anyOf": [
+                    {"required": ["video_urls"]},
+                    {"required": ["video_steps"]},
+                ],
+                "properties": {
+                    "video_urls": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                    "video_steps": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                    "normalize": {"type": "boolean"},
+                    "transition_duration": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                    "run_id": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        ),
+        _manifest("media.extract_frame", "Extract a still frame from a video. Use position=last for continuation generation; it resolves the true final decoded video frame.", "local.service", "image", alias="media-extract-frame", service_target="media_extract_frame", required=["video"], parameters_schema={"type": "object", "properties": {"timestamp": {"type": "number", "minimum": 0}, "position": {"type": "string", "enum": ["timestamp", "last"], "default": "timestamp"}, "video_url": {"type": "string"}, "source_video_step": {"type": "string"}, "format": {"type": "string", "enum": ["jpeg", "png"], "default": "jpeg"}, "run_id": {"type": "string"}}, "additionalProperties": False}),
         _manifest(
             "media.audio_trim",
             "Trim an audio URL to [start, start+duration). Optional fade_in_sec/fade_out_sec use trim-with-fade. Required for Seedance MV reference clips (total audio ≤15s).",
@@ -173,9 +196,14 @@ def platform_capabilities() -> list[CapabilityManifest]:
             optional=["music"],
             parameters_schema={
                 "type": "object",
-                "required": ["audio_url", "duration"],
+                "anyOf": [
+                    {"required": ["audio_url", "duration"]},
+                    {"required": ["audio_step"]},
+                ],
                 "properties": {
                     "audio_url": {"type": "string"},
+                    "audio_step": {"type": "string"},
+                    "analysis_step": {"type": "string"},
                     "start": {"type": "number", "minimum": 0, "default": 0},
                     "start_sec": {"type": "number", "minimum": 0},
                     "duration": {"type": "number", "exclusiveMinimum": 0},
@@ -197,9 +225,13 @@ def platform_capabilities() -> list[CapabilityManifest]:
             optional=["music"],
             parameters_schema={
                 "type": "object",
-                "required": ["audio_url"],
+                "anyOf": [
+                    {"required": ["audio_url"]},
+                    {"required": ["audio_step"]},
+                ],
                 "properties": {
                     "audio_url": {"type": "string"},
+                    "audio_step": {"type": "string"},
                     "target_duration_sec": {"type": "number", "exclusiveMinimum": 0},
                     "clip_id": {"type": "string", "description": "Suno clip_id so hybrid can skip upload."},
                     "generated_lyrics": {"type": "string"},
@@ -224,6 +256,8 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "type": "object",
                 "properties": {
                     "audio_url": {"type": "string"},
+                    "audio_step": {"type": "string"},
+                    "analysis_step": {"type": "string"},
                     "start_sec": {"type": "number", "minimum": 0},
                     "start": {"type": "number", "minimum": 0},
                     "duration": {"type": "number", "exclusiveMinimum": 0},
@@ -261,11 +295,16 @@ def platform_capabilities() -> list[CapabilityManifest]:
             optional=["music", "audio_cut"],
             parameters_schema={
                 "type": "object",
-                "required": ["video_url", "audio_url"],
+                "anyOf": [
+                    {"required": ["video_url", "audio_url"]},
+                    {"required": ["video_step", "audio_step"]},
+                ],
                 "properties": {
                     "video_url": {"type": "string"},
                     "audio_url": {"type": "string"},
                     "music_url": {"type": "string"},
+                    "video_step": {"type": "string"},
+                    "audio_step": {"type": "string"},
                     "mode": {"type": "string", "enum": ["replace", "overlay"], "default": "replace"},
                     "audio_volume": {"type": "number", "minimum": 0, "maximum": 2, "default": 0.35},
                     "loop_audio": {"type": "boolean", "default": False},
@@ -286,6 +325,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "type": "object",
                 "properties": {
                     "video_url": {"type": "string"},
+                    "video_step": {"type": "string"},
                     "language": {"type": "string"},
                     "model": {"type": "string"},
                     "run_id": {"type": "string"},
@@ -318,6 +358,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
                             "additionalProperties": False,
                         },
                     },
+                    "transcription_step": {"type": "string"},
                     "format": {"type": "string", "enum": ["srt", "vtt", "ass"]},
                     "timing_mode": {
                         "type": "string",
@@ -345,6 +386,8 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "properties": {
                     "video_url": {"type": "string"},
                     "subtitle_url": {"type": "string"},
+                    "video_step": {"type": "string"},
+                    "subtitle_step": {"type": "string"},
                     "style_preset": {
                         "type": "string",
                         "enum": ["short-video-bold", "clean", "minimal"],
@@ -363,7 +406,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
         ),
         _manifest(
             "media.hyperframes_caption",
-            "Render sentence-synchronized HyperFrames captions over a selected video. Use an explicit Cuti style; authored HTML remains an optional advanced override.",
+            "Render HyperFrames captions over a selected video. Write caption_html; a style name is only a fallback when HTML is absent.",
             "local.service",
             "video",
             alias="media-hyperframes-caption",
@@ -373,6 +416,8 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "type": "object",
                 "properties": {
                     "video_url": {"type": "string"},
+                    "video_step": {"type": "string"},
+                    "transcription_step": {"type": "string"},
                     "style": {
                         "type": "string",
                         "enum": [

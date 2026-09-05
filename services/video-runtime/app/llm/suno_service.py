@@ -5,11 +5,10 @@ import asyncio
 import json
 import aiohttp
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 from tenacity import retry, stop_after_delay, wait_fixed, retry_if_exception_type, retry_if_result
 from app.models.image_result import MusicGenerationResult, MusicProvider
 from app.utils.s3_utils import s3_utils
-from app.utils.media_egress import reachable_media_url
 from app.services.agent.utils.cancellation import raise_if_cancelled
 import os
 
@@ -63,6 +62,17 @@ class SunoServerErrorException(SunoRetryException):
 class SunoFinalException(Exception):
     """Suno API 最终失败异常 - 不需要重试"""
     pass
+
+
+def _clip_duration_seconds(raw: Any) -> int:
+    """Suno often sends duration:null while audio_url is already ready."""
+    if raw is None or raw == "":
+        return 0
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        logger.warning("🎵 无法解析 duration: %s，使用默认值 0", raw)
+        return 0
 
 
 def _suno_wait(retry_state) -> float:
@@ -279,17 +289,12 @@ class SunoService:
                         local_audio_urls = []
                         
                         for i, clip in enumerate(succeeded_clips):
-                            # 处理 duration 字段
-                            duration = clip.get("duration", 0)
-                            if duration is not None:
-                                try:
-                                    if isinstance(duration, str):
-                                        duration = int(float(duration))
-                                    elif isinstance(duration, float):
-                                        duration = int(duration)
-                                except (ValueError, TypeError):
-                                    logger.warning(f"🎵 无法解析 duration: {duration}，使用默认值 0")
-                                    duration = 0
+                            if clip.get("duration") is None:
+                                logger.warning(
+                                    "🎵 clip %s duration 为 null（音频已就绪），先记 0",
+                                    clip.get("clip_id"),
+                                )
+                            duration = _clip_duration_seconds(clip.get("duration"))
                             
                             # 下载并保存音频到S3（带重试机制）
                             clip_id = clip.get("clip_id")
@@ -309,7 +314,10 @@ class SunoService:
                             
                             processed_clips.append({
                                 "clip_id": clip_id,
-                                "audio_url": reachable_media_url(local_audio_url, original_audio_url),
+                                # Keep our storage URL. Internal analyze/Gemini copy
+                                # from disk (local) or S3 (dest/prod). Vendor APIs
+                                # go through resolve_outbound_media_url at call time.
+                                "audio_url": local_audio_url,
                                 "video_url": clip.get("video_url"),
                                 "title": clip.get("title"),
                                 "tags": clip.get("tags"),

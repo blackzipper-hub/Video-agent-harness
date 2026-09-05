@@ -11,14 +11,18 @@ contributions:
     - atomic.video.generate
     - suno.generate
     - api.provider.generate
+    - research.generate
 permissions:
   network_domains:
     - api.sunoapi.com
     - api.wavespeed.ai
     - ark.cn-beijing.volces.com
+    - api.openai.com
+    - generativelanguage.googleapis.com
   credentials:
     - ARK_API_KEY
     - OPENAI_API_KEY
+    - GOOGLE_API_KEY
     - SUNO_API_KEY
     - WAVESPEED_API_KEY
   sandbox: false

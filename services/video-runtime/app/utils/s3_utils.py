@@ -210,12 +210,52 @@ class S3Utils:
             lambda: self._upload_video_sync(video_data, filename, generation_id, content_type),
         )
     
+    async def _download_http_url(
+        self, url: str, local_path: str, *, max_retries: int = 3,
+    ) -> bool:
+        """Fetch a public http(s) URL to disk. Used for vendor media (Suno, etc.).
+
+        Local open-source has no S3; dest/prod keep S3 for first-party CDN URLs and
+        only reach this path for foreign hosts.
+        """
+        os.makedirs(os.path.dirname(os.path.abspath(local_path)) or ".", exist_ok=True)
+        last_error: Optional[Exception] = None
+        for attempt in range(max_retries):
+            try:
+                timeout = aiohttp.ClientTimeout(total=300.0)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url) as response:
+                        response.raise_for_status()
+                        data = await response.read()
+                if not data or len(data) < 100:
+                    raise RuntimeError(
+                        f"response too small: {0 if not data else len(data)} bytes"
+                    )
+                with open(local_path, "wb") as handle:
+                    handle.write(data)
+                logger.info(
+                    "Downloaded foreign media %s -> %s (%s bytes)",
+                    url[:120], local_path, len(data),
+                )
+                return True
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(
+                        "HTTP download attempt %s failed: %s; retry in %ss",
+                        attempt + 1, exc, wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
+        logger.error("HTTP download failed: %s (%s)", url, last_error)
+        return False
+
     def _download_file_sync(self, file_key_or_url: str, local_path: str) -> bool:
-        """同步下载实现，供 download_file 在 executor 中调用，不阻塞事件循环。"""
+        """Copy from local disk or S3. Foreign http(s) URLs are handled by download_file."""
         try:
             parsed_input = urlparse(file_key_or_url)
             if self._is_local:
-                # local 后端：仅支持「我们自己的」URL/键；外链由调用方 aiohttp 处理
+                # First-party /files URLs only. Vendor links go through _download_http_url.
                 if parsed_input.scheme in ('http', 'https'):
                     file_key = self.cdn_url_to_s3_key(file_key_or_url)
                     if not file_key:
@@ -257,18 +297,18 @@ class S3Utils:
             return False
 
     async def download_file(self, file_key_or_url: str, local_path: str) -> bool:
+        """Fetch media onto a local path for Gemini / ffmpeg / callers.
+
+        - Our storage URL or key: copy from disk (local) or S3 (dest/prod).
+        - Any other http(s) URL: HTTP GET. Open-source has no S3; dest/prod still
+          use S3 for CDN URLs and only hit this for vendor hosts.
         """
-        从S3下载文件到本地路径（异步，内部用 run_in_executor 执行 boto3，不阻塞事件循环）
-
-        调用方统一使用: await s3_utils.download_file(...)
-
-        Args:
-            file_key_or_url: S3文件键或CDN URL
-            local_path: 本地保存路径
-
-        Returns:
-            bool: 下载是否成功
-        """
+        parsed = urlparse(file_key_or_url)
+        if (
+            parsed.scheme in {"http", "https"}
+            and not is_our_cdn_url(file_key_or_url)
+        ):
+            return await self._download_http_url(file_key_or_url, local_path)
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -415,74 +455,57 @@ class S3Utils:
         generation_id: Optional[str] = None,
         max_retries: int = 3
     ) -> str:
+        """Fetch audio then store it. Same download_file contract as Gemini.
+
+        Local: HTTP-get vendor URL, write ``/files/audios/...``. dest/prod: HTTP-get
+        then S3. Returns our storage URL, not the vendor URL.
         """
-        从URL下载音频并上传到S3（带重试机制）
-        
-        Args:
-            audio_url: 音频文件URL
-            generation_id: 生成ID，如果为None则使用UUID
-            max_retries: 最大重试次数
-            
-        Returns:
-            str: S3 CDN URL
-        """
-        # 确定文件名
-        if generation_id:
-            base_filename = generation_id
-        else:
-            base_filename = str(uuid.uuid4())
-        
-        # 从URL获取文件扩展名，默认为mp3
+        base_filename = generation_id or str(uuid.uuid4())
         file_extension = ".mp3"
         if audio_url:
             try:
-                parsed = urlparse(audio_url)
-                path = parsed.path.lower()
+                path = urlparse(audio_url).path.lower()
                 if path.endswith(('.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a')):
                     file_extension = path[path.rfind('.'):]
-            except:
+            except Exception:
                 pass
-        
-        # 重试下载
-        audio_data = None
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"📥 开始下载音频 (尝试 {attempt + 1}/{max_retries}): {audio_url}")
-                
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300.0)) as session:
-                    async with session.get(audio_url) as response:
-                        response.raise_for_status()
-                        
-                        # 检查内容长度
-                        content_length = response.headers.get('content-length')
-                        if content_length and int(content_length) < 100:  # 少于100B可能是错误响应
-                            raise Exception(f"响应内容过小: {content_length} bytes，可能是无效音频")
-                        
-                        # 读取音频数据
-                        audio_data = await response.read()
-                        
-                        # 验证数据
-                        if not audio_data or len(audio_data) < 100:
-                            raise Exception(f"下载数据过小: {len(audio_data)} bytes，可能是无效音频")
-                
-                logger.info(f"📥 音频文件下载成功: {audio_url} ({len(audio_data)} bytes)")
-                break
-                        
-            except Exception as e:
-                error_msg = f"下载尝试 {attempt + 1} 失败: {e}"
-                if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 2  # 递增等待时间: 2s, 4s, 6s
-                    logger.warning(f"❌ {error_msg}，{wait_time}秒后重试...")
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"❌ 音频下载完全失败: {audio_url}, 最终错误: {e}")
-                    raise BusinessException(
-                        BusinessExceptionCode.BUSINESS_ERROR,
-                        f"下载音频失败（重试{max_retries}次）: {e}"
+
+        handle, tmp_path = tempfile.mkstemp(suffix=file_extension)
+        os.close(handle)
+        try:
+            last_error: Optional[Exception] = None
+            for attempt in range(max_retries):
+                ok = await self.download_file(audio_url, tmp_path)
+                if ok:
+                    with open(tmp_path, "rb") as fh:
+                        audio_data = fh.read()
+                    if audio_data and len(audio_data) >= 100:
+                        return await self.upload_audio(
+                            audio_data, generation_id=base_filename,
+                        )
+                    last_error = RuntimeError(
+                        f"downloaded audio too small: "
+                        f"{0 if not audio_data else len(audio_data)} bytes"
                     )
-        
-        # 上传到S3
-        return await self.upload_audio(audio_data, generation_id=base_filename)
+                else:
+                    last_error = RuntimeError(f"download_file failed: {audio_url}")
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(
+                        "ingest audio attempt %s failed: %s; retry in %ss",
+                        attempt + 1, last_error, wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
+            logger.error("Audio ingest failed: %s (%s)", audio_url, last_error)
+            raise BusinessException(
+                BusinessExceptionCode.BUSINESS_ERROR,
+                f"下载音频失败（重试{max_retries}次）: {last_error}",
+            )
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 async def convert_media_url_to_s3(media_url: str, media_type, target_format) -> Optional[str]:
     """

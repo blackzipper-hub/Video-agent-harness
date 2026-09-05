@@ -17,6 +17,7 @@ from app.video_runtime.api import set_runtime
 from app.video_runtime.deepseek_bff import (
     _compat_event,
     _sign_uploaded_file,
+    _UI_DEFAULTS_SEPARATOR,
     router,
     set_deepseek_client,
     studio_router,
@@ -477,6 +478,24 @@ Keep the requested visual tone consistent.
         })
         self.assertEqual(user["payload"]["message"]["content"], "Make a video")
 
+        user_defaults = _compat_event("project-1", {
+            "type": "user/message",
+            "seq": 12,
+            "time": 1005,
+            "data": {
+                "source": {"kind": "user"},
+                "content": [{
+                    "type": "text",
+                    "text": (
+                        "Make a video"
+                        + _UI_DEFAULTS_SEPARATOR
+                        + "{\"duration\": 15}"
+                    ),
+                }],
+            },
+        })
+        self.assertEqual(user_defaults["payload"]["message"]["content"], "Make a video")
+
         tool = _compat_event("project-1", {
             "type": "tool/call",
             "seq": 12,
@@ -557,6 +576,14 @@ Keep the requested visual tone consistent.
         self.assertIn('"mv"', prompt)
         self.assertIn("video_skill_load", prompt)
         self.assertIn("video_skill_read_resource", prompt)
+        self.assertIn("UI defaults (creation controls)", prompt)
+        self.assertIn("highest priority", prompt)
+        self.assertIn("only to fields the user did not mention", prompt)
+        self.assertNotIn("6smv", prompt)
+        self.assertNotIn(
+            "Respect duration, aspect ratio, resolution, selected image/video providers",
+            prompt,
+        )
         self.assertNotIn("load_skill", prompt)
         self.assertNotIn("read_skill_resource", prompt)
         self.assertNotIn("suno-song", prompt)

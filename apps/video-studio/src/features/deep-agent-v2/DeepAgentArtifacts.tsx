@@ -272,6 +272,173 @@ const isAudioArtifact = (artifact: DeepAgentArtifact): boolean => [
   'voiceover',
 ].includes(normalizeArtifactType(artifact.type))
 
+const isAudioAnalysisArtifact = (artifact: DeepAgentArtifact): boolean => [
+  'audio_analysis',
+  'audiomap',
+  'audio_map',
+].includes(normalizeArtifactType(artifact.type))
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+)
+
+const stringField = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+const boolField = (...values: unknown[]): boolean | undefined => {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value
+    if (value === 'true' || value === 'false') return value === 'true'
+  }
+  return undefined
+}
+
+const vocalGenderLabel = (value: string, t: Translate): string => {
+  if (value === 'f') return t('da.workspace.vocalFemale')
+  if (value === 'm') return t('da.workspace.vocalMale')
+  return value
+}
+
+function MetaField({ label, value }: { label: string; value?: string }) {
+  if (!value) return null
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-semibold text-foreground">{label}</p>
+      <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">{value}</p>
+    </div>
+  )
+}
+
+function MusicArtifactDetails({ artifact }: { artifact: DeepAgentArtifact }) {
+  const { t } = useLanguage()
+  const meta = artifact.metadata || {}
+  const params = asRecord(meta.generation_parameters)
+  const resolved = asRecord(meta.resolved_generation_parameters)
+  const lyrics = stringField(meta.lyrics, meta.generated_lyrics, params.lyrics, resolved.lyrics)
+  const style = stringField(meta.tags, params.tags, resolved.tags, meta.style)
+  const prompt = stringField(params.prompt, resolved.prompt, meta.prompt)
+  const title = stringField(meta.clip_title, params.title, resolved.title)
+  const vocal = stringField(meta.vocal_gender, params.vocal_gender, resolved.vocal_gender)
+  const instrumental = boolField(
+    meta.make_instrumental,
+    meta.instrumental,
+    params.make_instrumental,
+    params.instrumental,
+    resolved.make_instrumental,
+    resolved.instrumental,
+  )
+  const lyricsOrPrompt = lyrics || (instrumental ? '' : prompt)
+  const structurePrompt = instrumental ? prompt : (lyrics ? prompt : '')
+  if (!artifact.summary && !lyricsOrPrompt && !style && !title && vocal === '' && instrumental === undefined) {
+    return null
+  }
+  return (
+    <div className="space-y-3">
+      {artifact.summary ? (
+        <p className="text-xs text-muted-foreground">{artifact.summary}</p>
+      ) : null}
+      {instrumental === true ? (
+        <Badge variant="outline" className="text-[10px]">{t('da.workspace.instrumental')}</Badge>
+      ) : null}
+      <MetaField label={t('da.workspace.songTitle')} value={title} />
+      <MetaField label={t('da.workspace.musicStyle')} value={style} />
+      <MetaField
+        label={t('da.workspace.vocalGender')}
+        value={vocal ? vocalGenderLabel(vocal, t) : ''}
+      />
+      <MetaField label={t('da.workspace.lyrics')} value={lyricsOrPrompt} />
+      {structurePrompt && structurePrompt !== lyricsOrPrompt ? (
+        <MetaField label={t('da.workspace.musicPrompt')} value={structurePrompt} />
+      ) : null}
+    </div>
+  )
+}
+
+function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
+  const { t } = useLanguage()
+  const meta = artifact.metadata || {}
+  const sections = Array.isArray(meta.sections) ? meta.sections : []
+  const segments = Array.isArray(meta.segments) ? meta.segments : []
+  const instrumental = boolField(meta.is_instrumental)
+  const duration = typeof meta.audio_duration_sec === 'number'
+    ? `${meta.audio_duration_sec}s`
+    : stringField(meta.audio_duration_sec, meta.duration)
+  return (
+    <div className="space-y-3">
+      {artifact.summary ? (
+        <p className="text-xs text-muted-foreground">{artifact.summary}</p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <MetaField label={t('da.workspace.songName')} value={stringField(meta.song_name)} />
+        <MetaField label={t('da.workspace.genre')} value={stringField(meta.genre)} />
+        <MetaField label={t('da.workspace.globalBpm')} value={meta.global_bpm == null ? '' : String(meta.global_bpm)} />
+        <MetaField label={t('da.workspace.globalEmotion')} value={stringField(meta.global_emotion)} />
+        <MetaField label={t('da.workspace.suggestedTheme')} value={stringField(meta.suggested_global_theme)} />
+        <MetaField label={t('da.workspace.suggestedPalette')} value={stringField(meta.suggested_color_palette)} />
+        <MetaField label={t('da.workspace.audioDuration')} value={duration} />
+        <MetaField
+          label={t('da.workspace.isInstrumental')}
+          value={instrumental == null ? '' : instrumental ? t('da.workspace.yes') : t('da.workspace.no')}
+        />
+        <MetaField label={t('da.workspace.language')} value={stringField(meta.language)} />
+      </div>
+      <MetaField label={t('da.workspace.transcriptionText')} value={stringField(meta.text)} />
+      {sections.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-foreground">{t('da.workspace.sections')}</p>
+          {sections.map((item, index) => {
+            const row = asRecord(item)
+            const start = row.start_sec ?? row.start
+            const end = row.end_sec ?? row.end
+            return (
+              <div key={`section-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
+                <p className="text-xs font-medium">
+                  {stringField(row.section_type, `${t('da.workspace.section')} ${index + 1}`)}
+                  {start != null && end != null ? ` · ${start}–${end}s` : ''}
+                </p>
+                <p className="text-xs text-muted-foreground">{stringField(row.emotion, row.musical_features)}</p>
+                <p className="text-xs text-muted-foreground">{stringField(row.suggested_visual_theme)}</p>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+      {segments.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-foreground">{t('da.workspace.segments')}</p>
+          <div className="max-h-64 space-y-2 overflow-y-auto">
+            {segments.map((item, index) => {
+              const row = asRecord(item)
+              const start = row.start_sec ?? row.start
+              const end = row.end_sec ?? row.end
+              const gender = stringField(row.vocal_gender)
+              const presence = boolField(row.vocal_presence)
+              return (
+                <div key={`segment-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
+                  <p className="whitespace-pre-wrap text-xs">{stringField(row.text) || '—'}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {start != null && end != null ? `${start}–${end}s` : ''}
+                    {row.emotion ? ` · ${row.emotion}` : ''}
+                    {row.tempo ? ` · ${row.tempo}` : ''}
+                    {presence == null ? '' : ` · ${presence ? t('da.workspace.vocalsYes') : t('da.workspace.vocalsNo')}`}
+                    {gender ? ` · ${vocalGenderLabel(gender, t)}` : ''}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 const firstMarkdownHeading = (body: string): string | undefined => {
   const match = body.match(/^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/m)
   return match?.[1]?.replace(/[*_`]/g, '').trim() || undefined
@@ -593,12 +760,17 @@ export function DeepAgentArtifacts({
     !isStoryArtifact(artifact)
     && isAudioArtifact(artifact),
   )
+  const analysisArtifacts = visibleArtifacts.filter(artifact =>
+    !isStoryArtifact(artifact)
+    && isAudioAnalysisArtifact(artifact),
+  )
   const otherArtifacts = visibleArtifacts.filter(artifact =>
     !isStoryArtifact(artifact)
     && !isReadableTextArtifact(artifact)
     && !isImageArtifact(artifact)
     && !isVideoArtifact(artifact)
-    && !isAudioArtifact(artifact),
+    && !isAudioArtifact(artifact)
+    && !isAudioAnalysisArtifact(artifact),
   )
   // Surface all generation-task briefs (plot / shot / segment) as readable scripts.
   const segmentScripts = [...snapshot.tasks]
@@ -1216,11 +1388,50 @@ export function DeepAgentArtifacts({
                       ) : (
                         <p className="text-xs text-muted-foreground">{t('da.workspace.audioMissing')}</p>
                       )}
-                      {storyBody(artifact) && (
-                        <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                          <ReactMarkdown>{storyBody(artifact)}</ReactMarkdown>
-                        </div>
-                      )}
+                      <MusicArtifactDetails artifact={artifact} />
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </section>
+          )}
+
+          {analysisArtifacts.length > 0 && (
+            <section className="space-y-3">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Scissors className="h-4 w-4" />
+                {t('da.workspace.audioAnalysis')}
+              </h3>
+              {analysisArtifacts.map((artifact) => {
+                const selected = selectedIds.has(artifact.id)
+                const mediaUri = artifactMediaUri(artifact)
+                const title = artifactTitle(artifact.title, artifact.type, t)
+                return (
+                  <Card key={artifact.id} className="overflow-hidden border-border/60 bg-card/60">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                          <Scissors className="h-4 w-4" />
+                          <span className="truncate">{title}</span>
+                          <Badge variant="secondary">v{artifact.version}</Badge>
+                        </CardTitle>
+                        <Button
+                          size="sm"
+                          variant={selected ? 'secondary' : 'outline'}
+                          disabled={selected || selectingArtifactId === artifact.id}
+                          onClick={() => void handleSelectArtifact(artifact)}
+                        >
+                          {selectingArtifactId === artifact.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                          {selected && <Check className="mr-1 h-3.5 w-3.5" />}
+                          {selected ? t('da.workspace.selected') : t('da.workspace.useVersion')}
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {mediaUri ? (
+                        <audio src={mediaUri} controls className="w-full" />
+                      ) : null}
+                      <AudioAnalysisDetails artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
