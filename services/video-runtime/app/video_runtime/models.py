@@ -288,6 +288,8 @@ class VideoSpec(BaseModel):
 
 class RebuildPlanItem(BaseModel):
     step_id: str = Field(default_factory=uid)
+    objective: str = ""
+    input_artifact_version_ids: list[str] = Field(default_factory=list)
     artifact_version_id: str = ""
     output_artifact_id: str = ""
     output_artifact_type: str = ""
@@ -462,7 +464,7 @@ class PlanCheckpoint(BaseModel):
 
 
 class CheckpointResolution(BaseModel):
-    """Agent-authored semantic update accepted by a Workflow compiler."""
+    """One Cuti-compatible, append-only PlanPatch authored by the Agent."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -473,6 +475,10 @@ class CheckpointResolution(BaseModel):
     video_spec_patch: dict[str, Any] | None = None
     phase_inputs: dict[str, Any] = Field(default_factory=dict)
     proposed_steps: list[RebuildPlanItem] = Field(default_factory=list)
+    cancel_step_ids: list[str] = Field(default_factory=list)
+    goal_satisfied: bool = False
+    waiting_for_input: bool = False
+    response: str = ""
     reason: str = ""
 
     @model_validator(mode="after")

@@ -863,6 +863,20 @@ class PostgresVideoProjectRepository:
                 )
             }
             added = [item for item in updated_plan.items if item.step_id not in existing_step_ids]
+            if plan_revision.cancelled_step_ids:
+                cancelled_rows = await connection.fetch(
+                    f"""UPDATE {self.schema}.build_steps
+                    SET status='cancelled',completed_at=$3,updated_at=$3
+                    WHERE build_id=$1 AND plan_step_id=ANY($2::text[]) AND status='pending'
+                    RETURNING plan_step_id""",
+                    stored.build_id, plan_revision.cancelled_step_ids, now(),
+                )
+                cancelled = {row["plan_step_id"] for row in cancelled_rows}
+                missed = sorted(set(plan_revision.cancelled_step_ids) - cancelled)
+                if missed:
+                    raise ValueError(
+                        "cannot cancel non-pending build steps: " + ", ".join(missed)
+                    )
             await self._insert_spec_revision(connection, spec_revision)
             await self._insert_plan_revision(connection, plan_revision)
             await connection.execute(

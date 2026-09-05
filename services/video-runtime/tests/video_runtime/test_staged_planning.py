@@ -961,3 +961,117 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(completed.status, "completed")
         self.assertIsNotNone(version)
+
+
+class ContinuousPlanPatchRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.runtime = await video_runtime()
+        self.runtime.staged_planning_enabled = True
+        self.runtime.continuous_plan_patch_enabled = True
+        self.project, self.version = await self.runtime.create_project(
+            user_id="user-1", title="Continuous Cuti loop",
+        )
+        await self.runtime.bind_session(
+            project_id=self.project.id,
+            session_id="session-1",
+            user_id="user-1",
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.runtime.close()
+
+    async def test_deepseek_adds_one_frontier_then_finishes_from_real_artifact(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Continuous Cuti loop",
+                brief="Generate one native-audio cinematic clip",
+                workflow_id="seedance2",
+            ),
+            idempotency_key="continuous-plan",
+        )
+        self.assertEqual([item.step_id for item in plan.items], ["intent"])
+        self.assertEqual(plan.next_checkpoint.planning_mode, "agentic")
+        self.assertTrue(plan.project_intent.constraints["continuous_plan_patch"])
+
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-build",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoint = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertIn("video_plan_patch_submit", checkpoint_prompt(checkpoint))
+
+        updated = await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=checkpoint.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-patch-1",
+                video_spec_patch={"workflow_parameters": {"shot_count": 1}},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-1",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "one cinematic native-audio shot",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        self.assertIsNone(updated.video_spec)
+        self.assertEqual(updated.current_revision, 2)
+
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoint = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        final = await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=checkpoint.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=2,
+                base_spec_revision=2,
+                idempotency_key="continuous-patch-final",
+                video_spec_patch={},
+                goal_satisfied=True,
+                response="The video is ready in the creation workspace.",
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        self.assertIsNone(final.next_checkpoint)
+        completed, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(completed.status, "completed")
+        self.assertIsNotNone(version)

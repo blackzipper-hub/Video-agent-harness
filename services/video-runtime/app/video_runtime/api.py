@@ -107,6 +107,10 @@ class CheckpointResolveBody(ApiBody):
     video_spec_patch: dict | None = None
     phase_inputs: dict = Field(default_factory=dict)
     proposed_steps: list[dict] = Field(default_factory=list)
+    cancel_step_ids: list[str] = Field(default_factory=list)
+    goal_satisfied: bool = False
+    waiting_for_input: bool = False
+    response: str = ""
     reason: str = ""
 
     @model_validator(mode="after")

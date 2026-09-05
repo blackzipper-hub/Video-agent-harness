@@ -493,6 +493,14 @@ class InMemoryVideoProjectRepository:
                 raise ValueError(f"cannot resolve {stored.status} checkpoint")
             existing_steps = set(self.build_steps[stored.build_id])
             added = [item for item in updated_plan.items if item.step_id not in existing_steps]
+            for step_id in plan_revision.cancelled_step_ids:
+                state = self.build_steps[stored.build_id].get(step_id)
+                if state is None or state.status != "pending":
+                    raise ValueError(f"cannot cancel non-pending build step: {step_id}")
+                state.status = "cancelled"
+                state.completed_at = now()
+                state.updated_at = now()
+                self.build_steps[stored.build_id][step_id] = state
             self.video_spec_revisions[spec_revision.id] = deepcopy(spec_revision)
             self.project_spec_revisions[stored.project_id].append(spec_revision.id)
             self.plan_revisions[plan.id].append(deepcopy(plan_revision))
@@ -530,6 +538,7 @@ class InMemoryVideoProjectRepository:
                 "revision": plan_revision.revision,
                 "checkpoint_id": stored.id,
                 "added_step_ids": plan_revision.added_step_ids,
+                "cancelled_step_ids": plan_revision.cancelled_step_ids,
             })
             self._append_event(stored.project_id, "build.checkpoint.resolved", {
                 "build_id": stored.build_id,

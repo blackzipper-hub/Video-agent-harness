@@ -24,6 +24,11 @@ Provider / Workflow / Validator / Media plugins
 
 本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Video Agent Harness 架构说明](docs/video-agent-harness.zh.md)。
 
+规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的
+Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后，
+Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek
+再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
+
 ## Run
 
 ### Run from source
@@ -154,7 +159,7 @@ pnpm --filter @cuti-ai/video-studio run dev
 | Build 一直排队或 Runtime 不可用 | 执行 `docker compose -f compose.video.yml ps`，并查看 `docker compose -f compose.video.yml logs video-runtime`。 |
 | 端口已被占用 | 释放或映射端口 `3000`、`3080`、`8001`、`8090` 或 `18080`，并保持 URL 和代理配置一致。 |
 | Windows 上 Sandbox Worker 不健康 | 确认 Docker Desktop 使用 Linux 容器，并允许访问 Docker Socket。 |
-| 使用代理时 Node 模型请求超时 | 在 DeepSeek 终端设置 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`。 |
+| 使用代理时模型或 Provider 请求超时 | 在启动整个服务栈前设置 `HTTP_PROXY`、`HTTPS_PROXY`，并为 Node 设置 `NODE_USE_ENV_PROXY=1`；Compose 会把这些配置统一传给 Video Runtime、Media Service 和 DeepSeek Harness。 |
 
 停止 Docker 服务：
 

@@ -10,7 +10,7 @@ Stable, high-level tools that let a DeepSeek agent operate a versioned video pro
 
 #### What the model sees
 
-Nineteen `video_*` tools expose project creation and staged planning, semantic-checkpoint inspection and resolution, project inspection, structured edit and dependency impact previews, rebuild execution, durable build control, artifact selection, and export. `video_edit_preview` returns cost and affected steps but never executes paid work. Provider credentials, internal tasks, plugin hooks, and raw media operations are absent from the schemas.
+Twenty `video_*` tools expose project creation, Cuti-compatible continuous `PlanPatch` planning, project inspection, structured edit and dependency impact previews, rebuild execution, durable build control, artifact selection, and export. `video_edit_preview` returns cost and affected steps but never executes paid work. Provider credentials, internal tasks, plugin hooks, and raw media operations are absent from the schemas.
 
 #### Token effect
 

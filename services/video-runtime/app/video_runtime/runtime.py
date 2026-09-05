@@ -7,6 +7,9 @@ import time
 from copy import deepcopy
 from typing import Any, Protocol
 
+from jsonschema import ValidationError as JsonSchemaValidationError
+from jsonschema.validators import validator_for
+
 from .engine import IncrementalBuildEngine
 from .models import (
     ArtifactDependency,
@@ -272,6 +275,7 @@ class VideoBuildRuntime:
         plugins: VideoPluginRegistry | None = None,
         skill_runtime: VideoSkillRuntime | None = None,
         staged_planning_enabled: bool | None = None,
+        continuous_plan_patch_enabled: bool | None = None,
         max_parallel_generation_tasks: int | None = None,
     ) -> None:
         self.repo = repository or InMemoryVideoProjectRepository()
@@ -282,6 +286,12 @@ class VideoBuildRuntime:
             staged_planning_enabled
             if staged_planning_enabled is not None
             else os.getenv("VIDEO_STAGED_PLANNING_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes"}
+        )
+        self.continuous_plan_patch_enabled = (
+            continuous_plan_patch_enabled
+            if continuous_plan_patch_enabled is not None
+            else os.getenv("VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED", "false").strip().lower()
             in {"1", "true", "yes"}
         )
         # Keep the established Cuti deployment limit as the global safety cap;
@@ -1055,13 +1065,18 @@ class VideoBuildRuntime:
                 key: value for key, value in source_by_logical_id.items()
                 if key in referenced_source_ids
             },
+            "continuous_plan_patch": self.continuous_plan_patch_enabled,
         })
         for loaded in self.plugins.loaded:
             await loaded.implementation.before_plan(context)
         if self.staged_planning_enabled:
             workflow_id = supplied.workflow_id
             plugin = self._workflow_plugin(workflow_id)
-            planning_mode = plugin.implementation.planning_mode(workflow_id)
+            planning_mode = (
+                "agentic"
+                if self.continuous_plan_patch_enabled
+                else plugin.implementation.planning_mode(workflow_id)
+            )
             if planning_mode not in {"full", "staged", "agentic"}:
                 raise ValueError(f"unsupported workflow planning mode: {planning_mode}")
             if planning_mode == "full":
@@ -1097,12 +1112,29 @@ class VideoBuildRuntime:
                         constraints={"initial_video_spec": video_spec.model_dump(mode="json")},
                     )
                     context.values["project_intent"] = project_intent
-                compile_initial = getattr(plugin.implementation, "compile_initial", None)
-                if not callable(compile_initial):
-                    raise LookupError(
-                        f"workflow plugin has no staged compiler: {project_intent.workflow_id}"
+                if self.continuous_plan_patch_enabled:
+                    project_intent = project_intent.model_copy(update={
+                        "constraints": {
+                            **project_intent.constraints,
+                            "continuous_plan_patch": True,
+                        },
+                    })
+                    context.values["project_intent"] = project_intent
+                if self.continuous_plan_patch_enabled:
+                    from .staged_planning import compile_continuous_plan_initial
+
+                    plan = compile_continuous_plan_initial(
+                        workflow=self._workflow_policy_spec(project_intent.workflow_id),
+                        context=context,
+                        intent=project_intent,
                     )
-                plan = await compile_initial(context, project_intent)
+                else:
+                    compile_initial = getattr(plugin.implementation, "compile_initial", None)
+                    if not callable(compile_initial):
+                        raise LookupError(
+                            f"workflow plugin has no staged compiler: {project_intent.workflow_id}"
+                        )
+                    plan = await compile_initial(context, project_intent)
             if project_intent is None and video_spec is not None:
                 # Full planning does not need a ProjectIntent, but preserving the
                 # user's known constraints makes the plan self-describing.
@@ -1167,7 +1199,11 @@ class VideoBuildRuntime:
                 base_revision=0,
                 video_spec_revision_id=spec_revision.id,
                 added_step_ids=[item.step_id for item in plan.items],
-                reason="Initial staged phase",
+                reason=(
+                    "Initial Cuti continuous PlanPatch state"
+                    if self.continuous_plan_patch_enabled
+                    else "Initial staged phase"
+                ),
             )
         else:
             if video_spec is None:
@@ -1194,6 +1230,21 @@ class VideoBuildRuntime:
                     enabled=True,
                 )
         return saved
+
+    def _workflow_policy_spec(self, workflow_id: str):
+        """Return the original Cuti Workflow contract used to police PlanPatches."""
+        aliases = {
+            "cuti.music-video": "mv",
+            "cuti.lipsync-music-video": "mv",
+        }
+        return self.skills.workflows.get(aliases.get(workflow_id, workflow_id))
+
+    @staticmethod
+    def _is_continuous_plan(plan: RebuildPlan) -> bool:
+        return bool(
+            plan.project_intent
+            and plan.project_intent.constraints.get("continuous_plan_patch")
+        )
 
     def _workflow_plugin(self, workflow_id: str):
         from .skill_workflows import SKILL_WORKFLOW_PLUGIN_ID
@@ -1318,57 +1369,73 @@ class VideoBuildRuntime:
         current_spec_revision = await self.repo.get_video_spec_revision(
             plan.video_spec_revision_id,
         )
-        if resolution.video_spec is not None:
-            submitted_spec = resolution.video_spec
-        else:
-            intent = plan.project_intent
-            intent_base = ({
-                "title": intent.title,
-                "language": intent.language,
-                "target_duration_seconds": intent.target_duration_seconds,
-                "aspect_ratio": intent.aspect_ratio,
-                "resolution": intent.resolution,
-                "workflow_id": intent.workflow_id,
-                "style_id": intent.style_id,
-                "activated_skill_ids": list(intent.activated_skill_ids),
-                "source_asset_ids": list(intent.source_asset_ids),
-                "workflow_parameters": dict(intent.workflow_parameters),
-                "providers": intent.providers.model_dump(mode="json"),
-                "automation": intent.automation.model_dump(mode="json"),
-            } if intent is not None else {})
-            current_base = {
-                key: value for key, value in current_spec_revision.content.items()
-                if key in VideoSpec.model_fields
-            }
-            submitted_spec = VideoSpec.model_validate(_merge_spec_patch(
+        intent = plan.project_intent
+        intent_base = ({
+            "title": intent.title,
+            "language": intent.language,
+            "target_duration_seconds": intent.target_duration_seconds,
+            "aspect_ratio": intent.aspect_ratio,
+            "resolution": intent.resolution,
+            "workflow_id": intent.workflow_id,
+            "style_id": intent.style_id,
+            "activated_skill_ids": list(intent.activated_skill_ids),
+            "source_asset_ids": list(intent.source_asset_ids),
+            "workflow_parameters": dict(intent.workflow_parameters),
+            "providers": intent.providers.model_dump(mode="json"),
+            "automation": intent.automation.model_dump(mode="json"),
+        } if intent is not None else {})
+        current_base = {
+            key: value for key, value in current_spec_revision.content.items()
+            if key in VideoSpec.model_fields
+        }
+        merged_content = (
+            resolution.video_spec.model_dump(mode="json")
+            if resolution.video_spec is not None
+            else _merge_spec_patch(
                 {**intent_base, **current_base},
                 resolution.video_spec_patch or {},
-            ))
-        supplied_spec = await self._apply_project_skill_locks(
-            project_id, submitted_spec,
+            )
         )
-        if not isinstance(supplied_spec, VideoSpec):
-            raise TypeError("checkpoint resolution requires a complete VideoSpec")
-        if supplied_spec.workflow_id != plan.workflow_id:
+        if str(merged_content.get("workflow_id") or "") != plan.workflow_id:
             raise ValueError("checkpoint resolution cannot switch workflows")
         if (
             plan.project_intent is not None
-            and supplied_spec.providers != plan.project_intent.providers
+            and "providers" in merged_content
+            and merged_content["providers"]
+            != plan.project_intent.providers.model_dump(mode="json")
         ):
             raise ValueError("checkpoint resolution cannot switch providers")
-        resolution = resolution.model_copy(update={"video_spec": supplied_spec})
+
+        supplied_spec: VideoSpec | None
+        try:
+            candidate = VideoSpec.model_validate(merged_content)
+        except ValueError:
+            candidate = None
+        if candidate is not None:
+            locked = await self._apply_project_skill_locks(project_id, candidate)
+            if not isinstance(locked, VideoSpec):
+                raise TypeError("resolved VideoSpec has an invalid Skill lock projection")
+            supplied_spec = locked
+            merged_content = supplied_spec.model_dump(mode="json")
+        else:
+            supplied_spec = None
+        if resolution.goal_satisfied and resolution.proposed_steps:
+            raise ValueError("a completed goal cannot add more PlanPatch tasks")
+        if resolution.waiting_for_input:
+            raise ValueError(
+                "automatic video builds cannot wait for user input inside a PlanPatch"
+            )
+
         source_artifacts = {
             item.artifact_id: item
             for item in await self.repo.current_artifacts(project_id)
         }
-        referenced_source_ids = {
-            *supplied_spec.source_asset_ids,
-            *(
-                asset_id
-                for shot in supplied_spec.shots
-                for asset_id in shot.reference_asset_ids
-            ),
-        }
+        shots = merged_content.get("shots")
+        referenced_source_ids = set(merged_content.get("source_asset_ids") or [])
+        if isinstance(shots, list):
+            for shot in shots:
+                if isinstance(shot, dict):
+                    referenced_source_ids.update(shot.get("reference_asset_ids") or [])
         missing = sorted(referenced_source_ids - set(source_artifacts))
         if missing:
             raise LookupError(
@@ -1379,41 +1446,245 @@ class VideoBuildRuntime:
             project_id=project_id,
             revision=current_spec_revision.revision + 1,
             parent_revision_id=current_spec_revision.id,
-            content=supplied_spec.model_dump(mode="json"),
-            resolved_sections=[
-                "title", "format", "workflow", "style", "characters", "shots",
-                "audio", "providers", "automation", "timeline",
-            ],
-            unresolved_sections=[],
+            content=merged_content,
+            resolved_sections=sorted(
+                key for key in merged_content if key in VideoSpec.model_fields
+            ),
+            unresolved_sections=(
+                [] if supplied_spec is not None else [
+                    key for key in (
+                        "characters", "shots", "audio", "timeline"
+                    ) if not merged_content.get(key)
+                ]
+            ),
             source_artifact_version_ids=[
                 source_artifacts[item].id for item in sorted(referenced_source_ids)
             ],
             checkpoint_id=checkpoint.id,
             created_by="agent",
-            complete=True,
+            complete=supplied_spec is not None,
         )
-        context = PluginContext(project_id=project_id, build_id=build_id, values={
-            "video_spec": supplied_spec,
-            "base_project_version_id": plan.base_project_version_id,
-            "source_artifacts": {
-                key: value for key, value in source_artifacts.items()
-                if key in referenced_source_ids
-            },
-            "checkpoint": checkpoint,
-            "phase_inputs": dict(resolution.phase_inputs),
-            "video_spec_revision_id": spec_revision.id,
-        })
-        plugin = self._workflow_plugin(plan.workflow_id)
-        compile_phase = getattr(plugin.implementation, "compile_phase", None)
-        if not callable(compile_phase):
-            raise LookupError(f"workflow plugin has no staged phase compiler: {plan.workflow_id}")
-        updated_plan = await compile_phase(context, checkpoint, resolution, plan)
-        if updated_plan.workflow_id != plan.workflow_id:
-            raise ValueError("workflow compiler changed the locked workflow")
-        previous_ids = {item.step_id for item in plan.items}
-        added_ids = [item.step_id for item in updated_plan.items if item.step_id not in previous_ids]
-        if not added_ids:
-            raise ValueError("checkpoint resolution did not add a build phase")
+
+        cancelled_ids = list(dict.fromkeys(resolution.cancel_step_ids))
+        if cancelled_ids:
+            build_steps = {
+                item.plan_step_id: item
+                for item in await self.repo.list_build_steps(project_id, build_id)
+            }
+            unknown = sorted(set(cancelled_ids) - set(build_steps))
+            if unknown:
+                raise ValueError("PlanPatch cancels unknown tasks: " + ", ".join(unknown))
+            not_pending = sorted(
+                step_id for step_id in cancelled_ids
+                if build_steps[step_id].status != "pending"
+            )
+            if not_pending:
+                raise ValueError(
+                    "PlanPatch can cancel only pending tasks: " + ", ".join(not_pending)
+                )
+            dependants = sorted(
+                item.step_id for item in plan.items
+                if item.step_id not in cancelled_ids
+                and set(item.depends_on) & set(cancelled_ids)
+            )
+            if dependants:
+                raise ValueError(
+                    "cannot cancel tasks required by: " + ", ".join(dependants)
+                )
+        base_plan = plan.model_copy(deep=True)
+        if cancelled_ids:
+            base_plan.items = [
+                item for item in base_plan.items if item.step_id not in cancelled_ids
+            ]
+
+        if self._is_continuous_plan(plan) and checkpoint.planning_mode == "agentic":
+            from .staged_planning import append_continuous_plan_patch
+
+            if resolution.goal_satisfied:
+                completed_states = [
+                    item for item in await self.repo.list_build_steps(project_id, build_id)
+                    if item.status == "completed"
+                ]
+                completed_ids = {item.plan_step_id for item in completed_states}
+                playable = any(
+                    item.step_id in completed_ids
+                    and "video" in item.output_artifact_type.lower()
+                    for item in base_plan.items
+                )
+                if not playable:
+                    raise ValueError(
+                        "goal_satisfied requires a completed video Artifact; queued work is not completion"
+                    )
+                updated_plan = base_plan
+                updated_plan.video_spec = supplied_spec
+                updated_plan.video_spec_revision_id = spec_revision.id
+                updated_plan.current_revision += 1
+                updated_plan.current_phase = "goal_satisfied"
+                updated_plan.next_checkpoint = None
+                added_ids: list[str] = []
+            else:
+                build_step_states = await self.repo.list_build_steps(project_id, build_id)
+                completed_ids = {
+                    item.plan_step_id for item in build_step_states
+                    if item.status == "completed"
+                }
+                artifact_step_ids = {
+                    item.result_artifact_version_id: item.plan_step_id
+                    for item in build_step_states
+                    if item.status == "completed" and item.result_artifact_version_id
+                }
+                artifact_step_ids.update({
+                    item.artifact_version_id: item.step_id
+                    for item in base_plan.items
+                    if item.action == "reuse" and item.artifact_version_id
+                })
+                normalized_steps: list[RebuildPlanItem] = []
+                for proposed in resolution.proposed_steps:
+                    proposed = proposed.model_copy(deep=True)
+                    try:
+                        capability = self.skills.capabilities.get(proposed.capability)
+                    except LookupError as exc:
+                        raise ValueError(
+                            f"PlanPatch references unavailable capability {proposed.capability}"
+                        ) from exc
+                    proposed.output_artifact_type = (
+                        proposed.output_artifact_type or capability.output_type
+                    )
+                    input_versions = proposed.input_artifact_version_ids
+                    if not isinstance(input_versions, list):
+                        raise ValueError("input_artifact_version_ids must be an array")
+                    unknown_inputs = sorted(
+                        str(value) for value in input_versions
+                        if str(value) not in artifact_step_ids
+                    )
+                    if unknown_inputs:
+                        raise ValueError(
+                            "PlanPatch references unavailable input ArtifactVersions: "
+                            + ", ".join(unknown_inputs)
+                        )
+                    proposed.depends_on = list(dict.fromkeys([
+                        *proposed.depends_on,
+                        *(artifact_step_ids[str(value)] for value in input_versions),
+                    ]))
+                    normalized_steps.append(proposed)
+                workflow = self._workflow_policy_spec(plan.workflow_id)
+                build_record = await self.repo.get_build(project_id, build_id)
+                from app.chat.v2.workflows import (
+                    capability_requires_workflow,
+                    inject_workflow_parameters,
+                )
+                available_inputs: dict[str, MediaArtifactVersion] = {}
+                for version_id in artifact_step_ids:
+                    available_inputs[version_id] = await self.repo.get_artifact(
+                        project_id, version_id,
+                    )
+                for proposed in normalized_steps:
+                    capability = self.skills.capabilities.get(proposed.capability)
+                    proposed.capability = capability.id
+                    if workflow is not None and capability_requires_workflow(capability.id):
+                        proposed.parameters = inject_workflow_parameters(
+                            proposed.parameters, workflow,
+                        )
+                    schema = capability.parameters_schema
+                    if build_record.session_id and (
+                        not schema
+                        or schema.get("additionalProperties") is not False
+                        or "thread_id" in schema.get("properties", {})
+                        or "project_thread_id" in schema.get("properties", {})
+                    ):
+                        if "project_thread_id" in schema.get("properties", {}):
+                            proposed.parameters.setdefault(
+                                "project_thread_id", build_record.session_id,
+                            )
+                        else:
+                            proposed.parameters.setdefault(
+                                "thread_id", build_record.session_id,
+                            )
+                    if schema:
+                        validator = validator_for(schema)(schema)
+                        try:
+                            validator.validate(proposed.parameters)
+                        except JsonSchemaValidationError as exc:
+                            path = ".".join(str(item) for item in exc.absolute_path)
+                            location = f" at {path}" if path else ""
+                            raise ValueError(
+                                f"PlanPatch task {proposed.step_id} has invalid parameters"
+                                f"{location}: {exc.message}"
+                            ) from exc
+                    input_types = {
+                        available_inputs[version_id].type
+                        for version_id in proposed.input_artifact_version_ids
+                    }
+                    missing_input_types = [
+                        expected for expected in capability.inputs.required
+                        if not any(
+                            _artifact_matches_media_type(actual, [expected])
+                            for actual in input_types
+                        )
+                    ]
+                    if missing_input_types:
+                        raise ValueError(
+                            f"PlanPatch task {proposed.step_id} is missing inputs: "
+                            + ", ".join(missing_input_types)
+                        )
+                    accepted_types = [
+                        *capability.inputs.required,
+                        *capability.inputs.soft,
+                        *capability.inputs.optional,
+                    ]
+                    unsupported_types = sorted(
+                        actual for actual in input_types
+                        if accepted_types and not _artifact_matches_media_type(
+                            actual, accepted_types,
+                        )
+                    )
+                    if unsupported_types:
+                        raise ValueError(
+                            f"PlanPatch task {proposed.step_id} has unsupported inputs: "
+                            + ", ".join(unsupported_types)
+                        )
+                allowed = workflow.allowed_capabilities if workflow is not None else None
+                if plan.workflow_id == "cuti.lipsync-music-video" and allowed is not None:
+                    allowed = frozenset({*allowed, "media.lipsync"})
+                updated_plan, added_ids = append_continuous_plan_patch(
+                    existing_plan=base_plan,
+                    proposed_steps=normalized_steps,
+                    allowed_capabilities=allowed,
+                    completed_step_ids=completed_ids,
+                    spec=supplied_spec,
+                    spec_revision_id=spec_revision.id,
+                )
+        else:
+            if supplied_spec is None:
+                raise ValueError("staged Workflow checkpoint requires a complete VideoSpec")
+            resolution = resolution.model_copy(update={"video_spec": supplied_spec})
+            context = PluginContext(project_id=project_id, build_id=build_id, values={
+                "video_spec": supplied_spec,
+                "base_project_version_id": plan.base_project_version_id,
+                "source_artifacts": {
+                    key: value for key, value in source_artifacts.items()
+                    if key in referenced_source_ids
+                },
+                "checkpoint": checkpoint,
+                "phase_inputs": dict(resolution.phase_inputs),
+                "video_spec_revision_id": spec_revision.id,
+            })
+            plugin = self._workflow_plugin(plan.workflow_id)
+            compile_phase = getattr(plugin.implementation, "compile_phase", None)
+            if not callable(compile_phase):
+                raise LookupError(
+                    f"workflow plugin has no staged phase compiler: {plan.workflow_id}"
+                )
+            updated_plan = await compile_phase(context, checkpoint, resolution, base_plan)
+            if updated_plan.workflow_id != plan.workflow_id:
+                raise ValueError("workflow compiler changed the locked workflow")
+            previous_ids = {item.step_id for item in plan.items}
+            added_ids = [
+                item.step_id for item in updated_plan.items
+                if item.step_id not in previous_ids
+            ]
+            if not added_ids:
+                raise ValueError("checkpoint resolution did not add a build phase")
         await self._resolve_plan_skills(updated_plan)
         topological_steps(updated_plan.items)
         plan_revision = BuildPlanRevision(
@@ -1424,6 +1695,7 @@ class VideoBuildRuntime:
             checkpoint_id=checkpoint.id,
             video_spec_revision_id=spec_revision.id,
             added_step_ids=added_ids,
+            cancelled_step_ids=cancelled_ids,
             reason=resolution.reason or f"Resolved checkpoint {checkpoint.id}",
         )
         saved = await self.repo.resolve_checkpoint(
@@ -1873,6 +2145,10 @@ class VideoBuildRuntime:
                     "capability": planned.capability,
                     "rebuild_capability": planned.capability,
                     "generation_parameters": dict(planned.parameters),
+                    "objective": planned.objective,
+                    "input_artifact_version_ids": list(
+                        planned.input_artifact_version_ids
+                    ),
                     "estimated_cost": planned.estimated_cost,
                     "resolved_skills": [
                         value.model_dump(mode="json")
@@ -2227,7 +2503,11 @@ class VideoBuildRuntime:
                         target_version_id=target.id,
                         relation="build_step_dependency",
                     ))
-        if plan.schema_version == 2 and plan.video_spec is None:
+        if (
+            plan.schema_version == 2
+            and plan.video_spec is None
+            and not self._is_continuous_plan(plan)
+        ):
             raise ValueError("final staged build requires a complete VideoSpec")
         result = await self.repo.commit_initial_build(
             build_id=build.id,

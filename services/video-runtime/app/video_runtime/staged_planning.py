@@ -362,6 +362,132 @@ def compile_initial_phase(
     )
 
 
+def compile_continuous_plan_initial(
+    *,
+    workflow: WorkflowSpec | None,
+    context: PluginContext,
+    intent: ProjectIntent,
+) -> RebuildPlan:
+    """Persist only known inputs, then hand planning back to the DeepSeek loop.
+
+    This mirrors Cuti V2's DynamicHarness: the Workflow is a policy boundary,
+    not a precompiled production DAG.  The Agent sees the resulting snapshot
+    and submits the first executable frontier as a PlanPatch.
+    """
+    initial = compile_initial_phase(workflow=workflow, context=context, intent=intent)
+    initial.items = [
+        item for item in initial.items
+        if item.step_id == "intent" or item.action == "reuse"
+    ]
+    initial.current_phase = "goal_received"
+    initial.next_checkpoint = PlanCheckpointDefinition(
+        id="agent-plan-ready",
+        phase="goal_received",
+        next_phase="agent_execution",
+        required_artifact_types=["project_intent"],
+        resolves=["next_plan_patch"],
+        planner_instruction=(
+            "Inspect the current project snapshot and the loaded Workflow contract. "
+            "Submit only the next executable task or independent task frontier. "
+            "After those tasks finish you will receive their real Artifacts and revise "
+            "the plan again. Do not precompile the whole production DAG."
+        ),
+        planning_mode="agentic",
+    )
+    initial.estimated_cost = round(
+        sum(item.estimated_cost for item in initial.items), 6,
+    )
+    return initial
+
+
+def append_continuous_plan_patch(
+    *,
+    existing_plan: RebuildPlan,
+    proposed_steps: Iterable[RebuildPlanItem],
+    allowed_capabilities: frozenset[str] | None,
+    completed_step_ids: set[str],
+    spec: VideoSpec | None,
+    spec_revision_id: str,
+) -> tuple[RebuildPlan, list[str]]:
+    """Validate and append one Cuti-style ready frontier.
+
+    New tasks may depend only on tasks whose Artifacts already exist. This is
+    what makes the next Agent wake-up happen after every task/frontier instead
+    of silently executing a preplanned downstream DAG.
+    """
+    proposed = [item.model_copy(deep=True) for item in proposed_steps]
+    if not proposed:
+        raise BuildPlanValidationError("PlanPatch must add at least one executable task")
+    if len(proposed) > 8:
+        raise BuildPlanValidationError("PlanPatch may add at most eight ready tasks")
+    existing_ids = {item.step_id for item in existing_plan.items}
+    proposed_ids = {item.step_id for item in proposed}
+    if len(proposed_ids) != len(proposed):
+        raise BuildPlanValidationError("PlanPatch contains duplicate task ids")
+    overlap = sorted(existing_ids & proposed_ids)
+    if overlap:
+        raise BuildPlanValidationError("plan step already exists: " + ", ".join(overlap))
+    for item in proposed:
+        if item.action not in {"create", "validate"}:
+            raise BuildPlanValidationError(
+                "PlanPatch tasks may only create or validate artifacts"
+            )
+        if not item.capability:
+            raise BuildPlanValidationError(f"PlanPatch task {item.step_id} has no capability")
+        if not item.output_artifact_type:
+            raise BuildPlanValidationError(
+                f"PlanPatch task {item.step_id} has no output_artifact_type"
+            )
+        if allowed_capabilities is not None and item.capability not in allowed_capabilities:
+            raise BuildPlanValidationError(
+                f"workflow does not allow capability {item.capability}"
+            )
+        missing = sorted(set(item.depends_on) - completed_step_ids)
+        if missing:
+            raise BuildPlanValidationError(
+                f"PlanPatch task {item.step_id} depends on unfinished or unknown tasks: {missing}"
+            )
+        item.output_artifact_id = (
+            item.output_artifact_id
+            or f"{existing_plan.project_id}:{item.step_id}"
+        )
+        item.order = len(existing_plan.items) + proposed.index(item) + 1
+        item.reason = item.reason or "Agent-authored continuous PlanPatch"
+
+    # Multiple tasks in one patch are one independent frontier and execute in
+    # parallel, just as Cuti fills the currently available task slots.
+    if len(proposed) > 1:
+        group = f"plan-patch-{existing_plan.current_revision + 1}"
+        for item in proposed:
+            item.execution_group = item.execution_group or group
+            item.max_parallelism = item.max_parallelism or len(proposed)
+
+    updated = deepcopy(existing_plan)
+    updated.items.extend(proposed)
+    updated.video_spec = spec
+    updated.video_spec_revision_id = spec_revision_id
+    updated.current_revision += 1
+    updated.current_phase = "agent_execution"
+    updated.next_checkpoint = PlanCheckpointDefinition(
+        id=f"agent-plan-ready-{updated.current_revision}",
+        phase="task_frontier_completed",
+        next_phase="agent_execution",
+        required_artifact_types=[],
+        resolves=["next_plan_patch"],
+        planner_instruction=(
+            "Inspect every newly completed Artifact and revise the plan. Add only the "
+            "next ready task/frontier, or set goal_satisfied after the final playable "
+            "result exists."
+        ),
+        planning_mode="agentic",
+    )
+    updated.estimated_cost = round(
+        sum(item.estimated_cost for item in updated.items), 6,
+    )
+    topological_steps(updated.items)
+    return updated, [item.step_id for item in proposed]
+
+
 def next_checkpoint_for(
     workflow: WorkflowSpec | None,
     workflow_id: str,

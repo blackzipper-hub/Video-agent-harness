@@ -30,6 +30,27 @@ def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
         "planning_mode": checkpoint.planning_mode,
         "delivery_id": checkpoint.delivery_id,
     }
+    if checkpoint.planning_mode == "agentic":
+        instructions = [
+            "This build uses Cuti continuous PlanPatch semantics. The Workflow is a "
+            "capability and creative-policy boundary, not a precompiled DAG.",
+            "Inspect the real completed Artifacts before deciding what comes next. Call "
+            "video_plan_patch_submit with a partial video_spec_patch and add_tasks containing "
+            "only the next executable task or independent task frontier.",
+            "Every proposed task dependency must already be completed. Do not submit future "
+            "downstream tasks now; the Runtime will wake this Session again after this frontier.",
+            "Only set goal_satisfied=true when the final playable deliverable exists, never "
+            "merely because work was queued. Do not add tasks in the completion patch; include "
+            "any VideoSpec facts learned so far as a final partial patch.",
+        ]
+    else:
+        instructions = [
+            "Use the real artifact summaries to complete the unresolved creative fields.",
+            "Then call video_checkpoint_resolve once with either a complete revised VideoSpec "
+            "or a video_spec_patch that completes this phase, the exact base revisions, and "
+            "idempotency_key checkpoint:<delivery_id>.",
+            "Do not propose BuildSteps; the staged Workflow compiler owns them.",
+        ]
     return "\n".join([
         "CUTI_VIDEO_CHECKPOINT_V1",
         "A durable video build reached a semantic planning checkpoint.",
@@ -40,12 +61,7 @@ def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
         "From video_workflow_load, call video_skill_load for every returned "
         "skillDependencies entry and read every referenced bundled resource required by "
         "the Workflow before resolving the checkpoint.",
-        "Use the real artifact summaries to complete the unresolved creative fields.",
-        "Then call video_checkpoint_resolve once with either a complete revised VideoSpec "
-        "or a video_spec_patch that completes this phase, the exact base revisions, and "
-        "idempotency_key checkpoint:<delivery_id>.",
-        "For staged workflows do not propose BuildSteps; the Workflow compiler owns them. "
-        "Only agentic workflows may provide proposed_steps within allowed capabilities.",
+        *instructions,
         "Do not ask the user for confirmation unless the checkpoint explicitly says so.",
         "Checkpoint payload:",
         json.dumps(payload, ensure_ascii=False, sort_keys=True),

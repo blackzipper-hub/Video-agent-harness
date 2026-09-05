@@ -355,6 +355,15 @@ def _initial_video_build_prompt(
         f"VISIBLE_USER_REQUEST_JSON: {json.dumps(objective, ensure_ascii=False)}",
         "This request comes from the fully automatic video creation entry.",
         (
+            "Planning uses Cuti continuous PlanPatch semantics: start from ProjectIntent only. "
+            "The Runtime will persist it, then repeatedly wake this same DeepSeek Session after "
+            "each completed task frontier so you can inspect real Artifacts and append the next "
+            "tasks. Do not try to precompile the complete production DAG in this turn."
+            if os.getenv("VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED", "false").lower()
+            in {"1", "true", "yes", "on"} else
+            "Planning uses the configured Workflow planning contract."
+        ),
+        (
             "The Video Runtime BFF has already completed the video_project_create stage "
             f"and bound project {project_id} to this Session. Do not create another project."
         ),

@@ -69,6 +69,11 @@ services:
       VIDEO_RUNTIME_URL: http://video-runtime:8001
       VIDEO_RUNTIME_SERVICE_TOKEN: video-harness-runtime-local
       VIDEO_RUNTIME_USER_ID: local-user
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost,video-runtime,media-service,sandbox-worker,deepseek-harness}
+      NODE_USE_ENV_PROXY: ${NODE_USE_ENV_PROXY:-1}
     depends_on:
       video-runtime:
         condition: service_healthy

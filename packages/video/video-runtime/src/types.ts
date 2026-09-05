@@ -243,6 +243,10 @@ export interface CheckpointResolutionRequest {
   videoSpecPatch?: Record<string, JsonValue>
   phaseInputs?: Record<string, JsonValue>
   proposedSteps?: Array<Record<string, JsonValue>>
+  cancelStepIds?: string[]
+  goalSatisfied?: boolean
+  waitingForInput?: boolean
+  response?: string
   reason?: string
 }
 

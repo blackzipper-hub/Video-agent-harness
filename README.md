@@ -24,6 +24,12 @@ Provider / Workflow / Validator / Media plugins
 
 The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Video Agent Harness reference](docs/video-agent-harness.md) for the architecture in detail.
 
+Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the
+allowed capabilities and creative rules, but it does not precompile the complete
+production DAG. After each executable task frontier finishes, Video Runtime persists
+the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the
+next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
+
 ## Run
 
 ### Run from source
@@ -154,7 +160,7 @@ Open [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create).
 | Build remains queued or the Runtime is unavailable | Run `docker compose -f compose.video.yml ps` and inspect `docker compose -f compose.video.yml logs video-runtime`. |
 | Port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, or `18080`. Keep URLs and proxy settings consistent. |
 | Sandbox Worker is unhealthy on Windows | Ensure Docker Desktop is using Linux containers and allows access to the Docker socket. |
-| Node model calls time out behind a proxy | Set `HTTP_PROXY`, `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` in the DeepSeek terminal. |
+| Model or provider calls time out behind a proxy | Set `HTTP_PROXY` and `HTTPS_PROXY` before starting the stack, plus `NODE_USE_ENV_PROXY=1` for Node. Compose passes the settings consistently to Video Runtime, Media Service, and DeepSeek Harness. |
 
 Stop the Docker stack with:
 
