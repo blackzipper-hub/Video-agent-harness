@@ -17,10 +17,12 @@ from app.video_runtime.models import PlanCheckpoint
 from app.video_runtime.runtime import _checkpoint_artifact_summary
 from app.video_runtime.staged_planning import (
     append_phase,
+    compile_continuous_plan_initial,
     failed_checkpoint_step_ids,
     initial_checkpoint,
 )
 from app.video_runtime.initial_build import BuildPlanValidationError
+from app.video_runtime.plugins import PluginContext
 
 from test_initial_build import FakePlanExecutor, video_runtime, video_spec
 
@@ -961,6 +963,50 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(completed.status, "completed")
         self.assertIsNotNone(version)
+
+
+class ContinuousPlanInitializationTest(unittest.TestCase):
+    def test_initialization_does_not_require_a_fixed_workflow_compiler(self) -> None:
+        # Include aliases and a plugin-owned workflow with no built-in compiler.
+        # Availability is checked by Runtime before reaching this function.
+        for workflow_id in (
+            "seedance2", "seedance-mv", "cuti.music-video",
+            "cuti.lipsync-music-video", "product-ad-video",
+            "cuti-scenario-product-workflow", "workflow-keyframe-pipeline",
+            "third-party-agentic-workflow",
+        ):
+            with self.subTest(workflow=workflow_id):
+                plan = compile_continuous_plan_initial(
+                    workflow=None,
+                    context=PluginContext(project_id="project-1"),
+                    intent=ProjectIntent(
+                        title="User goal", brief="Create a video", workflow_id=workflow_id,
+                    ),
+                )
+                self.assertEqual([item.step_id for item in plan.items], ["intent"])
+                self.assertEqual(plan.workflow_id, workflow_id)
+                self.assertEqual(plan.estimated_cost, 0)
+                self.assertEqual(plan.next_checkpoint.planning_mode, "agentic")
+
+    def test_sources_are_reused_but_missing_or_foreign_sources_are_rejected(self) -> None:
+        source = MediaArtifactVersion(
+            project_id="project-1", artifact_id="source:product", type="source_image",
+        )
+        intent = ProjectIntent(
+            title="Product", brief="Use my product image", workflow_id="product-ad-video",
+            source_asset_ids=[source.artifact_id],
+        )
+        context = PluginContext(project_id="project-1", values={
+            "source_artifacts": {source.artifact_id: source},
+        })
+        plan = compile_continuous_plan_initial(workflow=None, context=context, intent=intent)
+        self.assertEqual([item.action for item in plan.items], ["create", "reuse"])
+        self.assertEqual(plan.items[1].artifact_version_id, source.id)
+        for sources in ({}, {source.artifact_id: source.model_copy(update={"project_id": "other"})}):
+            with self.subTest(sources=sources):
+                context.values["source_artifacts"] = sources
+                with self.assertRaisesRegex(BuildPlanValidationError, "source artifact is unavailable"):
+                    compile_continuous_plan_initial(workflow=None, context=context, intent=intent)
 
 
 class ContinuousPlanPatchRuntimeTest(unittest.IsolatedAsyncioTestCase):

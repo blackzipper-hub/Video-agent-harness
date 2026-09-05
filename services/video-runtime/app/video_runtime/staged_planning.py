@@ -374,13 +374,37 @@ def compile_continuous_plan_initial(
     not a precompiled production DAG.  The Agent sees the resulting snapshot
     and submits the first executable frontier as a PlanPatch.
     """
-    initial = compile_initial_phase(workflow=workflow, context=context, intent=intent)
-    initial.items = [
-        item for item in initial.items
-        if item.step_id == "intent" or item.action == "reuse"
-    ]
-    initial.current_phase = "goal_received"
-    initial.next_checkpoint = PlanCheckpointDefinition(
+    # Do not invoke a production compiler here, even to discard its output.
+    # Workflow-specific input acquisition and creative steps belong to the
+    # Agent's PlanPatch; the Runtime only registers facts already supplied.
+    if not context.project_id:
+        raise BuildPlanValidationError("continuous planning requires a project")
+    project_id = context.project_id
+    sources = dict(context.values.get("source_artifacts") or {})
+    items = [RebuildPlanItem(
+        step_id="intent",
+        output_artifact_id=f"{project_id}:intent",
+        output_artifact_type="project_intent",
+        action="create",
+        capability="runtime.artifact.persist",
+        parameters={"title": intent.title, "content": intent.model_dump(mode="json")},
+        order=1,
+        reason="Register the user's goal before Agent planning",
+    )]
+    for index, logical_id in enumerate(intent.source_asset_ids, start=1):
+        artifact = sources.get(logical_id)
+        if artifact is None or artifact.project_id != project_id:
+            raise BuildPlanValidationError(f"source artifact is unavailable: {logical_id}")
+        items.append(RebuildPlanItem(
+            step_id=f"source-{index}",
+            artifact_version_id=artifact.id,
+            output_artifact_id=f"{project_id}:source-{index}",
+            output_artifact_type=artifact.type,
+            action="reuse",
+            order=len(items) + 1,
+            reason="Reuse an existing project source without generation",
+        ))
+    checkpoint = PlanCheckpointDefinition(
         id="agent-plan-ready",
         phase="goal_received",
         next_phase="agent_execution",
@@ -394,10 +418,19 @@ def compile_continuous_plan_initial(
         ),
         planning_mode="agentic",
     )
-    initial.estimated_cost = round(
-        sum(item.estimated_cost for item in initial.items), 6,
+    return RebuildPlan(
+        project_id=project_id,
+        kind="initial",
+        base_project_version_id=str(context.values.get("base_project_version_id") or ""),
+        workflow_id=intent.workflow_id,
+        project_intent=intent,
+        items=items,
+        schema_version=2,
+        current_revision=1,
+        current_phase="goal_received",
+        next_checkpoint=checkpoint,
+        estimated_cost=0,
     )
-    return initial
 
 
 def append_continuous_plan_patch(
