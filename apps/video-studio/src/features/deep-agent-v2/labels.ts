@@ -90,6 +90,19 @@ export function artifactTitle(title: string | undefined, type: string, t: Transl
 export function runtimeMessage(message: string, t: Translate): string {
   const text = (message || '').trim()
   if (!text) return text
+  const exactMessages: Record<string, TranslationKey> = {
+    'Executing initial video build': 'da.runtime.executingInitial',
+    'Executing rebuild plan': 'da.runtime.executingRebuild',
+    'Initial video build committed': 'da.runtime.committed',
+    'Build committed': 'da.runtime.committed',
+    'Build failed; the previous project version remains active': 'da.runtime.failedPreserved',
+    'Agent planning failed; the previous project version remains active': 'da.runtime.agentPlanningFailed',
+    'Retry queued': 'da.runtime.retryQueued',
+    'Resumed by user; reconciling existing work': 'da.runtime.resuming',
+    'Cancellation requested': 'da.runtime.cancellationRequested',
+  }
+  const exact = exactMessages[text]
+  if (exact) return t(exact)
   const requestFailed = text.match(/Video Runtime request failed \((\d+)\)/i)
   if (requestFailed) {
     return interpolate(t('da.runtime.requestFailed'), { status: requestFailed[1] })
@@ -104,6 +117,13 @@ export function runtimeMessage(message: string, t: Translate): string {
   if (waiting) {
     return interpolate(t('da.runtime.waitingProvider'), {
       step: planStepLabel(waiting[1], t),
+    })
+  }
+  const completed = text.match(/^Completed (\d+) of (\d+) (?:media |build )?steps$/i)
+  if (completed) {
+    return interpolate(t('da.runtime.completedSteps'), {
+      done: completed[1],
+      total: completed[2],
     })
   }
   return planStepLabel(text, t)

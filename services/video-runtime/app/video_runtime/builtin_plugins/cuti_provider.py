@@ -52,6 +52,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
                     "generation_parameters": dict(step.get("parameters") or {}),
                     "rebuild_capability": envelope.grant.capability,
                     "plan_step_id": step.get("step_id"),
+                    "language_contract": step.get("language_contract"),
                 },
             )
             completed_payload = payload.get("completed_artifacts", {})
@@ -198,6 +199,14 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             created_at=item.created_at,
         ) for item in selected]
         resolve_media_parameters(parameters, legacy_artifacts)
+        if envelope.grant.capability == "api.provider.generate":
+            from app.integrations.providers.provider_bridge import normalize_video_profile
+
+            parameters = normalize_video_profile(parameters)
+        raw_language_contract = metadata.get("language_contract")
+        language_contract = (
+            raw_language_contract if isinstance(raw_language_contract, dict) else {}
+        )
         run = AgentRun(
             id=f"video-build:{payload['build']['id']}",
             thread_id=envelope.grant.session_id,
@@ -205,7 +214,11 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             user_id=envelope.grant.user_id,
             objective=prompt,
             idempotency_key=envelope.grant.idempotency_key,
-            output_language=str(metadata.get("output_language") or "en"),
+            output_language=(
+                "zh"
+                if str(language_contract.get("content_language") or "").lower().startswith("zh")
+                else "en"
+            ),
         )
         task = Task(
             run_id=run.id,
@@ -257,6 +270,11 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         generated_metadata = {
             **metadata,
             **dict(generated.get("metadata") or {}),
+            **{
+                key: generated[key]
+                for key in ("provider_used", "model", "model_family", "generation_mode")
+                if generated.get(key) is not None
+            },
             "rebuild_capability": envelope.grant.capability,
             # Keep the concrete URLs resolved from BuildStep dependencies for
             # post-generation identity/continuity validators. The Runtime also

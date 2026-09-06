@@ -9,6 +9,7 @@ import characterLeo from "@/assets/character-human-leo-toLiEK8M.png";
 import characterLuna from "@/assets/character-human-luna-CPe4KvLL.png";
 import characterRuby from "@/assets/character-human-ruby-BDFXLu1L.png";
 import characterMiuMiu from "@/assets/character-MiuMiu.png";
+import { useLanguage } from "@/i18n/LanguageContext";
 
 interface Character {
   id: string;
@@ -39,6 +40,7 @@ const CharacterSelectPopover = ({
   onSelect,
   selectedCharacters = []
 }: CharacterSelectPopoverProps) => {
+  const { t } = useLanguage();
   const [characters, setCharacters] = useState<Character[]>(DEFAULT_CHARACTERS);
   const [selected, setSelected] = useState<string[]>(
     selectedCharacters.map(c => c.id)
@@ -56,9 +58,9 @@ const CharacterSelectPopover = ({
 
       // Show toast
       if (newSelected.includes(id)) {
-        toast.success(`${name} selected`);
+        toast.success(`${name} ${t('characterSelected')}`);
       } else {
-        toast.success(`${name} deselected`);
+        toast.success(`${name} ${t('characterDeselected')}`);
       }
 
       return newSelected;
@@ -82,7 +84,7 @@ const CharacterSelectPopover = ({
             {/* Header */}
             <div className="flex items-center justify-between">
               <h4 className="font-medium text-sm text-muted-foreground">
-                Cuti & Friends (Pick the character you like)
+                {t('pickCharacter')}
               </h4>
             </div>
 

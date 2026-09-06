@@ -241,13 +241,13 @@ const SelectionHub = () => {
                 >
                   <img
                     src={lipsyncCardBg}
-                    alt="Lip-sync Music Video"
+                    alt={t("selectionHubLipsyncAlt")}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-black/20 to-transparent" />
                   {isLipsyncDemoLoading && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-sm font-medium">
-                      Loading demo…
+                      {t("selectionHubDemoLoading")}
                     </div>
                   )}
                 </button>
@@ -264,13 +264,13 @@ const SelectionHub = () => {
                 >
                   <img
                     src={storytellingCardBg}
-                    alt="Storytelling Music Video"
+                    alt={t("selectionHubStoryAlt")}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-black/20 to-transparent" />
                   {isStorytellingDemoLoading && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-sm font-medium">
-                      Loading demo…
+                      {t("selectionHubDemoLoading")}
                     </div>
                   )}
                 </button>
@@ -287,13 +287,13 @@ const SelectionHub = () => {
                 >
                   <img
                     src={demoProductLaunchImage}
-                    alt="Product Launch"
+                    alt={t("selectionHubProductAlt")}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-black/20 to-transparent" />
                   {isProductLaunchDemoLoading && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-sm font-medium">
-                      Loading demo…
+                      {t("selectionHubDemoLoading")}
                     </div>
                   )}
                 </button>
@@ -309,7 +309,7 @@ const SelectionHub = () => {
                 >
                   <img
                     src={`${import.meta.env.BASE_URL}chunjie-cover.jpg`}
-                    alt="Cuti 给你做新年头像"
+                    alt={t("selectionHubNewYearAlt")}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                 </button>
@@ -331,9 +331,9 @@ const SelectionHub = () => {
                     福
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-foreground">上传你的头像</h2>
+                    <h2 className="text-xl font-bold text-foreground">{t("selectionHubNewYearUploadTitle")}</h2>
                     <p className="mt-1.5 text-sm text-muted-foreground">
-                      Cuti 把它变成过年版 🎉
+                      {t("selectionHubNewYearUploadHint")}
                     </p>
                     <img
                       src={guonianImageIndex === 0 ? `${import.meta.env.BASE_URL}guonian1.jpg` : `${import.meta.env.BASE_URL}guonian2.jpg`}
@@ -347,14 +347,14 @@ const SelectionHub = () => {
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-neutral-800 px-4 py-3 text-white hover:bg-neutral-700"
                   >
                     <ImageIcon className="h-5 w-5" />
-                    选择图片
+                    {t("selectionHubChooseImage")}
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewYearAvatarModalOpen(false)}
                     className="text-sm text-muted-foreground hover:text-foreground"
                   >
-                    取消
+                    {t("cancel")}
                   </button>
                 </div>
               </DialogContent>
@@ -366,4 +366,3 @@ const SelectionHub = () => {
 };
 
 export default SelectionHub;
-

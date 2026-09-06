@@ -8,6 +8,7 @@ import type {
   DeepAgentMessageOptions,
   DeepAgentSuggestion,
 } from './types'
+import { useLanguage } from '../../i18n/LanguageContext'
 
 const SELECTED_RUN_KEY = 'cuti.deep-agent-v2.selected-run'
 const sequenceKey = (runId: string) => `cuti.deep-agent-v2.sequence.${runId}`
@@ -42,6 +43,7 @@ export function useDeepAgentWorkspace({
   /** Thread id from the URL (`/create/:threadId`). */
   routeThreadId?: string | null
 } = {}) {
+  const { language, t } = useLanguage()
   const [state, dispatch] = useReducer(deepAgentReducer, initialDeepAgentState)
   const [pendingThreadId, setPendingThreadId] = useState<string | null>(
     () => (routeThreadId || '').trim() || null,
@@ -106,9 +108,9 @@ export function useDeepAgentWorkspace({
       }
     } catch (error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: error instanceof Error ? error.message : String(error) } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
     }
-  }, [])
+  }, [t])
 
   const hydrateRun = useCallback(async (runId: string) => {
     hydrateControllerRef.current?.abort()
@@ -134,9 +136,9 @@ export function useDeepAgentWorkspace({
       dispatch({ type: 'HYDRATE', runId, snapshot, messages, events })
     } catch (error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: error instanceof Error ? error.message : String(error) } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     void loadRuns()
@@ -222,8 +224,8 @@ export function useDeepAgentWorkspace({
             type: 'NOTICE',
             notice: {
               severity: 'warning',
-              message: error instanceof Error
-                ? `Event stream interrupted, reconnecting… (${error.message})`
+              message: language === 'zh'
+                ? '事件连接中断，正在重新连接……'
                 : 'Event stream interrupted, reconnecting…',
             },
           })
@@ -238,7 +240,7 @@ export function useDeepAgentWorkspace({
       controller.abort()
       dispatch({ type: 'STREAMING', streaming: false })
     }
-  }, [state.selectedRunId, shouldStream])
+  }, [language, state.selectedRunId, shouldStream])
 
   const selectRun = useCallback((runId: string) => {
     if (selectedRunIdRef.current === runId) return
@@ -321,7 +323,10 @@ export function useDeepAgentWorkspace({
         ...(threadId ? { thread_id: threadId } : {}),
       }
       const stopped = state.snapshot?.run.status === 'cancelled'
-      if (stopped && !window.confirm('任务已停止。确认恢复并发送这条消息？已完成素材会保留；已提交的外部生成可能仍在运行，恢复时会先查询原任务。')) {
+      const resumeMessage = language === 'zh'
+        ? '任务已停止。确认恢复并发送这条消息？已完成素材会保留；已提交的外部生成可能仍在运行，恢复时会先查询原任务。'
+        : 'This task is stopped. Resume it and send this message? Completed media will be preserved, and submitted provider jobs will be reconciled before retrying.'
+      if (stopped && !window.confirm(resumeMessage)) {
         dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
         return
       }
@@ -335,13 +340,13 @@ export function useDeepAgentWorkspace({
       return run
     } catch (error) {
       dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: error instanceof Error ? error.message : String(error) } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
       throw error
     } finally {
       sendingRef.current = false
       dispatch({ type: 'SENDING', sending: false })
     }
-  }, [hydrateRun, pendingThreadId, resolveSessionThreadId, state.selectedRunId, state.snapshot?.run.status])
+  }, [hydrateRun, language, pendingThreadId, resolveSessionThreadId, state.selectedRunId, state.snapshot?.run.status, t])
 
   const sendSuggestion = useCallback(async (
     suggestion: DeepAgentSuggestion,

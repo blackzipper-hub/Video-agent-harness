@@ -442,7 +442,7 @@ export function DeepAgentArtifacts({
         }
       } catch (error) {
         if (active) {
-          setWorkspaceError(error instanceof Error ? error.message : String(error))
+          setWorkspaceError(t('da.runtime.requestFailed'))
         }
       } finally {
         if (active) setWorkspaceLoading(false)
@@ -466,7 +466,7 @@ export function DeepAgentArtifacts({
       eventNames.forEach(name => events.removeEventListener(name, refreshFromEvent))
       events.close()
     }
-  }, [projectId])
+  }, [projectId, t])
 
   const latestRuntimeBuild = runtimeWorkspace?.builds[0]
   useEffect(() => {
@@ -544,7 +544,7 @@ export function DeepAgentArtifacts({
         time: formatTimestamp(options.timestamp),
       }))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('da.workspace.frameExtractFailed'))
+      toast.error(t('da.workspace.frameExtractFailed'))
     } finally {
       setExtractingKey(null)
     }
@@ -619,7 +619,7 @@ export function DeepAgentArtifacts({
       setRuntimeWorkspace(await videoRuntimeClient.workspace(projectId))
       toast.success(t('da.workspace.artifactSwitched'))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error))
+      toast.error(t('da.runtime.requestFailed'))
     } finally {
       setSelectingArtifactId(null)
     }
@@ -634,7 +634,7 @@ export function DeepAgentArtifacts({
         setWorkspaceError(null)
       }
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : String(error))
+      setWorkspaceError(t('da.runtime.requestFailed'))
     } finally {
       setWorkspaceLoading(false)
     }
@@ -698,7 +698,7 @@ export function DeepAgentArtifacts({
                       </div>
                       {build.error && (
                         <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                          {build.error}
+                          {t('da.runtime.unknownFailure')}
                         </p>
                       )}
                     </div>
@@ -860,11 +860,11 @@ export function DeepAgentArtifacts({
                           )}
                           {task.error && softFail && (
                             <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
-                              {interpolate(t('da.workspace.attemptFailed'), { error: task.error })}
+                              {interpolate(t('da.workspace.attemptFailed'), { error: t('da.runtime.unknownFailure') })}
                             </p>
                           )}
                           {task.error && hardFail && (
-                            <p className="mt-2 text-xs text-destructive">{task.error}</p>
+                            <p className="mt-2 text-xs text-destructive">{t('da.runtime.unknownFailure')}</p>
                           )}
                         </div>
                       </div>

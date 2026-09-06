@@ -58,6 +58,7 @@ export const deepAgentEn = {
   'da.status.planning': 'Planning',
   'da.status.running': 'Running',
   'da.status.waiting_external': 'Waiting on provider',
+  'da.status.waiting_agent': 'Waiting for Agent planning',
   'da.status.waiting_input': 'Waiting for you',
   'da.status.completed': 'Completed',
   'da.status.failed': 'Failed',
@@ -67,10 +68,21 @@ export const deepAgentEn = {
   'da.status.blocked': 'Blocked',
   'da.status.ready': 'Ready',
   'da.status.succeeded': 'Succeeded',
+  'da.status.draft': 'Draft',
 
   'da.runtime.requestFailed': 'Video Runtime request failed ({status})',
   'da.runtime.waitingWavespeed': 'Waiting for Wavespeed: {step}',
   'da.runtime.waitingProvider': 'Waiting for provider: {step}',
+  'da.runtime.executingInitial': 'Starting video production',
+  'da.runtime.executingRebuild': 'Applying the requested changes',
+  'da.runtime.completedSteps': 'Completed {done} of {total} production steps',
+  'da.runtime.committed': 'The new project version is ready',
+  'da.runtime.failedPreserved': 'Production failed; the previous project version remains active',
+  'da.runtime.agentPlanningFailed': 'Agent planning failed; the previous project version remains active',
+  'da.runtime.retryQueued': 'Retry queued',
+  'da.runtime.resuming': 'Resuming and checking existing work',
+  'da.runtime.cancellationRequested': 'Cancellation requested',
+  'da.runtime.unknownFailure': 'This production step failed. Open Agent trace for technical details.',
 
   'da.step.spec': 'Video spec',
   'da.step.script': 'Script',
@@ -428,6 +440,13 @@ export const deepAgentEn = {
 
   'da.composer.thinking': 'Cuti is thinking...',
   'da.composer.emptyHint': 'Start by describing your video idea...',
+  'da.composer.storyGenerating': 'Generating story',
+  'da.composer.storyGenerated': 'Story generated',
+  'da.composer.audioUnsupported': 'Your browser does not support audio playback.',
+  'da.composer.storyboardChat': 'Storyboard chat · Shot {shot} · v{version}',
+  'da.page.closeSidebar': 'Close sidebar',
+  'da.page.expandSidebar': 'Expand sidebar',
+  'da.composer.viewAvatar': 'View assistant avatar',
 } as const
 
 export const deepAgentZh = {
@@ -489,6 +508,7 @@ export const deepAgentZh = {
   'da.status.planning': '规划中',
   'da.status.running': '进行中',
   'da.status.waiting_external': '等待外部服务',
+  'da.status.waiting_agent': '等待 Agent 规划',
   'da.status.waiting_input': '等待你确认',
   'da.status.completed': '已完成',
   'da.status.failed': '失败',
@@ -498,10 +518,21 @@ export const deepAgentZh = {
   'da.status.blocked': '已阻塞',
   'da.status.ready': '就绪',
   'da.status.succeeded': '已成功',
+  'da.status.draft': '草稿',
 
   'da.runtime.requestFailed': 'Video Runtime 请求失败（{status}）',
   'da.runtime.waitingWavespeed': '正在等待 Wavespeed：{step}',
   'da.runtime.waitingProvider': '正在等待外部服务：{step}',
+  'da.runtime.executingInitial': '正在开始视频制作',
+  'da.runtime.executingRebuild': '正在执行修改',
+  'da.runtime.completedSteps': '已完成 {done}/{total} 个制作步骤',
+  'da.runtime.committed': '新的作品版本已就绪',
+  'da.runtime.failedPreserved': '制作失败，先前的作品版本仍然有效',
+  'da.runtime.agentPlanningFailed': 'Agent 规划失败，先前的作品版本仍然有效',
+  'da.runtime.retryQueued': '已将重试加入队列',
+  'da.runtime.resuming': '正在恢复并核对已有任务',
+  'da.runtime.cancellationRequested': '已请求停止任务',
+  'da.runtime.unknownFailure': '当前制作步骤失败；技术详情可在 Agent 轨迹中查看。',
 
   'da.step.spec': '视频规格',
   'da.step.script': '脚本',
@@ -859,6 +890,13 @@ export const deepAgentZh = {
 
   'da.composer.thinking': 'Cuti 正在思考...',
   'da.composer.emptyHint': '描述你的创作想法，开始新的任务…',
+  'da.composer.storyGenerating': '故事生成中',
+  'da.composer.storyGenerated': '故事生成完成',
+  'da.composer.audioUnsupported': '您的浏览器不支持音频播放。',
+  'da.composer.storyboardChat': '分镜对话 · 镜头 {shot} · v{version}',
+  'da.page.closeSidebar': '关闭侧边栏',
+  'da.page.expandSidebar': '展开侧边栏',
+  'da.composer.viewAvatar': '查看助手头像',
 } as const
 
 type EnKeys = keyof typeof deepAgentEn

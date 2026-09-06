@@ -30,14 +30,22 @@ class ProviderMediaInputTest(unittest.IsolatedAsyncioTestCase):
     async def test_direct_provider_receives_all_images_in_agent_order_and_remote_identity(self):
         payload = self.payload()
         payload["step"]["parameters"]["remote_operation_id"] = "existing-job"
-        fake = AsyncMock(return_value={"uri": "https://cdn.example.test/out.mp4", "raw_task_id": "existing-job"})
+        fake = AsyncMock(return_value={"uri": "https://cdn.example.test/out.mp4", "raw_task_id": "existing-job",
+                                       "provider_used": "wavespeed", "model": "seedance-2.5",
+                                       "model_family": "seedance_2_5"})
         with patch("app.integrations.providers.provider_bridge.generate_video", fake):
             result = await self.call(payload)
         profile = fake.call_args.args[0]
         self.assertEqual(profile["images"], [f"https://cdn.example.test/{i}.png" for i in range(4)])
         self.assertEqual(profile["idempotency_key"], "stable-key")
         self.assertEqual(profile["remote_operation_id"], "existing-job")
+        self.assertEqual(profile["provider"], "wavespeed")
+        self.assertEqual(profile["model"], "seedance-2.5")
+        self.assertEqual(profile["requested_provider"], "seedance-2.5")
         self.assertEqual(result.metadata["resolved_generation_parameters"]["images"], profile["images"])
+        self.assertEqual(result.metadata["resolved_generation_parameters"]["model"], "seedance-2.5")
+        self.assertEqual(result.metadata["provider_used"], "wavespeed")
+        self.assertEqual(result.metadata["model_family"], "seedance_2_5")
         self.assertNotIn("start_image_url", profile)
 
     async def test_atomic_uses_same_order_and_explicit_id_resolution(self):

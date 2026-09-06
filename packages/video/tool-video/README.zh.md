@@ -4,6 +4,8 @@
 
 一组稳定的高层工具，使 DeepSeek agent 能够操作带版本的视频项目，而不暴露 Provider 专用调用。
 
+项目创建和规划必须提供由五个字段组成的视频语言约定。Agent 分别维护界面语言、用户可见创作内容、语音、字幕和 Provider 提示词语言，并在每次计划补丁中保留这些字段。
+
 `video_checkpoint_inspect` 接受 `checkpoint_id="live"`，为执行期间的用户编辑打开规划快照；随后使用返回的 ID 和版本调用 `video_plan_patch_submit`。任务完成/失败通知与主动编辑共用追加、取消路径；只能取消待执行任务，无关的运行中任务继续执行。参见 [Runtime 调度规则](../../../services/video-runtime/README.zh.md)。
 
 ## Model Experience

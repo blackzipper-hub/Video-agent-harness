@@ -750,11 +750,12 @@ permissions:
                 "/tmp/video-runtime",
                 create=True,
             ),
+            patch("app.utils.media_service_client.os.path.isfile", return_value=True),
             patch(
-                "app.video_runtime.builtin_plugins.continuity_validator.asyncio.create_subprocess_exec",
+                "app.utils.media_service_client.asyncio.create_subprocess_exec",
                 new=AsyncMock(return_value=Process()),
             ) as ffprobe,
-            patch("app.utils.media_service_client.video_info", new=AsyncMock()) as media_service,
+            patch("app.utils.media_service_client._post", new=AsyncMock()) as media_service,
         ):
             info = await _video_info(
                 "http://127.0.0.1:8001/files/videos/final.mp4",

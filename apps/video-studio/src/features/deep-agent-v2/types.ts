@@ -53,6 +53,13 @@ export interface DeepAgentRun {
   current_revision: number
   last_response: string
   output_language?: 'zh' | 'en'
+  language_contract?: {
+    ui_locale: 'zh-CN' | 'en-US'
+    content_language: 'zh-CN' | 'en-US'
+    spoken_language: 'zh-CN' | 'en-US'
+    subtitle_language: 'zh-CN' | 'en-US'
+    provider_prompt_language: 'auto' | 'zh-CN' | 'en-US'
+  } | null
   user_option?: Record<string, unknown> | null
   input_files?: DeepAgentInputFile[]
   skill_locks?: DeepAgentSkillLock[]

@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Stable, high-level tools that let a DeepSeek agent operate a versioned video project without exposing provider-specific calls.
 
+Project creation and planning require a five-field video language contract. The Agent keeps UI locale, user-visible authored content, speech, subtitles, and provider prompt language independent and preserves those fields in every plan patch.
+
 `video_checkpoint_inspect` accepts `checkpoint_id="live"` to open a planning snapshot for a user edit during execution. Use the returned id and revisions with `video_plan_patch_submit`. Task completion/failure notifications and live edits share the same append/cancel path; only pending tasks can be cancelled, and unrelated running tasks continue. See the [Runtime scheduling rules](../../../services/video-runtime/README.md).
 
 ## Model Experience

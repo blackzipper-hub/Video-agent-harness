@@ -53,7 +53,10 @@ def delivered_turn_ended(checkpoint: PlanCheckpoint, history: dict) -> bool:
     return consumed and ended
 
 
-def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
+def checkpoint_prompt(
+    checkpoint: PlanCheckpoint,
+    language_contract: dict[str, str] | None = None,
+) -> str:
     """Build an auditable continuation request without exposing hidden reasoning."""
     payload = {
         "project_id": checkpoint.project_id,
@@ -101,10 +104,16 @@ def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
             "idempotency_key checkpoint:<delivery_id>.",
             "Do not propose BuildSteps; the staged Workflow compiler owns them.",
         ]
-    return "\n".join([
+    language_instruction = ""
+    if language_contract:
+        from app.chat.v2.language import video_language_instruction
+
+        language_instruction = video_language_instruction(language_contract)
+    return "\n".join(filter(None, [
         "CUTI_VIDEO_CHECKPOINT_V1",
         "A durable video build reached a semantic planning checkpoint.",
         "This is an automatic continuation of the same user request and Session.",
+        language_instruction,
         "Do not create a project, switch Workflow, or repeat completed media steps.",
         "Call video_workflow_load for the exact workflow_id below, then call "
         "video_checkpoint_inspect with the exact project/build/checkpoint ids.",
@@ -122,7 +131,7 @@ def checkpoint_prompt(checkpoint: PlanCheckpoint) -> str:
         + ("video_plan_patch_submit (base_revision is base_plan_revision above)" if checkpoint.planning_mode == "agentic"
            else "video_checkpoint_resolve")
         + ". Do not end with a promise to execute later. The task remains blocked until the tool accepts your patch.",
-    ])
+    ]))
 
 
 class CheckpointCoordinator:
@@ -164,15 +173,30 @@ class CheckpointCoordinator:
             )
             return True
         try:
-            lock = self.runtime.session_control_locks.setdefault(checkpoint.project_id, asyncio.Lock())
+            locks = getattr(self.runtime, "session_control_locks", None)
+            lock = (
+                locks.setdefault(checkpoint.project_id, asyncio.Lock())
+                if locks is not None else asyncio.Lock()
+            )
             async with lock:
-                build = await self.runtime.repo.get_build(checkpoint.project_id, checkpoint.build_id)
-                if build.status in {"cancelled", "failed", "completed"}:
-                    return True
+                get_build = getattr(self.runtime.repo, "get_build", None)
+                if callable(get_build):
+                    build = await get_build(checkpoint.project_id, checkpoint.build_id)
+                    if build.status in {"cancelled", "failed", "completed"}:
+                        return True
                 checkpoint = await refresh_checkpoint(self.runtime, checkpoint)
+                get_plan = getattr(self.runtime.repo, "get_plan", None)
+                language_values = None
+                if callable(get_plan):
+                    plan = await get_plan(checkpoint.plan_id)
+                    language_source = plan.video_spec or plan.project_intent
+                    language_values = (
+                        language_source.language_contract.model_dump(mode="json")
+                        if language_source is not None else None
+                    )
                 await self.deepseek.prompt(
                     checkpoint.session_id,
-                    checkpoint_prompt(checkpoint),
+                    checkpoint_prompt(checkpoint, language_values),
                     mode="queue",
                 )
         except Exception as exc:

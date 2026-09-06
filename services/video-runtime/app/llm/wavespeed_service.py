@@ -79,6 +79,35 @@ def _seedance_poll_limit_seconds() -> int:
     return max(600, value)
 
 
+async def _validate_generated_video_duration(
+    video_url: str,
+    requested_duration: float,
+    *,
+    tolerance_seconds: float = 1.0,
+) -> float | None:
+    """Probe a persisted provider result and reject material duration drift.
+
+    A probe outage must not discard an otherwise valid, already-paid provider
+    result.  A successful probe, however, is authoritative: accepting a 5s
+    file for a 15s request corrupts downstream planning and project versions.
+    """
+    try:
+        info = await msc.video_info(video_url)
+        actual = float(info.get("duration") or 0.0)
+    except Exception as exc:
+        logger.warning("Unable to probe generated video duration: %s", exc)
+        return None
+    if actual <= 0:
+        logger.warning("Generated video duration probe returned no usable duration: %s", info)
+        return None
+    if abs(actual - float(requested_duration)) > tolerance_seconds:
+        raise WaveSpeedFinalException(
+            "Generated video duration mismatch: "
+            f"requested={float(requested_duration):.3f}s, actual={actual:.3f}s"
+        )
+    return actual
+
+
 class WaveSpeedRetryException(Exception):
     """WaveSpeed API 需要重试的异常基类"""
     
@@ -2152,11 +2181,15 @@ class WaveSpeedService:
                                 strip_audio=strip_audio,
                             )
                             logger.info(f"✅ Seedance视频已上传到S3: {local_video_url}")
+                            actual_duration = await _validate_generated_video_duration(
+                                local_video_url,
+                                float(duration),
+                            )
                             return VideoGenerationResult.success_result(
                                 video_url=local_video_url,
                                 generated_prompt=original_prompt,
                                 provider=VideoProvider.WAVESPEED,
-                                duration=float(duration),
+                                duration=actual_duration or float(duration),
                                 resolution=resolution,
                                 seed=seed,
                                 message=f"✅ WaveSpeed Seedance视频生成成功"

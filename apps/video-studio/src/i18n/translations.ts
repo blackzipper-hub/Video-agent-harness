@@ -40,6 +40,16 @@ export const translations = {
 
     // User
     credits: 'Credits',
+    characterSelected: 'selected',
+    characterDeselected: 'deselected',
+    userAvatar: 'User avatar',
+    breadcrumb: 'Breadcrumb',
+    more: 'More',
+    previousSlide: 'Previous slide',
+    nextSlide: 'Next slide',
+    pagination: 'Pagination',
+    morePages: 'More pages',
+    toggleSidebar: 'Toggle sidebar',
     logout: 'Logout',
 
     // Messages
@@ -252,6 +262,14 @@ export const translations = {
     selectionHubCardStoryVideo: 'Cuti makes story videos',
     selectionHubCardProductLaunch: 'Cuti makes product launch videos',
     selectionHubCardProductLaunchHint: 'Talking head + TTS narration',
+    selectionHubDemoLoading: 'Loading demo…',
+    selectionHubLipsyncAlt: 'Lip-sync music video',
+    selectionHubStoryAlt: 'Storytelling music video',
+    selectionHubProductAlt: 'Product launch video',
+    selectionHubNewYearAlt: 'Cuti New Year avatar',
+    selectionHubNewYearUploadTitle: 'Upload your avatar',
+    selectionHubNewYearUploadHint: 'Cuti will turn it into a festive New Year avatar 🎉',
+    selectionHubChooseImage: 'Choose image',
     selectionHubDemoProductLaunchPrompt: 'Create a product launch video for this app. Hook viewers in the first shot, demo key features with app/UI shots, and end with a clear call to action.',
     selectionHubDemoMvButton: 'Create a MV for this song based on this character',
     selectionHubDemoCapybaraButton: "Create a video about a capybara's adventure in Tokyo",
@@ -1029,6 +1047,7 @@ export const translations = {
     paymentCancelledMessage: "No worries! You can try purchasing credits again whenever you're ready. Your cart is still waiting for you.",
     paymentFailedTitle: 'Payment Failed',
     paymentFailedSubtitle: 'We could not process your payment. Please try again.',
+    whatToDoNext: 'What should I do next?',
     needHelp: 'Need help?',
     contactSupport: 'Contact Support',
     stillHavingIssues: 'Still having issues?',
@@ -1107,6 +1126,7 @@ export const translations = {
     manageSubscription: 'Manage Subscription',
     subscriptionError: 'Subscription Error',
 
+    generationHistory: 'Generation History',
     videoHistory: 'Video History',
     noVideoHistory: 'No video history yet',
     totalVideos: 'Total Videos',
@@ -1258,6 +1278,16 @@ export const translations = {
 
     // User
     credits: '积分',
+    characterSelected: '已选择',
+    characterDeselected: '已取消选择',
+    userAvatar: '用户头像',
+    breadcrumb: '面包屑导航',
+    more: '更多',
+    previousSlide: '上一张',
+    nextSlide: '下一张',
+    pagination: '分页导航',
+    morePages: '更多页面',
+    toggleSidebar: '展开或收起侧边栏',
     logout: '登出',
 
     // Messages
@@ -1470,6 +1500,14 @@ export const translations = {
     selectionHubCardStoryVideo: 'Cuti做个故事视频',
     selectionHubCardProductLaunch: 'Cuti做个产品发布视频',
     selectionHubCardProductLaunchHint: 'Talking head + TTS 旁白',
+    selectionHubDemoLoading: '正在加载示例…',
+    selectionHubLipsyncAlt: '口型同步音乐视频',
+    selectionHubStoryAlt: '故事音乐视频',
+    selectionHubProductAlt: '产品发布视频',
+    selectionHubNewYearAlt: 'Cuti 新年头像',
+    selectionHubNewYearUploadTitle: '上传你的头像',
+    selectionHubNewYearUploadHint: 'Cuti 把它变成过年版 🎉',
+    selectionHubChooseImage: '选择图片',
     selectionHubDemoProductLaunchPrompt: '为这个产品/App 做一支发布视频：第一镜抓住注意力，用 App/产品界面演示核心功能，最后一镜给出明确的行动号召。',
     selectionHubDemoMvButton: '根据这个角色和这首歌创作一支 MV',
     selectionHubDemoCapybaraButton: '创作一个水豚在东京冒险的视频',
@@ -2448,4 +2486,3 @@ export function mapBackendLanguageToUi(backend: string | undefined | null): Lang
   if (lower === 'zh' || lower.startsWith('zh-')) return 'zh'
   return 'en'
 }
-

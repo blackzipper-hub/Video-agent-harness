@@ -19,15 +19,40 @@ _LANGUAGE_SKILL_OUTPUT = {"language-zh": "zh", "language-en": "en"}
 
 _SPOKEN_EN_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"(?:对话|对白|台词|旁白|口播|配音|语音|角色说话).{0,12}(?:保持|使用|采用|说|为|用)?\s*(?:英文|英语)",
-    r"(?:英文|英语).{0,8}(?:对话|对白|台词|旁白|口播|配音|语音)",
+    r"(?:英文|英语)(?:的)?(?:对话|对白|台词|旁白|口播|配音|语音)",
     r"(?:dialogue|dialog|narration|voice[ -]?over|spoken language|speech).{0,16}(?:in|use|remain|keep|be)?\s*english",
     r"english.{0,12}(?:dialogue|dialog|narration|voice[ -]?over|speech)",
+    r"(?:人物|角色).{0,8}(?:说|对白|台词).{0,8}(?:英文|英语)",
 ))
 _SPOKEN_ZH_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"(?:对话|对白|台词|旁白|口播|配音|语音|角色说话).{0,12}(?:保持|使用|采用|说|为|用)?\s*(?:中文|汉语|普通话)",
-    r"(?:中文|汉语|普通话).{0,8}(?:对话|对白|台词|旁白|口播|配音|语音)",
+    r"(?:中文|汉语|普通话)(?:的)?(?:对话|对白|台词|旁白|口播|配音|语音)",
     r"(?:dialogue|dialog|narration|voice[ -]?over|spoken language|speech).{0,16}(?:in|use|remain|keep|be)?\s*(?:chinese|mandarin)",
     r"(?:chinese|mandarin).{0,12}(?:dialogue|dialog|narration|voice[ -]?over|speech)",
+    r"(?:人物|角色).{0,8}(?:说|对白|台词).{0,8}(?:中文|汉语|普通话)",
+))
+
+_VISIBLE_EN_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"(?:所有内容|全部内容|整个作品|用户可见内容|展示内容|输出内容|策划|剧本|文案)(?:全部|所有)?(?:使用|采用|写成|保持|为|用)\s*(?:英文|英语)",
+    r"(?:用|使用|采用)?(?:英文|英语)(?:来|进行)?(?:展示|输出|撰写|编写)?(?:所有|全部)?(?:内容|策划|剧本|文案|版本)",
+    r"(?:all|every|user[- ]visible).{0,18}(?:output|content|plan|script|text).{0,12}(?:in|use|remain|be)\s*english",
+    r"(?:respond|write|display|show|output).{0,12}(?:everything|all content|the plan|the script)?\s*(?:in|as)?\s*english",
+))
+_VISIBLE_ZH_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"(?:所有内容|全部内容|整个作品|用户可见内容|展示内容|输出内容|策划|剧本|文案)(?:全部|所有)?(?:使用|采用|写成|保持|为|用)\s*(?:中文|汉语|简体中文)",
+    r"(?:用|使用|采用)?(?:中文|汉语|简体中文)(?:来|进行)?(?:展示|输出|撰写|编写)?(?:所有|全部)?(?:内容|策划|剧本|文案|版本)",
+    r"(?:all|every|user[- ]visible).{0,18}(?:output|content|plan|script|text).{0,12}(?:in|use|remain|be)\s*(?:chinese|mandarin)",
+    r"(?:respond|write|display|show|output).{0,12}(?:everything|all content|the plan|the script)?\s*(?:in|as)?\s*(?:chinese|mandarin)",
+))
+_SUBTITLE_EN_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"(?:字幕|屏幕文字).{0,12}(?:使用|采用|保持|为|用)?\s*(?:英文|英语)",
+    r"(?:英文|英语)(?:的)?(?:字幕|屏幕文字)",
+    r"(?:subtitles?|captions?|on[- ]screen text).{0,16}(?:in|use|remain|be)?\s*english",
+))
+_SUBTITLE_ZH_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"(?:字幕|屏幕文字).{0,12}(?:使用|采用|保持|为|用)?\s*(?:中文|汉语|简体中文)",
+    r"(?:中文|汉语|简体中文)(?:的)?(?:字幕|屏幕文字)",
+    r"(?:subtitles?|captions?|on[- ]screen text).{0,16}(?:in|use|remain|be)?\s*(?:chinese|mandarin)",
 ))
 
 
@@ -73,6 +98,148 @@ def normalize_output_language(value: str | None) -> str | None:
     return None
 
 
+def canonical_content_language(value: str | None, *, fallback: str = "en-US") -> str:
+    """Return the supported BCP-47 content language used by Video Runtime."""
+    normalized = normalize_output_language(value)
+    if normalized == "zh":
+        return "zh-CN"
+    if normalized == "en":
+        return "en-US"
+    return fallback
+
+
+def explicit_visible_language(text: str) -> str | None:
+    """Read an explicit user-visible output request without conflating dialogue."""
+    source = text or ""
+    english = any(pattern.search(source) for pattern in _VISIBLE_EN_PATTERNS)
+    chinese = any(pattern.search(source) for pattern in _VISIBLE_ZH_PATTERNS)
+    if english and chinese:
+        raise LanguageSkillConflictError("同一条消息不能同时要求全部中文和全部英文输出。")
+    if english:
+        return "en-US"
+    if chinese:
+        return "zh-CN"
+    return None
+
+
+def explicit_subtitle_language(text: str) -> str | None:
+    """Return an explicitly requested subtitle/on-screen-text language."""
+    source = text or ""
+    english = any(pattern.search(source) for pattern in _SUBTITLE_EN_PATTERNS)
+    chinese = any(pattern.search(source) for pattern in _SUBTITLE_ZH_PATTERNS)
+    if english and chinese:
+        raise LanguageSkillConflictError("同一条消息不能同时要求中文字幕和英文字幕。")
+    if english:
+        return "en-US"
+    if chinese:
+        return "zh-CN"
+    return None
+
+
+def explicit_spoken_language(text: str) -> str | None:
+    """Return an explicitly requested dialogue, narration or voice language."""
+    source = text or ""
+    english_matches = [
+        match.group(0) for pattern in _SPOKEN_EN_PATTERNS
+        if (match := pattern.search(source)) is not None
+    ]
+    chinese_matches = [
+        match.group(0) for pattern in _SPOKEN_ZH_PATTERNS
+        if (match := pattern.search(source)) is not None
+    ]
+    if english_matches and chinese_matches:
+        shortest_english = min(map(len, english_matches))
+        shortest_chinese = min(map(len, chinese_matches))
+        if shortest_english != shortest_chinese:
+            return "en-US" if shortest_english < shortest_chinese else "zh-CN"
+        raise LanguageSkillConflictError(
+            "同一条消息不能同时要求中文和英文对白或旁白。"
+        )
+    if english_matches:
+        return "en-US"
+    if chinese_matches:
+        return "zh-CN"
+    return None
+
+
+def resolve_video_language_contract(
+    text: str,
+    *,
+    ui_locale: str | None = None,
+    current: dict[str, str] | None = None,
+    overrides: dict[str, str] | None = None,
+    language_skill: str | None = None,
+) -> dict[str, str]:
+    """Resolve independent UI, visible-content, speech, subtitle and provider languages."""
+    current = current or {}
+    overrides = overrides or {}
+    canonical_skill = canonical_language_skill_name(language_skill)
+    skill_language = (
+        "zh-CN" if canonical_skill == "language-zh" else
+        "en-US" if canonical_skill == "language-en" else None
+    )
+    resolved_ui = canonical_content_language(
+        overrides.get("ui_locale") or ui_locale or current.get("ui_locale"),
+    )
+    explicit_content = explicit_visible_language(text)
+    if current:
+        inferred_content = canonical_content_language(current.get("content_language"), fallback=resolved_ui)
+    else:
+        inferred_content = canonical_content_language(
+            resolve_output_language(text, requested=resolved_ui), fallback=resolved_ui,
+        )
+    content = canonical_content_language(
+        overrides.get("content_language") or skill_language or explicit_content or inferred_content,
+        fallback=resolved_ui,
+    )
+    spoken = canonical_content_language(
+        overrides.get("spoken_language")
+        or skill_language
+        or explicit_spoken_language(text)
+        or current.get("spoken_language")
+        or content,
+        fallback=content,
+    )
+    subtitle = canonical_content_language(
+        overrides.get("subtitle_language")
+        or explicit_subtitle_language(text)
+        or current.get("subtitle_language")
+        or content,
+        fallback=content,
+    )
+    provider_prompt = str(
+        overrides.get("provider_prompt_language")
+        or current.get("provider_prompt_language")
+        or "auto"
+    ).strip() or "auto"
+    return {
+        "ui_locale": resolved_ui,
+        "content_language": content,
+        "spoken_language": spoken,
+        "subtitle_language": subtitle,
+        "provider_prompt_language": provider_prompt,
+    }
+
+
+def video_language_instruction(contract: dict[str, str]) -> str:
+    """Render the durable Video Runtime language obligations for the Agent."""
+    content = canonical_content_language(contract.get("content_language"))
+    visible = "Simplified Chinese" if content == "zh-CN" else "English"
+    return (
+        "Video language contract (authoritative): "
+        f"ui_locale={contract.get('ui_locale', content)}; "
+        f"content_language={content}; "
+        f"spoken_language={contract.get('spoken_language', content)}; "
+        f"subtitle_language={contract.get('subtitle_language', content)}; "
+        f"provider_prompt_language={contract.get('provider_prompt_language', 'auto')}. "
+        f"Write every user-visible title, summary, plan, script, character/scene/shot description, "
+        f"review and final response in {visible}. Keep machine identifiers unchanged. "
+        "Dialogue/narration and subtitles follow their independent fields. Provider prompts may "
+        "use provider_prompt_language but are internal and must not replace the user-visible artifact. "
+        "Preserve this exact contract in ProjectIntent, VideoSpec and every PlanPatch."
+    )
+
+
 def resolve_output_language(
     text: str,
     *,
@@ -107,11 +274,9 @@ def resolve_spoken_language(
     canonical = canonical_language_skill_name(language_skill)
     if canonical:
         return "zh-CN" if _LANGUAGE_SKILL_OUTPUT[canonical] == "zh" else "en-US"
-    source = text or ""
-    if any(pattern.search(source) for pattern in _SPOKEN_EN_PATTERNS):
-        return "en-US"
-    if any(pattern.search(source) for pattern in _SPOKEN_ZH_PATTERNS):
-        return "zh-CN"
+    explicit = explicit_spoken_language(text)
+    if explicit:
+        return explicit
     return "zh-CN" if normalize_output_language(output_language) == "zh" else "en-US"
 
 

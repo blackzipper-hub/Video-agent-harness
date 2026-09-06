@@ -122,7 +122,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <TooltipContent>
-                    <p>Credit</p>
+                    <p>{t('credits')}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -133,7 +133,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="p-0 rounded-full">
                     <Avatar className="w-7 h-7 sm:w-8 sm:h-8">
-                      <img src={defaultAvatar} alt="User avatar" className="w-full h-full object-cover" />
+                      <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
                       <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                         {getUserInitials()}
                       </AvatarFallback>
@@ -144,7 +144,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
                   <div className="px-2 py-2">
                     <div className="flex items-center gap-3">
                       <Avatar className="w-10 h-10 flex-shrink-0">
-                        <img src={defaultAvatar} alt="User avatar" className="w-full h-full object-cover" />
+                      <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
                         <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                           {getUserInitials()}
                         </AvatarFallback>
@@ -186,7 +186,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
               ) : !authLoading ? (
                 <Button variant="ghost" size="icon" className="p-0 rounded-full" onClick={() => navigate("/auth")}>
                   <Avatar className="w-7 h-7 sm:w-8 sm:h-8">
-                    <img src={defaultAvatar} alt="User avatar" className="w-full h-full object-cover" />
+                    <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
                     <AvatarFallback className="bg-muted text-muted-foreground">
                       <UserIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </AvatarFallback>

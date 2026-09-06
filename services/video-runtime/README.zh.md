@@ -1,6 +1,6 @@
 # Video Runtime
 
-Provider 分发将任务输入 ArtifactVersion 转换为有序的图片、视频和音频 URI 列表，直调与 Atomic 路径共用。显式媒体参数顺序优先，其余任务输入按声明顺序去重合并。引用素材缺失、提示词索引越界时在提交前失败。输出产物记录解析后的输入版本与具体参数。分发保留远程任务 ID 和幂等键，参考图不会自动变成首帧。
+Provider 分发将任务输入 ArtifactVersion 转换为有序的图片、视频和音频 URI 列表，直调与 Atomic 路径共用。显式媒体参数顺序优先，其余任务输入按声明顺序去重合并。引用素材缺失、提示词索引越界时在提交前失败。输出产物记录解析后的输入版本与具体参数。旧调用把 Seedance 模型名放在 `provider` 字段时，分发会拆分为 WaveSpeed 通道和精确的模型版本；相互冲突的版本参数在提交前失败。分发保留远程任务 ID 和幂等键，参考图不会自动变成首帧。
 
 失败任务可通过 PlanPatch 替换映射提交新参数。待执行的下游任务会复制并改接依赖，旧下游步骤在同一版本事务中取消。失败步骤保留原参数和 `superseded_by` 指针；整单重试跳过已替代及已取消步骤。已开始执行的下游不能自动改接。失败的持续 Build 在查看修复检查点时仍保持失败，只有替换补丁通过计划、规格与项目版本校验并提交后才恢复。
 
@@ -40,6 +40,8 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 每个可选 Workflow 都必须公开一个具名的专用编译器契约。未知 Skill mode、或没有显式 Runtime 描述的 Workflow 插件会显示为不可用；系统不存在通用／默认 Workflow 编译器回退。原版 Cuti Workflow 的正文保持不变，只在 frontmatter 中补充分阶段规划元数据。
 
 内置适配器复用 Cuti 的文本、图片、音乐、视频、TTS、FFmpeg、字幕与 Lipsync 操作。`cuti.seedance-story`、`cuti.music-video` 和 `cuti.lipsync-music-video` 编译与 Provider 无关的 `VideoSpec`；`cuti.style-presets` 在编译前应用已安装的提示词默认值。生产身份可以使用独立 Runtime 的服务 Bearer Token，或组合应用中的 Cuti JWT 适配器；两者均未配置时默认拒绝请求。
+
+每个新的 `ProjectIntent` 和 `VideoSpec` 都持久化一份语言契约，分别记录界面、用户可见内容、对白或旁白、字幕和 Provider 提示词语言。BFF 会把该契约注入首次规划、后续编辑和自动检查点回合；Runtime 生成的用户产物会记录契约，并拒绝明确的文本语言不匹配。只有 `language` 字段的旧文档会为所有内容字段补上相同语言的默认值。
 
 所有已注册 Capability 都通过 `RuntimeCapabilityRegistry` 和 `CapabilityExecutionGateway` 执行。网关校验服务端签名 Grant，Grant 绑定项目、Session、用户、插件、Capability、域名、费用上限、超时、并发、重试、幂等键、审计 id 和过期时间。进程内可执行插件要求服务端持有至少 32 字节的 `VIDEO_CAPABILITY_GRANT_SECRET`。
 

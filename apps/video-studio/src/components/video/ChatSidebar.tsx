@@ -282,7 +282,7 @@ export const ChatSidebar = ({
         isMobileFullScreen ? 'w-full grow h-0' : (collapsed ? 'w-20' : 'w-80') + ' flex-shrink-0'
       } transition-all duration-300 flex flex-col border-r-0 bg-zinc-100/90 dark:bg-[#000000] backdrop-blur-md overflow-hidden ${collapsed ? 'cursor-e-resize' : ''}`}
       onClick={handleSidebarRootClick}
-      title={collapsed ? 'Expand' : undefined}
+      title={collapsed ? t('da.page.expandSidebar') : undefined}
     >
       {/* Sidebar Header - logo 展开前后位置一致 */}
       <div className="w-full min-w-0 flex-shrink-0 p-4 flex items-center justify-between box-border">
@@ -291,7 +291,7 @@ export const ChatSidebar = ({
             type="button"
             onClick={(e) => { e.stopPropagation(); onToggleCollapse() }}
             className="group h-8 w-8 flex items-center justify-center flex-shrink-0 hover:opacity-80 transition-opacity"
-            title="Expand"
+            title={t('da.page.expandSidebar')}
           >
             <img src={`${import.meta.env.BASE_URL}logo-internal.png`} alt="Cuti" className="h-8 w-8 object-contain group-hover:hidden" />
             <ChevronRight className="w-4 h-4 text-muted-foreground hidden group-hover:block" />
@@ -574,4 +574,3 @@ export const ChatSidebar = ({
     </div>
   )
 }
-

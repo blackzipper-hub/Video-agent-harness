@@ -19,6 +19,7 @@ from app.video_runtime.models import (
     RebuildPlan,
     RebuildPlanItem,
     ValidationResult,
+    VideoLanguageContract,
     VideoSpec,
 )
 from app.video_runtime.runtime import VideoBuildRuntime
@@ -338,6 +339,54 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         raw.pop("workflow_id")
         with self.assertRaisesRegex(ValueError, "workflow_id"):
             VideoSpec.model_validate(raw)
+
+    async def test_user_artifact_records_the_project_language_contract(self):
+        runtime = await video_runtime()
+        project, version = await runtime.create_project(
+            user_id="user", title="Language metadata",
+        )
+        spec = video_spec().model_copy(deep=True, update={
+            "language": "en-US",
+            "language_contract": VideoLanguageContract(
+                ui_locale="zh-CN",
+                content_language="en-US",
+                spoken_language="zh-CN",
+                subtitle_language="en-US",
+            ),
+        })
+        plan = RebuildPlan(
+            project_id=project.id,
+            kind="initial",
+            base_project_version_id=version.id,
+            workflow_id=spec.workflow_id,
+            video_spec=spec,
+            items=[RebuildPlanItem(
+                step_id="script",
+                action="create",
+                capability="atomic.text.generate",
+                output_artifact_id="script:main",
+                output_artifact_type="script",
+            )],
+        )
+        plan = await runtime.repo.save_plan(plan, "language-metadata-plan")
+        build = await runtime.start_build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=version.id,
+            idempotency_key="language-metadata-build",
+        )
+        await runtime.execute_build(
+            project_id=project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        step = (await runtime.repo.list_build_steps(project.id, build.id))[0]
+        artifact = await runtime.repo.get_artifact(
+            project.id, step.result_artifact_version_id,
+        )
+        self.assertEqual(artifact.metadata["language"], "en-US")
+        self.assertEqual(artifact.metadata["language_contract"]["ui_locale"], "zh-CN")
+        self.assertTrue(artifact.metadata["language_validation"]["passed"])
 
     async def test_scene_reference_isolation_fails_before_video_generation(self):
         runtime = await video_runtime()

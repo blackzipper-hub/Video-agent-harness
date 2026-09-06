@@ -15,6 +15,7 @@ import {
 } from '@/utils/actionSuggestions'
 import { extractGeneratedVideoItems } from '@/utils/videoGenResults'
 import { remainingSecondsUntil } from '@/utils/interruptAutoResume'
+import { interpolate } from '@/features/deep-agent-v2/labels'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -142,7 +143,7 @@ function InterruptCountdown({
   if (left <= 0) return <span className="text-sm text-amber-600">{labelAfter || ''}</span>
   return (
     <span className="text-sm text-amber-700 dark:text-amber-300">
-      {left}s {labelAfter ?? '后自动继续'}
+      {left}s {labelAfter || ''}
     </span>
   )
 }
@@ -1776,7 +1777,7 @@ export const MessageArea = ({
                       type="button"
                       onClick={() => setShowCutiAvatarLightbox(true)}
                       className="mt-1 flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      title="Click to view larger"
+                      title={t('da.composer.viewAvatar')}
                     >
                       <img
                         src={aiAvatar}
@@ -1893,7 +1894,7 @@ export const MessageArea = ({
                                     >
                                       {src && <source src={src} type="audio/mpeg" />}
                                       {children}
-                                      您的浏览器不支持音频播放。
+                                      {t('da.composer.audioUnsupported')}
                                     </audio>
                                   ),
                                   // 自定义 source 组件（用于 audio 标签内部）
@@ -1913,7 +1914,7 @@ export const MessageArea = ({
                                           <p className="mb-2">{linkText}</p>
                                           <audio controls className="w-full">
                                             <source src={audioUrl} type="audio/mpeg" />
-                                            您的浏览器不支持音频播放。
+                                            {t('da.composer.audioUnsupported')}
                                           </audio>
                                         </div>
                                       )
@@ -2982,7 +2983,7 @@ export const MessageArea = ({
                             ? (t('musicGenerating') || '音乐生成中')
                             : agentType === 'video_gen'
                               ? (t('generatingVideos') || '正在生成视频...')
-                              : '故事生成中'
+                              : t('da.composer.storyGenerating')
 
                         return (
                           <div className="space-y-2">
@@ -3012,7 +3013,7 @@ export const MessageArea = ({
                                           ? (t('musicGenerated') || '音乐生成完成')
                                           : agentType === 'video_gen'
                                             ? (t('generatedVideos') || '已生成视频')
-                                            : '故事生成完成')
+                                            : t('da.composer.storyGenerated'))
                                       : isCancelled
                                         ? (t('generationCancelled') || 'Cancelled')
                                         : isFailed
@@ -3502,7 +3503,7 @@ export const MessageArea = ({
                   type="button"
                   onClick={() => setShowCutiAvatarLightbox(true)}
                   className="mt-1 flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  title="Click to view larger"
+                  title={t('da.composer.viewAvatar')}
                 >
                   <img
                     src={aiAvatar}
@@ -3964,7 +3965,10 @@ export const MessageArea = ({
             <div className="flex items-center gap-2 mb-2">
               <MessageSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                Storyboard Chat - Shot {selectedStoryboard.shot_number} v{selectedStoryboard.version_number}
+                {interpolate(t('da.composer.storyboardChat'), {
+                  shot: selectedStoryboard.shot_number,
+                  version: selectedStoryboard.version_number,
+                })}
               </span>
             </div>
             <div className="flex gap-2">

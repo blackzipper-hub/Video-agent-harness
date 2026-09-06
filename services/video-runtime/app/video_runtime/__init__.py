@@ -12,6 +12,7 @@ from .models import (
     Project,
     ProjectVersion,
     RebuildPlan,
+    VideoLanguageContract,
     VideoSpec,
 )
 from .repository import InMemoryVideoProjectRepository, ProjectVersionConflict
@@ -31,6 +32,7 @@ __all__ = [
     "ProjectVersion",
     "ProjectVersionConflict",
     "RebuildPlan",
+    "VideoLanguageContract",
     "VideoSpec",
     "VideoBuildRuntime",
 ]

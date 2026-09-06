@@ -16,7 +16,7 @@ def expand_repair(plan: RebuildPlan, states: dict[str, BuildStep], resolution: C
         if new in states or new not in proposed:
             raise ValueError(f"replacement requires a new proposed task: {new}")
         # A replacement is a new operation, never a reconciliation of the failed one.
-        proposed[new].idempotency_key = None
+        proposed[new].idempotency_key = ""
         proposed[new].parameters.pop("remote_operation_id", None)
     for item in topological_steps(plan.items):
         if item.step_id in mapping or not set(item.depends_on).intersection(mapping):
@@ -31,7 +31,7 @@ def expand_repair(plan: RebuildPlan, states: dict[str, BuildStep], resolution: C
         if clone.step_id in states or clone.step_id in proposed:
             raise ValueError(f"repair task id collision: {clone.step_id}")
         mapping[item.step_id] = clone.step_id
-        clone.idempotency_key = None
+        clone.idempotency_key = ""
         clone.parameters.pop("remote_operation_id", None)
         proposed[clone.step_id] = clone
         result.proposed_steps.append(clone)

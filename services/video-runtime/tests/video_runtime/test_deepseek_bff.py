@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from app.video_runtime.api import set_runtime
 from app.video_runtime.deepseek_bff import (
     _compat_event,
+    _load_run_context,
     _sign_uploaded_file,
     router,
     set_deepseek_client,
@@ -23,7 +24,7 @@ from app.video_runtime.deepseek_bff import (
 )
 from app.video_runtime.deepseek_client import DeepSeekHarnessError
 from app.video_runtime.runtime import VideoBuildRuntime
-from app.video_runtime.models import Build
+from app.video_runtime.models import Build, ProjectIntent, RebuildPlan
 from app.video_runtime.skills import VideoSkillRuntime
 
 
@@ -605,3 +606,58 @@ Keep the requested visual tone consistent.
         run = created.json()["data"]
         self.assertEqual(run["workflow_id"], "mv")
         self.assertEqual(run["activated_skill_ids"], [])
+
+    def test_create_persists_independent_ui_and_content_languages(self):
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            headers={"X-App-Language": "zh"},
+            json={
+                "objective": "请用英文展示全部策划，人物对白使用中文，并配英文字幕",
+                "idempotency_key": "language-contract-1",
+                "workflow_id": "seedance2",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        self.assertEqual(run["output_language"], "en")
+        self.assertEqual(run["language_contract"], {
+            "ui_locale": "zh-CN",
+            "content_language": "en-US",
+            "spoken_language": "zh-CN",
+            "subtitle_language": "en-US",
+            "provider_prompt_language": "auto",
+        })
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertIn("content_language=en-US", prompt)
+        self.assertIn("spoken_language=zh-CN", prompt)
+
+    def test_legacy_run_context_recovers_dialogue_language_from_project_intent(self):
+        project, version = asyncio.run(self.runtime.create_project(
+            user_id="local-user", title="Legacy English dialogue",
+        ))
+        plan = asyncio.run(self.runtime.repo.save_plan(RebuildPlan(
+            project_id=project.id,
+            kind="initial",
+            base_project_version_id=version.id,
+            workflow_id="seedance2",
+            project_intent=ProjectIntent(
+                title="中文策划",
+                brief="制作中文策划，人物对白保持英文。",
+                language="zh-CN",
+                workflow_id="seedance2",
+                style_id="cinematic",
+                constraints={"dialogue_language": "English"},
+            ),
+            items=[],
+        ), "legacy-language-plan"))
+        build = Build(
+            project_id=project.id,
+            plan_id=plan.id,
+            base_project_version_id=version.id,
+            idempotency_key="legacy-language-build",
+        )
+        self.runtime.repo.builds[build.id] = build
+        context = asyncio.run(_load_run_context(self.runtime, project.id))
+        self.assertEqual(context["language_contract"]["content_language"], "zh-CN")
+        self.assertEqual(context["language_contract"]["spoken_language"], "en-US")
+        self.assertEqual(context["language_contract_version"], 1)

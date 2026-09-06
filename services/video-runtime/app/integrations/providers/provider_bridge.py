@@ -160,6 +160,63 @@ def _model_family(model: str | None) -> str:
     return "seedance_2"
 
 
+def _explicit_video_model_family(value: str | None) -> str | None:
+    """Recognize model identifiers that older planners placed in ``provider``."""
+    raw = (value or "").strip().lower()
+    if raw in {"", "auto", "ark", "wavespeed", "wavespeed-seedance-2", "seedance", "pollo_seedance"}:
+        return None
+    if "seedance" in raw or raw in {"h3", "minimax-h3", "minimax_h3", "minimax-h3-r2v"}:
+        return _model_family(raw)
+    if "minimax/h3" in raw or "h3/reference-to-video" in raw:
+        return "minimax_h3"
+    return None
+
+
+def normalize_video_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the public video profile before selecting a provider.
+
+    ``duration_seconds`` is the Video Runtime/VideoSpec spelling while the
+    provider adapters historically consumed ``duration``.  Keep one canonical
+    provider field here so a valid requested duration can never silently fall
+    back to the provider default.
+    """
+    normalized = dict(profile)
+    duration = normalized.get("duration")
+    duration_seconds = normalized.get("duration_seconds")
+    if duration is not None and duration_seconds is not None:
+        if float(duration) != float(duration_seconds):
+            raise ValueError(
+                "conflicting video duration selectors: "
+                f"duration={duration!r}, duration_seconds={duration_seconds!r}"
+            )
+    requested_duration = duration if duration is not None else duration_seconds
+    if requested_duration is not None:
+        try:
+            numeric_duration = float(requested_duration)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid video duration: {requested_duration!r}") from exc
+        if numeric_duration <= 0 or not numeric_duration.is_integer():
+            raise ValueError(
+                f"video duration must be a positive whole number of seconds: {requested_duration!r}"
+            )
+        normalized["duration"] = int(numeric_duration)
+
+    requested_provider = str(normalized.get("provider") or "").strip()
+    provider_family = _explicit_video_model_family(requested_provider)
+    requested_model = str(normalized.get("model") or "").strip()
+    if provider_family is None:
+        return normalized
+    if requested_model and _model_family(requested_model) != provider_family:
+        raise ValueError(
+            f"conflicting video model selectors: provider={requested_provider!r}, "
+            f"model={requested_model!r}"
+        )
+    normalized["model"] = requested_model or requested_provider
+    normalized["provider"] = "wavespeed"
+    normalized["requested_provider"] = requested_provider
+    return normalized
+
+
 def _is_i2v_mode(profile: dict[str, Any]) -> bool:
     mode = str(
         profile.get("mode")
@@ -593,6 +650,7 @@ async def _wavespeed_generate(
         "video_url": video_url,
         "uri": video_url,
         "provider_used": "wavespeed",
+        "model": model or family,
         "model_family": family,
         "generation_mode": "i2v" if i2v_requested else "t2v",
         "start_image_url": start_image,
@@ -609,6 +667,7 @@ async def generate_video(
     fallbacks_json: str | None = None,
     on_remote_submitted: RemoteSubmittedCallback | None = None,
 ) -> dict[str, Any]:
+    profile = normalize_video_profile(profile)
     requested = str(profile.get("provider") or profile.get("model") or "ark")
     # If model looks like doubao-*, treat provider as ark unless explicitly set.
     provider_hint = str(profile.get("provider") or "ark")

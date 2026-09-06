@@ -42,6 +42,24 @@ const buildOutput = {
   },
 } as const
 
+const languageContractParameters = {
+  type: 'object' as const,
+  required: true,
+  additionalProperties: false,
+  description: 'Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.',
+  properties: {
+    ui_locale: { type: 'string' as const, required: true, enum: ['zh-CN', 'en-US'] },
+    content_language: { type: 'string' as const, required: true, enum: ['zh-CN', 'en-US'] },
+    spoken_language: { type: 'string' as const, required: true, enum: ['zh-CN', 'en-US'] },
+    subtitle_language: { type: 'string' as const, required: true, enum: ['zh-CN', 'en-US'] },
+    provider_prompt_language: {
+      type: 'string' as const,
+      required: true,
+      enum: ['auto', 'zh-CN', 'en-US'],
+    },
+  },
+} as const
+
 const projectIntentParameters = {
   type: 'object' as const,
   additionalProperties: false,
@@ -49,6 +67,7 @@ const projectIntentParameters = {
     title: { type: 'string' as const, required: true },
     brief: { type: 'string' as const, required: true },
     language: { type: 'string' as const, required: true },
+    language_contract: languageContractParameters,
     target_duration_seconds: { type: 'number' as const, required: true },
     aspect_ratio: { type: 'string' as const, required: true, enum: ['16:9', '9:16', '1:1'] },
     resolution: { type: 'string' as const, required: true },
@@ -80,6 +99,7 @@ const videoSpecParameters = {
   properties: {
     title: { type: 'string' as const, required: true },
     language: { type: 'string' as const, required: true },
+    language_contract: languageContractParameters,
     target_duration_seconds: { type: 'number' as const, required: true },
     aspect_ratio: { type: 'string' as const, required: true, enum: ['16:9', '9:16', '1:1'] },
     resolution: { type: 'string' as const, required: true },

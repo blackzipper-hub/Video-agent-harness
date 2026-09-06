@@ -30,6 +30,34 @@ function nestedCallId(payload: Record<string, unknown>): string {
     : ''
 }
 
+function localizedRuntimeMessage(
+  runtime: RuntimeProductionProgress,
+  zh: boolean,
+  unknownFailure: string,
+): string {
+  if (runtime.error) return unknownFailure
+  const messages: Record<string, readonly [string, string]> = {
+    queued: ['制作任务已排队', 'Production is queued'],
+    running: ['正在执行当前制作步骤', 'Running the current production step'],
+    waiting_external: ['正在等待生成服务返回结果', 'Waiting for the generation provider'],
+    waiting_agent: ['Agent 正在根据已有素材规划下一步', 'The Agent is planning the next step from completed media'],
+    completed: ['视频制作已完成', 'Video production is complete'],
+    failed: ['制作失败，已完成素材仍会保留', 'Production failed; completed media is preserved'],
+    cancelled: ['制作已停止，已完成素材仍会保留', 'Production stopped; completed media is preserved'],
+  }
+  const message = messages[runtime.status]
+  return message ? message[zh ? 0 : 1] : runtime.message
+}
+
+function localizedSection(section: string, zh: boolean): string {
+  if (!zh) return section.replace(/_/g, ' ')
+  const labels: Record<string, string> = {
+    characters: '角色设定', shots: '镜头规划', audio: '音频', timeline: '时间线',
+    subtitles: '字幕', story: '故事', script: '剧本', scenes: '场景',
+  }
+  return labels[section] || section.replace(/_/g, ' ')
+}
+
 export function AgentProductionProgress({
   status,
   isSending,
@@ -130,7 +158,9 @@ export function AgentProductionProgress({
               <p className="mt-2 text-xs text-muted-foreground">
                 {stoppedWithoutBuild
                   ? t('da.progress.noBuildHint')
-                  : runtime?.message || t('da.progress.defaultHint')}
+                  : runtime
+                    ? localizedRuntimeMessage(runtime, zh, t('da.runtime.unknownFailure'))
+                    : t('da.progress.defaultHint')}
               </p>
 
               {runtime?.checkpoint && (
@@ -140,8 +170,8 @@ export function AgentProductionProgress({
                   </p>
                   <p className="mt-1 text-muted-foreground">
                     {zh
-                      ? `已获得 ${runtime.checkpoint.artifactCount} 个真实产物，正在补全：${runtime.checkpoint.unresolvedSections.join('、') || '下一阶段参数'}`
-                      : `${runtime.checkpoint.artifactCount} real artifacts ready; resolving ${runtime.checkpoint.unresolvedSections.join(', ') || 'next-phase parameters'}`}
+                      ? `已获得 ${runtime.checkpoint.artifactCount} 个真实产物，正在补全：${runtime.checkpoint.unresolvedSections.map(section => localizedSection(section, true)).join('、') || '下一阶段参数'}`
+                      : `${runtime.checkpoint.artifactCount} real artifacts ready; resolving ${runtime.checkpoint.unresolvedSections.map(section => localizedSection(section, false)).join(', ') || 'next-phase parameters'}`}
                   </p>
                 </div>
               )}

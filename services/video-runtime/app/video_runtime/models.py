@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.orchestration.skills.models import (
     ResolvedSkillRef,
@@ -221,7 +221,69 @@ class VideoAutomationPolicy(BaseModel):
     max_artifact_retries: int = Field(default=1, ge=0, le=3)
 
 
-class ProjectIntent(BaseModel):
+def _canonical_video_language(value: str | None, fallback: str = "zh-CN") -> str:
+    normalized = (value or "").strip().lower().replace("_", "-")
+    if normalized.startswith("zh"):
+        return "zh-CN"
+    if normalized.startswith("en"):
+        return "en-US"
+    return fallback
+
+
+class VideoLanguageContract(BaseModel):
+    """Persistent language choices for UI, authored content, speech and subtitles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ui_locale: str = Field(default="zh-CN", min_length=2, max_length=20)
+    content_language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    spoken_language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    subtitle_language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    provider_prompt_language: str = Field(default="auto", min_length=2, max_length=20)
+
+    @model_validator(mode="after")
+    def normalize_supported_languages(self):
+        self.ui_locale = _canonical_video_language(self.ui_locale)
+        self.content_language = _canonical_video_language(self.content_language)
+        self.spoken_language = _canonical_video_language(
+            self.spoken_language, self.content_language,
+        )
+        self.subtitle_language = _canonical_video_language(
+            self.subtitle_language, self.content_language,
+        )
+        self.provider_prompt_language = (
+            "auto" if self.provider_prompt_language.strip().lower() == "auto"
+            else _canonical_video_language(
+                self.provider_prompt_language, self.content_language,
+            )
+        )
+        return self
+
+
+class _LanguageAwareVideoModel(BaseModel):
+    """Compatibility normalization for legacy documents that only stored `language`."""
+
+    @model_validator(mode="after")
+    def align_language_contract(self):
+        legacy = _canonical_video_language(getattr(self, "language", None))
+        contract = getattr(self, "language_contract", None)
+        if contract is None:
+            contract = VideoLanguageContract(
+                ui_locale=legacy,
+                content_language=legacy,
+                spoken_language=legacy,
+                subtitle_language=legacy,
+            )
+            self.language_contract = contract
+        elif legacy != contract.content_language:
+            raise ValueError(
+                "language must equal language_contract.content_language"
+            )
+        self.language = contract.content_language
+        return self
+
+
+class ProjectIntent(_LanguageAwareVideoModel):
     """Known project constraints accepted before a complete VideoSpec exists."""
 
     model_config = ConfigDict(extra="forbid")
@@ -229,6 +291,7 @@ class ProjectIntent(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     brief: str = Field(min_length=1)
     language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    language_contract: VideoLanguageContract | None = None
     target_duration_seconds: float = Field(default=15, gt=0, le=600)
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     resolution: str = Field(default="1080p", pattern=r"^[0-9]{3,4}p$")
@@ -242,13 +305,14 @@ class ProjectIntent(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
 
 
-class VideoSpec(BaseModel):
+class VideoSpec(_LanguageAwareVideoModel):
     """Provider-neutral, deterministic input for the first project build."""
 
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=200)
     language: str = Field(default="zh-CN", min_length=2, max_length=20)
+    language_contract: VideoLanguageContract | None = None
     target_duration_seconds: float = Field(gt=0, le=600)
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     resolution: str = Field(default="1080p", pattern=r"^[0-9]{3,4}p$")
@@ -312,6 +376,12 @@ class RebuildPlanItem(BaseModel):
     resolved_skills: list[ResolvedSkillRef] = Field(default_factory=list)
     skill_context: SkillContext | None = None
     constraint_contract: SkillConstraintContract | None = None
+    language_contract: VideoLanguageContract | None = None
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def normalize_legacy_empty_idempotency_key(cls, value):
+        return "" if value is None else value
 
 
 class RebuildPlan(BaseModel):

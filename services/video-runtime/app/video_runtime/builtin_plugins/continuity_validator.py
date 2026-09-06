@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 
@@ -12,41 +11,6 @@ from ..plugins import BaseVideoPlugin, PluginContext
 
 async def _video_info(uri: str) -> dict:
     """Probe local self-hosted outputs without depending on Cuti Media Service."""
-    from app.utils.s3_utils import _storage_is_local, is_our_cdn_url, s3_utils
-
-    if _storage_is_local() and is_our_cdn_url(uri):
-        file_key = s3_utils.cdn_url_to_s3_key(uri)
-        if not file_key:
-            raise RuntimeError("cannot resolve local video storage key")
-        local_path = os.path.join(s3_utils._local_dir, file_key)
-        process = await asyncio.create_subprocess_exec(
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate",
-            "-of", "json",
-            local_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            raise RuntimeError(
-                f"ffprobe failed: {stderr.decode(errors='replace').strip()}"
-            )
-        payload = json.loads(stdout.decode())
-        streams = payload.get("streams") or []
-        video_stream = next(
-            (item for item in streams if item.get("codec_type") == "video"), {}
-        )
-        return {
-            "duration": float((payload.get("format") or {}).get("duration") or 0),
-            "has_video": bool(video_stream),
-            "has_audio": any(item.get("codec_type") == "audio" for item in streams),
-            "width": video_stream.get("width"),
-            "height": video_stream.get("height"),
-            "fps": video_stream.get("r_frame_rate"),
-        }
-
     from app.utils import media_service_client as msc
 
     return await msc.video_info(uri)

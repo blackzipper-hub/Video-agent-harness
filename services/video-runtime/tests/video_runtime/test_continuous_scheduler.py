@@ -36,6 +36,12 @@ class ControlledExecutor(FakePlanExecutor):
 
 
 class ContinuousSchedulerTest(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_repair_step_with_null_idempotency_key_loads_as_unassigned(self):
+        item = RebuildPlanItem.model_validate({
+            "step_id": "legacy-repair", "action": "create", "idempotency_key": None,
+        })
+        self.assertEqual(item.idempotency_key, "")
+
     async def asyncSetUp(self):
         self.runtime = await video_runtime(max_parallel_generation_tasks=2)
         self.runtime.staged_planning_enabled = True
@@ -119,6 +125,18 @@ class ContinuousSchedulerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(delivered_turn_ended(checkpoint, {"events": [consumed, unrelated]}))
         started = {"event": {"type": "turn/start", "time": timestamp + 2}}
         self.assertFalse(delivered_turn_ended(checkpoint, {"events": [consumed, unrelated, started]}))
+
+    async def test_plan_patch_resolves_concat_inputs_from_new_dependency_outputs(self):
+        video = self.task("clip")
+        video.output_artifact_type = "video"
+        concat = RebuildPlanItem(
+            step_id="concat", action="create", capability="media.concat",
+            output_artifact_type="video", parameters={"video_urls": []}, depends_on=["clip"],
+        )
+        plan = await self.resolve(await self.checkpoint(), proposed_steps=[video, concat])
+        stored = next(item for item in plan.items if item.step_id == "concat")
+        self.assertEqual(stored.parameters["video_steps"], ["clip"])
+        self.assertNotIn("video_urls", stored.parameters)
 
     async def checkpoint(self):
         async def wait():

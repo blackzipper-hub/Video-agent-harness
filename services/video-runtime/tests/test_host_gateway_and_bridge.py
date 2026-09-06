@@ -10,6 +10,7 @@ from app.chat.v2.provider_bridge import (
     ProviderGenerateError,
     _classify_wavespeed_failure,
     _model_family,
+    normalize_video_profile,
     resolve_provider,
 )
 from app.chat.v2.sandbox_client import SandboxClient
@@ -163,6 +164,82 @@ def test_model_family_routes_minimax_h3():
     assert _model_family("h3") == "minimax_h3"
     assert _model_family("minimax/h3/reference-to-video") == "minimax_h3"
     assert _model_family("wavespeed-ai/minimax-h3/reference-to-video") == "minimax_h3"
+
+
+def test_model_identifier_in_provider_slot_is_normalized_without_version_loss():
+    profile = normalize_video_profile({"provider": "seedance-2.5", "prompt": "commercial"})
+    assert profile["provider"] == "wavespeed"
+    assert profile["model"] == "seedance-2.5"
+    assert profile["requested_provider"] == "seedance-2.5"
+
+
+def test_duration_seconds_is_normalized_to_provider_duration():
+    profile = normalize_video_profile({
+        "provider": "wavespeed",
+        "prompt": "fifteen second scene",
+        "duration_seconds": 15,
+    })
+    assert profile["duration"] == 15
+
+
+def test_conflicting_duration_selectors_are_rejected():
+    with pytest.raises(ValueError, match="conflicting video duration selectors"):
+        normalize_video_profile({"duration": 5, "duration_seconds": 15})
+
+
+@pytest.mark.asyncio
+async def test_generated_video_duration_probe_accepts_small_container_drift(monkeypatch):
+    from app.llm import wavespeed_service
+
+    async def _video_info(_url):
+        return {"duration": 15.08}
+
+    monkeypatch.setattr(wavespeed_service.msc, "video_info", _video_info)
+    actual = await wavespeed_service._validate_generated_video_duration(
+        "http://media/video.mp4", 15,
+    )
+    assert actual == pytest.approx(15.08)
+
+
+@pytest.mark.asyncio
+async def test_generated_video_duration_probe_rejects_wrong_length(monkeypatch):
+    from app.llm import wavespeed_service
+
+    async def _video_info(_url):
+        return {"duration": 5.085}
+
+    monkeypatch.setattr(wavespeed_service.msc, "video_info", _video_info)
+    with pytest.raises(
+        wavespeed_service.WaveSpeedFinalException,
+        match=r"requested=15\.000s, actual=5\.085s",
+    ):
+        await wavespeed_service._validate_generated_video_duration(
+            "http://media/video.mp4", 15,
+        )
+
+
+def test_conflicting_provider_model_selectors_are_rejected():
+    with pytest.raises(ValueError, match="conflicting video model selectors"):
+        normalize_video_profile({"provider": "seedance-2.5", "model": "seedance-2.0"})
+
+
+@pytest.mark.asyncio
+async def test_generate_video_routes_provider_slot_seedance_25_to_25_handler(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    captured = {}
+
+    async def _fake_wavespeed(profile, _callback=None):
+        captured.update(profile)
+        return {"uri": "https://cdn/seedance-25.mp4", "model_family": _model_family(profile["model"])}
+
+    monkeypatch.setattr(bridge, "resolve_provider", lambda *_args, **_kwargs: "wavespeed")
+    monkeypatch.setattr(bridge, "_wavespeed_generate", _fake_wavespeed)
+    result = await bridge.generate_video({"provider": "seedance-2.5", "prompt": "commercial"})
+
+    assert captured["provider"] == "wavespeed"
+    assert captured["model"] == "seedance-2.5"
+    assert result["model_family"] == "seedance_2_5"
 
 
 @pytest.mark.asyncio

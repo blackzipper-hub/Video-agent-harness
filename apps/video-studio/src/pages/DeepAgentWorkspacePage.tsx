@@ -991,7 +991,7 @@ export default function DeepAgentWorkspacePage() {
                   isMobileFullScreen
                 />
               </div>
-              <button className="flex-1 bg-black/50" aria-label="Close sidebar" onClick={() => setMobileSidebarOpen(false)} />
+              <button className="flex-1 bg-black/50" aria-label={t('da.page.closeSidebar')} onClick={() => setMobileSidebarOpen(false)} />
             </div>
           )}
         </div>

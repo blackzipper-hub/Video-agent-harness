@@ -42,7 +42,7 @@ from .capabilities import RuntimeCapabilityRegistry
 from .execution import CapabilityExecutionGateway
 from .security import CapabilityGrant, CapabilityGrantSigner
 from .skills import VideoSkillRuntime, default_video_skill_runtime
-from app.orchestration.skills import SkillResolutionRequest
+from app.orchestration.skills import SkillContext, SkillResolutionRequest
 from app.domain.skills.service import make_skill_lock
 
 
@@ -58,6 +58,9 @@ _CHECKPOINT_METADATA_KEYS = {
     "width",
     "height",
     "plan_step_id",
+    "language",
+    "language_contract",
+    "language_validation",
 }
 
 
@@ -1102,6 +1105,7 @@ class VideoBuildRuntime:
                             or "; ".join(shot.beat for shot in video_spec.shots)
                         ),
                         language=video_spec.language,
+                        language_contract=video_spec.language_contract,
                         target_duration_seconds=video_spec.target_duration_seconds,
                         aspect_ratio=video_spec.aspect_ratio,
                         resolution=video_spec.resolution,
@@ -1149,6 +1153,7 @@ class VideoBuildRuntime:
                         or "; ".join(shot.beat for shot in video_spec.shots)
                     ),
                     language=video_spec.language,
+                    language_contract=video_spec.language_contract,
                     target_duration_seconds=video_spec.target_duration_seconds,
                     aspect_ratio=video_spec.aspect_ratio,
                     resolution=video_spec.resolution,
@@ -1299,6 +1304,20 @@ class VideoBuildRuntime:
                 constraint_contract=item.constraint_contract,
                 require_constraint_contract=False,
             ))
+            language_source = plan.video_spec or plan.project_intent
+            if language_source is not None:
+                item.language_contract = language_source.language_contract
+            if item.capability == "atomic.text.generate" and language_source is not None:
+                from app.chat.v2.language import video_language_instruction
+
+                language_values = language_source.language_contract.model_dump(mode="json")
+                instruction = video_language_instruction(language_values)
+                context = context or SkillContext()
+                context = context.model_copy(update={
+                    "instructions": "\n\n".join(filter(None, (
+                        context.instructions.strip(), instruction,
+                    ))),
+                })
             item.skill_context = context
             item.resolved_skills = list(context.applied_skills) if context else []
 
@@ -1398,6 +1417,10 @@ class VideoBuildRuntime:
         intent_base = ({
             "title": intent.title,
             "language": intent.language,
+            "language_contract": (
+                intent.language_contract.model_dump(mode="json")
+                if intent.language_contract is not None else None
+            ),
             "target_duration_seconds": intent.target_duration_seconds,
             "aspect_ratio": intent.aspect_ratio,
             "resolution": intent.resolution,
@@ -1637,6 +1660,9 @@ class VideoBuildRuntime:
                 for proposed in normalized_steps:
                     capability = self.skills.capabilities.get(proposed.capability)
                     proposed.capability = capability.id
+                    if capability.id == "media.concat" and not proposed.parameters.get("video_urls"):
+                        proposed.parameters.pop("video_urls", None)
+                        proposed.parameters.setdefault("video_steps", list(proposed.depends_on))
                     if workflow is not None and capability_requires_workflow(capability.id):
                         proposed.parameters = inject_workflow_parameters(
                             proposed.parameters, workflow,
@@ -1667,15 +1693,24 @@ class VideoBuildRuntime:
                                 f"PlanPatch task {proposed.step_id} has invalid parameters"
                                 f"{location}: {exc.message}"
                             ) from exc
+                    dependency_output_types = {
+                        item.step_id: item.output_artifact_type
+                        for item in [*base_plan.items, *normalized_steps]
+                    }
                     input_types = {
                         available_inputs[version_id].type
                         for version_id in proposed.input_artifact_version_ids
+                    }
+                    requirement_types = input_types | {
+                        dependency_output_types[step_id]
+                        for step_id in proposed.depends_on
+                        if dependency_output_types.get(step_id)
                     }
                     missing_input_types = [
                         expected for expected in capability.inputs.required
                         if not any(
                             _artifact_matches_media_type(actual, [expected])
-                            for actual in input_types
+                            for actual in requirement_types
                         )
                     ]
                     if missing_input_types:
@@ -2248,6 +2283,45 @@ class VideoBuildRuntime:
                         else None
                     ),
                 }
+                plan = await self.repo.get_plan(build.plan_id)
+                language_source = plan.video_spec or plan.project_intent
+                if language_source is not None:
+                    language_values = language_source.language_contract.model_dump(mode="json")
+                    artifact.metadata.update({
+                        "language": language_values["content_language"],
+                        "language_contract": language_values,
+                        "audience": "user",
+                        "content_role": artifact.type,
+                    })
+                    if artifact.type in {
+                        "text", "story", "script", "outline", "character",
+                        "scene", "shot", "storyboard", "scenario_product_script",
+                    }:
+                        body = str(
+                            artifact.metadata.get("text")
+                            or artifact.metadata.get("content")
+                            or artifact.summary
+                            or ""
+                        )
+                        cjk_count = sum(
+                            "\u3400" <= character <= "\u9fff" for character in body
+                        )
+                        latin_count = sum(character.isascii() and character.isalpha() for character in body)
+                        expected = language_values["content_language"]
+                        passed = not (
+                            (expected == "zh-CN" and latin_count >= 400 and cjk_count == 0)
+                            or (expected == "en-US" and cjk_count >= 50 and latin_count < cjk_count // 2)
+                        )
+                        artifact.metadata["language_validation"] = {
+                            "expected": expected,
+                            "passed": passed,
+                            "cjk_characters": cjk_count,
+                            "latin_characters": latin_count,
+                        }
+                        if not passed:
+                            raise ValueError(
+                                f"user-visible artifact language does not match {expected}"
+                            )
                 if artifact.type == "video_spec" and isinstance(
                     planned.parameters.get("content"), dict,
                 ):

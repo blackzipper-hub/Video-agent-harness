@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.orchestration.workflow_compiler.registry import WorkflowSpec
 from app.video_runtime.models import (
     CheckpointResolution, MediaArtifactVersion, ProjectIntent, RebuildPlan,
-    RebuildPlanItem, ValidationResult,
+    RebuildPlanItem, ValidationResult, VideoLanguageContract,
 )
 from app.video_runtime.repository import PlanRevisionConflict
 from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator, checkpoint_prompt
@@ -54,6 +54,22 @@ class _DeepSeek:
 
 
 class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_intent_receives_a_complete_language_contract(self) -> None:
+        intent = ProjectIntent(
+            title="English film", brief="Make a film", language="en-US",
+            workflow_id="seedance2",
+        )
+        self.assertEqual(intent.language_contract.content_language, "en-US")
+        self.assertEqual(intent.language_contract.subtitle_language, "en-US")
+
+    def test_conflicting_legacy_and_structured_languages_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "content_language"):
+            ProjectIntent(
+                title="Film", brief="Make a film", language="zh-CN",
+                language_contract=VideoLanguageContract(content_language="en-US"),
+                workflow_id="seedance2",
+            )
+
     def test_unknown_plugin_has_no_implicit_direct_video_phase(self) -> None:
         with self.assertRaisesRegex(
             BuildPlanValidationError,

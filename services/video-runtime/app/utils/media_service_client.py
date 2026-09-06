@@ -5,7 +5,10 @@ Cuti-Media-Service HTTP client.
 所有方法均为 async，接受 URL 输入、返回 S3 CDN URL 输出。
 """
 
+import asyncio
+import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -128,6 +131,54 @@ async def image_info(image_url: str) -> dict:
 # ─── Video ───────────────────────────────────────────────
 
 async def video_info(video_url: str) -> dict:
+    # Self-hosted Runtime artifacts already exist on this machine. Sending their
+    # public URL to MEDIA_SERVICE_URL adds a network dependency and, when that
+    # service is absent, blocks every generated clip for the 1200s read timeout.
+    # Probe the immutable local file directly instead.
+    from app.utils.s3_utils import _storage_is_local, is_our_cdn_url, s3_utils
+
+    if _storage_is_local() and is_our_cdn_url(video_url):
+        file_key = s3_utils.cdn_url_to_s3_key(video_url)
+        if not file_key:
+            raise RuntimeError("cannot resolve local video storage key")
+        storage_root = os.path.realpath(s3_utils._local_dir)
+        local_path = os.path.realpath(os.path.join(storage_root, file_key))
+        if os.path.commonpath((storage_root, local_path)) != storage_root:
+            raise RuntimeError("local video path escapes storage root")
+        if not os.path.isfile(local_path):
+            raise FileNotFoundError(local_path)
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate",
+            "-of", "json",
+            local_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError("ffprobe timed out after 30 seconds")
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"ffprobe failed: {stderr.decode(errors='replace').strip()}"
+            )
+        payload = json.loads(stdout.decode())
+        streams = payload.get("streams") or []
+        video_stream = next(
+            (item for item in streams if item.get("codec_type") == "video"), {}
+        )
+        return {
+            "duration": float((payload.get("format") or {}).get("duration") or 0),
+            "has_video": bool(video_stream),
+            "has_audio": any(item.get("codec_type") == "audio" for item in streams),
+            "width": video_stream.get("width"),
+            "height": video_stream.get("height"),
+            "fps": video_stream.get("r_frame_rate"),
+        }
     return await _post("video/info", {"video_url": video_url})
 
 

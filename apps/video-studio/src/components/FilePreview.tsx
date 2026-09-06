@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, FileText, Music, Video, Image, Play, Pause, Scissors } from 'lucide-react';
 import { hardCleanupVideo } from '@/utils/videoCleanup';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLanguage } from '@/i18n/LanguageContext';
 
 interface FilePreviewProps {
   file: File;
@@ -11,6 +12,7 @@ interface FilePreviewProps {
 }
 
 export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove, onCropAudio }) => {
+  const { t } = useLanguage();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
@@ -246,7 +248,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleAudioClick(); }}
                 className="w-12 h-12 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
-                title={onCropAudio ? 'Open crop audio' : (audioPlaying ? 'Pause' : 'Play')}
+                title={onCropAudio ? t('cropAudioTitle') : (audioPlaying ? t('pausePreview') : t('playPreview'))}
               >
                 {onCropAudio ? <Music className="w-5 h-5" /> : (audioPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />)}
               </button>
@@ -265,7 +267,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
                 onCropAudio(index, file);
               }}
               className="absolute -bottom-0.5 -right-0.5 hover:bg-white/20 rounded-full p-0.5 min-w-[20px] min-h-[20px] sm:min-w-0 sm:min-h-0 sm:p-0.5 transition-colors flex-shrink-0 bg-white/10 backdrop-blur-sm flex items-center justify-center"
-              title="Crop audio"
+              title={t('cropAudioTitle')}
             >
               <Scissors className="w-2.5 h-2.5" />
             </button>
@@ -287,7 +289,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
                 onRemove(index);
               }}
               className="absolute -top-0.5 -right-0.5 hover:bg-white/20 rounded-full p-0.5 min-w-[20px] min-h-[20px] sm:min-w-0 sm:min-h-0 sm:p-0.5 transition-colors flex-shrink-0 bg-white/10 backdrop-blur-sm flex items-center justify-center"
-              title="Remove file"
+              title={t('delete')}
             >
               <X className="w-2.5 h-2.5" />
             </button>

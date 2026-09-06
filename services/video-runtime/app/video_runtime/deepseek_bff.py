@@ -25,6 +25,13 @@ from .models import MediaArtifactVersion
 from .upload_security import sign_uploaded_file as _sign_uploaded_file
 from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
 from app.chat.utils.file_utils import process_uploaded_files
+from app.chat.v2.language import (
+    active_language_skill,
+    explicit_language_skill,
+    normalize_output_language,
+    resolve_video_language_contract,
+    video_language_instruction,
+)
 
 
 router = APIRouter(prefix="/v2", tags=["deepseek-compatibility-bff"])
@@ -84,6 +91,39 @@ class StudioSkillEnableBody(BaseModel):
 
 def success(data: Any) -> dict[str, Any]:
     return {"code": 0, "message": "success", "data": data}
+
+
+def _language_overrides(user_option: dict[str, Any] | None) -> dict[str, str]:
+    options = user_option or {}
+    nested = options.get("language_contract")
+    source = nested if isinstance(nested, dict) else options
+    return {
+        key: str(source[key])
+        for key in (
+            "ui_locale", "content_language", "spoken_language",
+            "subtitle_language", "provider_prompt_language",
+        )
+        if isinstance(source.get(key), str) and str(source[key]).strip()
+    }
+
+
+def _request_language_contract(
+    text: str,
+    *,
+    app_language: str | None,
+    user_option: dict[str, Any] | None,
+    activated_skill_ids: list[str] | None = None,
+    current: dict[str, str] | None = None,
+) -> dict[str, str]:
+    explicit_skill = explicit_language_skill(text)
+    selected_skill = explicit_skill or active_language_skill(activated_skill_ids)
+    return resolve_video_language_contract(
+        text,
+        ui_locale=app_language,
+        current=current,
+        overrides=_language_overrides(user_option),
+        language_skill=selected_skill,
+    )
 
 
 def _prompt_input_files(input_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -344,6 +384,7 @@ def _initial_video_build_prompt(
     input_files: list[dict[str, Any]],
     workflow_id: str | None = None,
     activated_skill_ids: list[str] | None = None,
+    language_contract: dict[str, str] | None = None,
 ) -> str:
     """Give DeepSeek a deterministic product-flow contract for `/create`."""
     options = user_option or {}
@@ -374,6 +415,12 @@ def _initial_video_build_prompt(
         f"The required base_project_version_id is {base_project_version_id}.",
         f"Creation controls: {json.dumps(options, ensure_ascii=False, sort_keys=True)}",
         f"Uploaded project Source Artifacts: {json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True)}",
+        video_language_instruction(language_contract or resolve_video_language_contract(objective)),
+        (
+            "Set the legacy language field to language_contract.content_language and set "
+            "language_contract to exactly this persisted five-field value. Do not infer a "
+            "different language from SKILL.md or provider-prompt instructions."
+        ),
         (
             "Use only the uploaded artifact_id values as VideoSpec.source_asset_ids and shot "
             "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
@@ -552,6 +599,11 @@ def _run(
     messages = _messages(project.id, events)
     assistant = [item["content"] for item in messages if item["role"] == "assistant"]
     user = [item["content"] for item in messages if item["role"] == "user"]
+    language_values = (context or {}).get("language_contract")
+    language_values = language_values if isinstance(language_values, dict) else {}
+    output_language = normalize_output_language(
+        str(language_values.get("content_language") or "")
+    ) or "en"
     return {
         "id": project.id,
         "thread_id": session_id,
@@ -561,7 +613,8 @@ def _run(
         "status": _status(events),
         "current_revision": 0,
         "last_response": assistant[-1] if assistant else "",
-        "output_language": "en",
+        "output_language": output_language,
+        "language_contract": language_values or None,
         "user_option": (context or {}).get("user_option"),
         "input_files": (context or {}).get("input_files", []),
         "workflow_id": (context or {}).get("workflow_id"),
@@ -578,17 +631,7 @@ async def _run_with_context(
     session_id: str,
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    encoded = await runtime.repo.get_operation_result(
-        project.id, _RUN_CONTEXT_OPERATION, _RUN_CONTEXT_KEY,
-    )
-    context: dict[str, Any] = {}
-    if encoded:
-        try:
-            parsed = json.loads(encoded)
-            if isinstance(parsed, dict):
-                context = parsed
-        except json.JSONDecodeError:
-            pass
+    context = await _load_run_context(runtime, project.id)
     result = _run(project, session_id, events, context)
     locks = await runtime.list_project_skill_locks(project.id)
     result["skill_locks"] = [item.model_dump(mode="json") for item in locks]
@@ -606,6 +649,73 @@ async def _run_with_context(
         if latest.status == "cancelled":
             result["status"] = "cancelled"
     return result
+
+
+async def _load_run_context(
+    runtime: VideoBuildRuntime,
+    project_id: str,
+) -> dict[str, Any]:
+    encoded = await runtime.repo.get_operation_result(
+        project_id, _RUN_CONTEXT_OPERATION, _RUN_CONTEXT_KEY,
+    )
+    context: dict[str, Any] = {}
+    if encoded:
+        try:
+            parsed = json.loads(encoded)
+            if isinstance(parsed, dict):
+                context = parsed
+        except json.JSONDecodeError:
+            pass
+    if context.get("language_contract_version") != 1:
+        builds = await runtime.repo.list_builds(project_id)
+        for build in sorted(builds, key=lambda item: item.created_at, reverse=True):
+            try:
+                plan = await runtime.repo.get_plan(build.plan_id)
+            except LookupError:
+                continue
+            language_source = plan.video_spec or plan.project_intent
+            if language_source is None or language_source.language_contract is None:
+                continue
+            persisted = language_source.language_contract.model_dump(mode="json")
+            source_values = language_source.model_dump(mode="json")
+            workflow_values = source_values.get("workflow_parameters")
+            constraints = source_values.get("constraints")
+            legacy_overrides = {"content_language": persisted["content_language"]}
+            for values in (workflow_values, constraints):
+                if not isinstance(values, dict):
+                    continue
+                spoken = values.get("spoken_language") or values.get("dialogue_language")
+                subtitles = values.get("subtitle_language")
+                provider_prompt = values.get("provider_prompt_language")
+                if isinstance(spoken, str) and spoken.strip():
+                    legacy_overrides["spoken_language"] = spoken
+                if isinstance(subtitles, str) and subtitles.strip():
+                    legacy_overrides["subtitle_language"] = subtitles
+                if isinstance(provider_prompt, str) and provider_prompt.strip():
+                    legacy_overrides["provider_prompt_language"] = provider_prompt
+            context["language_contract"] = resolve_video_language_contract(
+                str(source_values.get("brief") or source_values.get("title") or ""),
+                ui_locale=persisted["ui_locale"],
+                overrides=legacy_overrides,
+            )
+            context["language_contract_version"] = 1
+            await runtime.repo.remember_operation_result(
+                project_id,
+                _RUN_CONTEXT_OPERATION,
+                _RUN_CONTEXT_KEY,
+                json.dumps(context, ensure_ascii=False, sort_keys=True),
+            )
+            break
+        else:
+            context["language_contract_version"] = 1
+            if isinstance(context.get("language_contract"), dict):
+                await runtime.repo.remember_operation_result(
+                    project_id,
+                    _RUN_CONTEXT_OPERATION,
+                    _RUN_CONTEXT_KEY,
+                    json.dumps(context, ensure_ascii=False, sort_keys=True),
+                )
+    return context
 
 
 async def _history(dsh: DeepSeekHarnessClient, session_id: str) -> list[dict[str, Any]]:
@@ -712,6 +822,7 @@ async def create_run(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
+    app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
     existing = await runtime.repo.get_compatibility_run(user_id, body.idempotency_key)
     if existing is not None:
@@ -746,16 +857,25 @@ async def create_run(
         workflow_id, activated_skill_ids = await _effective_skill_selection(
             runtime, project.id, requested_workflow, requested_activated,
         )
+        language_values = _request_language_contract(
+            body.objective,
+            app_language=app_language,
+            user_option=body.user_option,
+            activated_skill_ids=activated_skill_ids,
+        )
+        run_context = {
+            "user_option": body.user_option,
+            "input_files": imported_input_files,
+            "workflow_id": workflow_id,
+            "activated_skill_ids": activated_skill_ids,
+            "language_contract": language_values,
+            "language_contract_version": 1,
+        }
         await runtime.repo.remember_operation_result(
             project.id,
             _RUN_CONTEXT_OPERATION,
             _RUN_CONTEXT_KEY,
-            json.dumps({
-                "user_option": body.user_option,
-                "input_files": imported_input_files,
-                "workflow_id": workflow_id,
-                "activated_skill_ids": activated_skill_ids,
-            }, ensure_ascii=False, sort_keys=True),
+            json.dumps(run_context, ensure_ascii=False, sort_keys=True),
         )
         await dsh.prompt(
             session_id,
@@ -768,14 +888,10 @@ async def create_run(
                 input_files=imported_input_files,
                 workflow_id=workflow_id,
                 activated_skill_ids=activated_skill_ids,
+                language_contract=language_values,
             ),
         )
-        return success(_run(project, session_id, [], {
-            "user_option": body.user_option,
-            "input_files": imported_input_files,
-            "workflow_id": workflow_id,
-            "activated_skill_ids": activated_skill_ids,
-        }))
+        return success(_run(project, session_id, [], run_context))
     except DeepSeekHarnessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -822,6 +938,7 @@ async def add_message(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
+    app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
     project, binding = await _project_and_binding(runtime, project_id, user_id)
     if await runtime.repo.get_operation_result(
@@ -854,6 +971,16 @@ async def add_message(
         workflow_id, activated_skill_ids = await _effective_skill_selection(
             runtime, project_id, requested_workflow, requested_activated,
         )
+        run_context = await _load_run_context(runtime, project_id)
+        current_language = run_context.get("language_contract")
+        current_language = current_language if isinstance(current_language, dict) else None
+        language_values = _request_language_contract(
+            body.content,
+            app_language=app_language,
+            user_option=body.user_option,
+            activated_skill_ids=activated_skill_ids,
+            current=current_language,
+        )
         prompt = (
             _initial_video_build_prompt(
                 objective=body.content,
@@ -864,6 +991,7 @@ async def add_message(
                 input_files=imported_input_files,
                 workflow_id=workflow_id,
                 activated_skill_ids=activated_skill_ids,
+                language_contract=language_values,
             )
             if is_empty_creation
             else body.content
@@ -875,6 +1003,7 @@ async def add_message(
             )
         if not is_empty_creation:
             prompt += _selection_context(workflow_id, activated_skill_ids)
+            prompt += "\n\n" + video_language_instruction(language_values)
         builds = await runtime.repo.list_builds(project_id)
         latest = max(builds, key=lambda item: item.created_at) if builds else None
         stopped = latest is not None and latest.status == "cancelled"
@@ -896,6 +1025,25 @@ async def add_message(
                     f"Active checkpoints: {json.dumps(active)}."
                 )
         await dsh.prompt(binding.session_id, prompt)
+        run_context.update({
+            "workflow_id": workflow_id,
+            "activated_skill_ids": activated_skill_ids,
+            "language_contract": language_values,
+            "language_contract_version": 1,
+        })
+        if body.user_option is not None:
+            run_context["user_option"] = body.user_option
+        if imported_input_files:
+            run_context["input_files"] = [
+                *list(run_context.get("input_files") or []),
+                *imported_input_files,
+            ]
+        await runtime.repo.remember_operation_result(
+            project_id,
+            _RUN_CONTEXT_OPERATION,
+            _RUN_CONTEXT_KEY,
+            json.dumps(run_context, ensure_ascii=False, sort_keys=True),
+        )
         await runtime.repo.remember_operation_result(
             project_id, "compat-message", body.idempotency_key, binding.session_id,
         )
@@ -913,8 +1061,12 @@ async def resume_run(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
+    app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
-    return await add_message(project_id, body.model_copy(update={"resume_builds": True}), user_id, runtime, dsh)
+    return await add_message(
+        project_id, body.model_copy(update={"resume_builds": True}),
+        user_id, runtime, dsh, app_language,
+    )
 
 
 @router.get("/runs/{project_id}/messages")
@@ -1243,6 +1395,7 @@ async def studio_create_project(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
+    app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
     created = await create_run(
         CreateRunBody(
@@ -1257,6 +1410,7 @@ async def studio_create_project(
         user_id,
         runtime,
         dsh,
+        app_language,
     )
     return success({"project": created["data"], "suggested_plan": []})
 
@@ -1279,6 +1433,7 @@ async def studio_add_command(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
+    app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
     project, binding = await _studio_project(runtime, session_id, user_id)
     imported_input_files = await _import_input_files(
@@ -1292,6 +1447,16 @@ async def studio_add_command(
     workflow_id, activated_skill_ids = await _effective_skill_selection(
         runtime, project.id, requested_workflow, requested_activated,
     )
+    run_context = await _load_run_context(runtime, project.id)
+    current_language = run_context.get("language_contract")
+    current_language = current_language if isinstance(current_language, dict) else None
+    language_values = _request_language_contract(
+        body.objective,
+        app_language=app_language,
+        user_option=body.user_option,
+        activated_skill_ids=activated_skill_ids,
+        current=current_language,
+    )
     try:
         prompt = body.objective
         if body.user_option or imported_input_files:
@@ -1301,7 +1466,18 @@ async def studio_add_command(
             )
         await dsh.prompt(
             binding.session_id,
-            prompt + _selection_context(workflow_id, activated_skill_ids),
+            prompt + _selection_context(workflow_id, activated_skill_ids)
+            + "\n\n" + video_language_instruction(language_values),
+        )
+        run_context.update({
+            "workflow_id": workflow_id,
+            "activated_skill_ids": activated_skill_ids,
+            "language_contract": language_values,
+            "language_contract_version": 1,
+        })
+        await runtime.repo.remember_operation_result(
+            project.id, _RUN_CONTEXT_OPERATION, _RUN_CONTEXT_KEY,
+            json.dumps(run_context, ensure_ascii=False, sort_keys=True),
         )
     except DeepSeekHarnessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

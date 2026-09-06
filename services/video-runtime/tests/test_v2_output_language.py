@@ -6,12 +6,15 @@ from app.chat.v2.language import (
     explicit_language_skill,
     language_contract,
     output_language_instruction,
+    resolve_video_language_contract,
     resolve_output_language,
     resolve_spoken_language,
+    video_language_instruction,
 )
 import pytest
 from app.chat.v2.models import AgentRun, PlannedTask, RunSnapshot
 from app.orchestration.context import ContextAssembler
+from app.capabilities.models import CapabilityRegistry
 from app.chat.v2.models import PlanPatch
 from app.orchestration.task_runtime.harness import DynamicHarness
 from app.chat.v2.skill_catalog import SkillCatalog
@@ -69,6 +72,48 @@ def test_explicit_chinese_voiceover_is_independent_from_english_output():
     assert resolve_spoken_language(request, output_language="en") == "zh-CN"
 
 
+def test_video_language_contract_separates_ui_content_speech_and_subtitles():
+    contract = resolve_video_language_contract(
+        "请用英文展示全部策划，人物说中文，并配英文字幕",
+        ui_locale="zh",
+    )
+    assert contract == {
+        "ui_locale": "zh-CN",
+        "content_language": "en-US",
+        "spoken_language": "zh-CN",
+        "subtitle_language": "en-US",
+        "provider_prompt_language": "auto",
+    }
+    rendered = video_language_instruction(contract)
+    assert "every user-visible" in rendered
+    assert "content_language=en-US" in rendered
+
+
+def test_followup_keeps_project_content_language_without_explicit_switch():
+    current = resolve_video_language_contract(
+        "Write all content in English", ui_locale="en",
+    )
+    updated = resolve_video_language_contract(
+        "请把第二个镜头改快一点", ui_locale="zh", current=current,
+    )
+    assert updated["ui_locale"] == "zh-CN"
+    assert updated["content_language"] == "en-US"
+
+
+def test_followup_keeps_independent_spoken_language_without_explicit_switch():
+    current = resolve_video_language_contract(
+        "请用中文展示全部策划，人物对白使用英文",
+        ui_locale="zh",
+    )
+    updated = resolve_video_language_contract(
+        "把第二个镜头改快一点",
+        ui_locale="zh",
+        current=current,
+    )
+    assert updated["content_language"] == "zh-CN"
+    assert updated["spoken_language"] == "en-US"
+
+
 def test_run_language_skill_has_priority_over_inline_spoken_language():
     assert resolve_spoken_language(
         "$eng 对话使用中文",
@@ -107,10 +152,11 @@ def test_harness_adds_language_contract_when_stage_has_no_matching_skill():
         output_language="zh",
     )
     class EmptyResolver:
-        def resolve(self, _run, _task):
+        def resolve(self, _request):
             return None
 
     harness = DynamicHarness.__new__(DynamicHarness)
+    harness.capabilities = CapabilityRegistry()
     harness.skill_resolver = EmptyResolver()
     patch = harness._resolve_stage_skills(
         run,

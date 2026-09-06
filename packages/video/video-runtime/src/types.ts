@@ -34,9 +34,19 @@ export interface VideoShotSpec {
   transition?: string
 }
 
+/** Persistent and independent locale choices for every user-visible and media output. */
+export interface VideoLanguageContract {
+  ui_locale: 'zh-CN' | 'en-US'
+  content_language: 'zh-CN' | 'en-US'
+  spoken_language: 'zh-CN' | 'en-US'
+  subtitle_language: 'zh-CN' | 'en-US'
+  provider_prompt_language: 'auto' | 'zh-CN' | 'en-US'
+}
+
 export interface VideoSpec {
   title: string
   language: string
+  language_contract: VideoLanguageContract
   target_duration_seconds: number
   aspect_ratio: '16:9' | '9:16' | '1:1'
   resolution: string
@@ -57,6 +67,7 @@ export interface ProjectIntent {
   title: string
   brief: string
   language: string
+  language_contract: VideoLanguageContract
   target_duration_seconds: number
   aspect_ratio: '16:9' | '9:16' | '1:1'
   resolution: string
