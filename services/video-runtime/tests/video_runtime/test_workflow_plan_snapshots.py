@@ -185,7 +185,7 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             {function.__name__ for function in compilers},
             {
                 "compile_keyframe", "compile_direct", "compile_seedance2",
-                "compile_mv_compat", "compile_seedance_mv",
+                "compile_mv_compat",
                 "compile_system_short_drama", "compile_short_drama_workflow",
                 "compile_product_ad", "compile_cuti_product",
                 "compile_scenario_product", "compile_libtv_product",
@@ -244,7 +244,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
                 "workflow-direct-video": ("direct_video", "compile_direct"),
                 "seedance2": ("seedance2", "compile_seedance2"),
                 "mv": ("mv", "compile_mv_compat"),
-                "seedance-mv": ("seedance_mv", "compile_seedance_mv"),
                 "workflow-short-drama": ("short_drama", "compile_system_short_drama"),
                 "short-drama-workflow": (
                     "short_drama_workflow", "compile_short_drama_workflow",
@@ -305,7 +304,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
         expected = {
             "mv": "compile_mv_compat",
             "seedance2": "compile_seedance2",
-            "seedance-mv": "compile_seedance_mv",
             "short-drama-workflow": "compile_short_drama_workflow",
             "workflow-short-drama": "compile_system_short_drama",
             "workflow-keyframe-pipeline": "compile_keyframe",
@@ -344,8 +342,7 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             "libtv-product-workflow": "8a41ee03d48eda29d1b574c9b512f9b259f216f8cce9be69ffd8455c2736ee64",
             "open-montage": "fd107a14105e90c6f39daf98c645f509a94b1330ac1a420e91c655b5b596afbf",
             "product-ad-video": "250e1b246c6f3fc4560c97598f92d10209d4105e313598928fd8c31a43de2657",
-            "seedance-mv": "91e42b047b6f9fb31ccc25599d3d91344f9690a9ae5d1200025b2e61ad2a6940",
-            "seedance2": "ec4757af24cc91f48462b916c5bed5f5b576eae4dbe634ffb0decb1034de82dc",
+            "seedance2": "a496b7e4b2ed260753355de549b0606e38236692461cff601be05021fe4db7d7",
             "short-drama-workflow": "d81a99f35a4fddf2772e1aa5c861ec7f53ec88690e136f3048523c68c8143c4c",
             "workflow-direct-video": "8dc9fd30fac2b7d4591ad3d62b080e3d7927c51089212a924d01c5518f01c634",
             "workflow-keyframe-pipeline": "9208a988b68f9772fa4e0c98c8dc1d1433995eda43a8f01973b54e40c04489ea",
@@ -376,10 +373,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             )
         if "seedance2" in installed:
             plans["seedance2"] = await self._compile("seedance2")
-        if "seedance-mv" in installed:
-            plans["seedance-mv"] = await self._compile(
-                "seedance-mv", _spec("seedance-mv", bgm_prompt="test song"),
-            )
         mv_spec = _spec("mv", bgm_prompt="test song", subtitles=True)
         plans["mv"] = await self._compile(
             "mv",
@@ -453,24 +446,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(all(item.parameters["model"] == "minimax-h3" for item in mv_clips))
 
-        if "seedance-mv" in plans:
-            seedance_mv = plans["seedance-mv"]
-            seedance_mv_sig = snapshots["seedance-mv"]
-            self.assertIn("music:create:atomic.music.generate", seedance_mv_sig)
-            self.assertIn("music-analysis:create:media.audio_analyze", seedance_mv_sig)
-            self.assertIn("music-window:create:media.audio.trim", seedance_mv_sig)
-            self.assertIn("shot-1-audio:create:media.audio.trim", seedance_mv_sig)
-            self.assertIn("shot-2-audio:create:media.audio.trim", seedance_mv_sig)
-            self.assertIn("shot-1-tail-for-2:create:media.extract_frame", seedance_mv_sig)
-            self.assertNotIn("suno.generate", {item.capability for item in seedance_mv.items})
-            seedance_mv_clips = [
-                item for item in seedance_mv.items
-                if item.output_artifact_type == "video_clip"
-            ]
-            self.assertTrue(all(item.capability == "api.provider.generate" for item in seedance_mv_clips))
-            self.assertTrue(all(item.parameters["model"] == "doubao-seedance-2-0" for item in seedance_mv_clips))
-            self.assertTrue(all("audio_segment_index" not in item.parameters for item in seedance_mv_clips))
-            self.assertTrue(all("seedance2" not in item.skill_ids for item in seedance_mv.items))
         for workflow_id in (
             "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",
@@ -916,10 +891,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             )
         if "seedance2" in installed:
             workflow_specs["seedance2"] = _spec("seedance2")
-        if "seedance-mv" in installed:
-            workflow_specs["seedance-mv"] = _spec(
-                "seedance-mv", bgm_prompt="test song",
-            )
         for workflow_id in (
             "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",

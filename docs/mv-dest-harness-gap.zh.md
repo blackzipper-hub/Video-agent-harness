@@ -51,7 +51,7 @@
 | `$hyperframes-captions` SKILL | 写完整 `caption_html`，按需 load core/media/animation | **是，已改回 dest** |
 | ~~`compile_mv` / `WorkflowPlanBuilder.finish(captions=True)` 默认 `caption-highlight`~~ | continuous **不跑** | 不用改 compiler |
 | 后期 Plan Patch 目录 | `media.hyperframes_caption` 绑 `skill_id=hyperframes-captions` | 跟同事 skill：选 style |
-| `$seedance2` / 产品流 / `$seedance-mv` SKILL | **没有**写 HyperFrames 成片字 | 不用这条 |
+| `$seedance2` / 产品流 SKILL | **没有**写 HyperFrames 成片字 | 不用这条 |
 | `$subtitle-authoring` | 静态 SRT + `subtitle_burn` | 另一条后期 |
 
 media-service **一条 API 两条腿**都还在：

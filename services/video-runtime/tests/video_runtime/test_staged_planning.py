@@ -75,13 +75,13 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
     def test_workflow_id_cannot_change_its_staged_planning_mode(self) -> None:
         wrong_mode = WorkflowSpec(
-            skill_name="seedance-mv",
-            title="Seedance MV",
-            mode="mv",
+            skill_name="mv",
+            title="Music Video",
+            mode="seedance2",
         )
         with self.assertRaisesRegex(
             BuildPlanValidationError,
-            "dedicated staged-planning contract requires seedance_mv",
+            "dedicated staged-planning contract requires mv",
         ):
             initial_checkpoint(wrong_mode, wrong_mode.skill_name)
 
@@ -319,7 +319,6 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "mv": ["intent", "music", "music-analysis", "music-cut"],
             "cuti.music-video": ["intent", "music", "music-analysis", "music-cut"],
             "cuti.lipsync-music-video": ["intent", "music", "music-analysis", "music-cut"],
-            "seedance-mv": ["intent", "music", "music-analysis", "music-window"],
             "workflow-keyframe-pipeline": ["intent", "story-draft"],
             "workflow-short-drama": ["intent", "story-draft"],
             "short-drama-workflow": ["intent", "story-draft"],
@@ -330,7 +329,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "cuti-scenario-product-workflow": ["intent", "source-1", "product-analysis"],
             "libtv-product-workflow": ["intent", "source-1", "product-analysis"],
         }
-        music = {"mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv"}
+        music = {"mv", "cuti.music-video", "cuti.lipsync-music-video"}
         products = {
             "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",
@@ -374,27 +373,6 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(plan.schema_version, 2)
             self.assertIsNotNone(plan.next_checkpoint)
-
-    async def test_seedance_mv_initial_phase_uses_original_music_capabilities(self) -> None:
-        intent = ProjectIntent(
-            title="Seedance MV",
-            brief="Create an original electronic song and matching MV",
-            target_duration_seconds=15,
-            workflow_id="seedance-mv",
-            workflow_parameters={"music_prompt": "electronic pop"},
-        )
-        plan = await self.runtime.plan_project(
-            project_id=self.project.id,
-            base_project_version_id=self.version.id,
-            project_intent=intent,
-            idempotency_key="plan-seedance-mv",
-        )
-        by_id = {item.step_id: item for item in plan.items}
-        self.assertEqual(by_id["music"].capability, "atomic.music.generate")
-        self.assertEqual(by_id["music-analysis"].capability, "media.audio_analyze")
-        self.assertEqual(by_id["music-window"].capability, "media.audio.trim")
-        self.assertNotIn("suno.generate", {item.capability for item in plan.items})
-        self.assertFalse(any(item.output_artifact_type == "video_clip" for item in plan.items))
 
     async def test_plugin_music_workflows_keep_suno_contract_across_phases(self) -> None:
         for index, workflow_id in enumerate(
@@ -533,7 +511,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_every_single_checkpoint_workflow_appends_its_own_compiler_plan(self) -> None:
         """Schema-v2 continuation may stage a compiler, but may never replace it."""
         workflows = (
-            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+            "mv", "cuti.music-video", "cuti.lipsync-music-video",
             "workflow-direct-video", "seedance2", "workflow-short-drama",
             "short-drama-workflow", "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",
@@ -543,7 +521,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "cuti-scenario-product-workflow", "libtv-product-workflow",
         }
         music_workflows = {
-            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+            "mv", "cuti.music-video", "cuti.lipsync-music-video",
         }
         for index, workflow_id in enumerate(workflows, start=1):
             project, version = await self.runtime.create_project(
@@ -970,7 +948,7 @@ class ContinuousPlanInitializationTest(unittest.TestCase):
         # Include aliases and a plugin-owned workflow with no built-in compiler.
         # Availability is checked by Runtime before reaching this function.
         for workflow_id in (
-            "seedance2", "seedance-mv", "cuti.music-video",
+            "seedance2", "cuti.music-video",
             "cuti.lipsync-music-video", "product-ad-video",
             "cuti-scenario-product-workflow", "workflow-keyframe-pipeline",
             "third-party-agentic-workflow",

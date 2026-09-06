@@ -710,7 +710,6 @@ def test_mv_skill_files_and_workflow_contract():
         None,
     )
     assert is_workflow_skill("mv")
-    assert is_workflow_skill("seedance-mv")
     seedance2 = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance2" / "SKILL.md"
     if seedance2.is_file():
         assert is_workflow_skill("seedance2")

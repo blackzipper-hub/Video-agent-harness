@@ -140,7 +140,7 @@ define which pipeline to run. Non-workflow skills are helpers/bridges.
 Workflow selection (mandatory before stage work):
 1. Call list_skills. Prefer skills whose metadata.kind is "workflow":
    workflow-keyframe-pipeline, workflow-short-drama, workflow-direct-video,
-   open-montage, seedance2, mv, seedance-mv.
+   open-montage, seedance2, mv.
    For MV / song / beat-sync / 角色唱这首歌, prefer mv over seedance2.
 2. If the user wrote `$name` / `/name` for a workflow, that workflow is confirmed —
    load it and follow its pipeline.
