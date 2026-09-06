@@ -348,23 +348,14 @@ class SkillWorkflowApiTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200, response.text)
         workflows = {item["id"]: item for item in response.json()["data"]}
-        self.assertEqual(
-            workflows["workflow-short-drama"]["mode"],
-            "short_drama",
-        )
-        self.assertEqual(
-            workflows["workflow-keyframe-pipeline"]["source"],
-            "skill",
-        )
+        from app.video_runtime.retired import RETIRED_PUBLIC_WORKFLOWS
+        self.assertTrue(RETIRED_PUBLIC_WORKFLOWS.isdisjoint(workflows))
         self.assertIn("mv", workflows)
         self.assertEqual(workflows["mv"]["mode"], "mv")
         self.assertTrue(workflows["mv"]["available"])
-        if "open-montage" in workflows:
-            self.assertFalse(workflows["open-montage"]["available"])
-            self.assertEqual(
-                workflows["open-montage"]["missingCapabilities"],
-                ["open_montage.tool.invoke"],
-            )
+        self.assertNotIn("workflow-short-drama", workflows)
+        self.assertNotIn("workflow-keyframe-pipeline", workflows)
+        self.assertNotIn("open-montage", workflows)
         if not skills.catalog.has("seedance2"):
             return
         with TestClient(app) as client:
@@ -392,6 +383,19 @@ class SkillWorkflowApiTest(unittest.TestCase):
         catalog = {item["name"]: item for item in skills.prompt_view()}
         self.assertEqual(catalog["seedance2"]["kind"], "workflow")
         self.assertEqual(catalog["seedance-20"]["kind"], "helper")
+        from app.video_runtime.retired import RETIRED_PUBLIC_SKILLS
+        self.assertTrue(RETIRED_PUBLIC_SKILLS.isdisjoint(catalog))
+        with TestClient(app) as client:
+            shotcraft = client.get(
+                "/api/video/skills/video-shotcraft",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+            keyframe = client.get(
+                "/api/video/workflows/workflow-keyframe-pipeline",
+                headers={"X-Video-User-Id": "user-1"},
+            )
+        self.assertEqual(shotcraft.status_code, 404, shotcraft.text)
+        self.assertEqual(keyframe.status_code, 404, keyframe.text)
 
     def test_complete_catalog_has_no_implicit_plugin_compiler(self):
         runtime = VideoBuildRuntime()
@@ -415,32 +419,17 @@ class SkillWorkflowApiTest(unittest.TestCase):
                 "/api/video/workflows/cuti.lipsync-music-video",
                 headers={"X-Video-User-Id": "user-1"},
             )
+            seedance_story = client.get(
+                "/api/video/workflows/cuti.seedance-story",
+                headers={"X-Video-User-Id": "user-1"},
+            )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(music_detail.status_code, 200, music_detail.text)
-        self.assertEqual(lipsync_detail.status_code, 200, lipsync_detail.text)
+        self.assertEqual(music_detail.status_code, 404, music_detail.text)
+        self.assertEqual(lipsync_detail.status_code, 404, lipsync_detail.text)
+        self.assertEqual(seedance_story.status_code, 404, seedance_story.text)
         workflows = {item["id"]: item for item in response.json()["data"]}
-        self.assertEqual(
-            workflows["cuti.music-video"]["compiler"],
-            "MusicVideoWorkflowPlugin.compile_build_plan",
-        )
-        self.assertEqual(
-            workflows["cuti.lipsync-music-video"]["compiler"],
-            "LipsyncMusicVideoWorkflowPlugin.compile_build_plan",
-        )
-        music = music_detail.json()["data"]
-        lipsync = lipsync_detail.json()["data"]
-        self.assertEqual(music["instructionSkillId"], "mv")
-        self.assertEqual(music["resourceOwnerSkillId"], "mv")
-        self.assertIn("MV", music["instructions"])
-        self.assertNotIn("Cuti lipsync extension", music["instructions"])
-        self.assertEqual(lipsync["instructionSkillId"], "mv")
-        self.assertEqual(lipsync["resourceOwnerSkillId"], "mv")
-        self.assertIn("Cuti lipsync extension", lipsync["instructions"])
-        self.assertEqual(
-            workflows["cuti.seedance-story"]["executionKind"],
-            "legacy_compatibility",
-        )
-        self.assertFalse(workflows["cuti.seedance-story"]["userSelectable"])
+        from app.video_runtime.retired import RETIRED_PUBLIC_WORKFLOWS
+        self.assertTrue(RETIRED_PUBLIC_WORKFLOWS.isdisjoint(workflows))
         self.assertFalse([
             item["id"] for item in workflows.values()
             if item["executionKind"] == "plugin"

@@ -44,7 +44,7 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             "unavailableReason": None,
             "requiredCapabilities": pipeline,
             "missingCapabilities": [],
-            "userSelectable": True,
+            "userSelectable": False,
             "executionKind": "dedicated_plugin_compiler",
             "compiler": self.compiler_name,
             # This alias executes the original Cuti $mv contract.  Planning

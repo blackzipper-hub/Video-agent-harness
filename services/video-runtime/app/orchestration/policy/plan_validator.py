@@ -543,7 +543,7 @@ class PlanValidator:
                     "no confirmed workflow skill is activated; "
                     "propose a workflow via waiting_for_input "
                     "(interruption.category=workflow_confirm) and wait for the user "
-                    "to confirm with $workflow-… / $open-montage / $seedance2 "
+                    "to confirm with $seedance2 / $mv / $short-drama-workflow "
                     "before scheduling stage tasks"
                 )
             if capability_id == "keyframe.generate" and not workflow.requires_keyframe:
