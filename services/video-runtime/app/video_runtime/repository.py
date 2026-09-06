@@ -368,11 +368,38 @@ class InMemoryVideoProjectRepository:
         await self.get_plan(plan_id)
         return deepcopy(self.plan_revisions[plan_id])
 
+    async def claim_build_step(self, project_id: str, build_id: str, step_id: str) -> BuildStep | None:
+        """Atomically admit pending work; a cancelled step can never be admitted."""
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None or build.project_id != project_id:
+                raise LookupError("build not found")
+            state = self.build_steps[build_id].get(step_id)
+            if build.status in {"failed", "cancelled", "completed"} or state is None or state.status != "pending":
+                return None
+            state.status = "running"
+            state.started_at = state.started_at or now()
+            state.updated_at = now()
+            self._append_event(project_id, "build.step_status", {
+                "build_id": build_id, "step_id": step_id, "status": state.status,
+            })
+            return deepcopy(state)
+
     async def create_checkpoint(self, checkpoint: PlanCheckpoint) -> PlanCheckpoint:
         async with self.lock:
             build = self.builds.get(checkpoint.build_id)
             if build is None or build.project_id != checkpoint.project_id:
                 raise LookupError("build not found")
+            if build.status in {"cancelled", "completed"} or (build.status == "failed" and not checkpoint.phase.startswith("repair:")):
+                raise ValueError("cannot open a checkpoint for a stopped build")
+            if checkpoint.phase.startswith(("task-update:", "live:")):
+                outstanding = next((self.checkpoints[item] for item in self.build_checkpoints[build.id]
+                                    if self.checkpoints[item].status in {"pending", "planning", "failed"}), None)
+                if outstanding is not None:
+                    return deepcopy(outstanding)
+                current_plan = self.plans[checkpoint.plan_id]
+                if current_plan.current_revision != checkpoint.base_plan_revision:
+                    raise PlanRevisionConflict(checkpoint.base_plan_revision, current_plan.current_revision)
             existing = next((
                 self.checkpoints[item]
                 for item in self.build_checkpoints[checkpoint.build_id]
@@ -382,7 +409,8 @@ class InMemoryVideoProjectRepository:
                 return deepcopy(existing)
             self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
             self.build_checkpoints[checkpoint.build_id].append(checkpoint.id)
-            build.status = "waiting_agent"
+            if not checkpoint.phase.startswith("repair:"):
+                build.status = "waiting_agent"
             build.message = f"Waiting for Agent planning after {checkpoint.phase}"
             build.updated_at = now()
             self.builds[build.id] = deepcopy(build)
@@ -409,18 +437,23 @@ class InMemoryVideoProjectRepository:
         await self.get_build(project_id, build_id)
         return [deepcopy(self.checkpoints[item]) for item in self.build_checkpoints[build_id]]
 
+    async def list_planning_checkpoints(self) -> list[PlanCheckpoint]:
+        return [deepcopy(item) for item in self.checkpoints.values()
+                if item.status == "planning"
+                and self.builds[item.build_id].status not in {"cancelled", "failed", "completed"}]
+
     async def claim_pending_checkpoint(self, lease_seconds: int = 120) -> PlanCheckpoint | None:
         async with self.lock:
             current_time = now()
             candidates = sorted(self.checkpoints.values(), key=lambda item: item.created_at)
             checkpoint = next((
                 item for item in candidates
-                if item.status == "pending"
-                or (
+                if self.builds[item.build_id].status not in {"cancelled", "failed", "completed"}
+                and (item.status == "pending" or (
                     item.status == "planning"
                     and item.lease_expires_at is not None
                     and item.lease_expires_at <= current_time
-                )
+                ))
             ), None)
             if checkpoint is None:
                 return None
@@ -437,11 +470,20 @@ class InMemoryVideoProjectRepository:
             })
             return deepcopy(checkpoint)
 
-    async def fail_checkpoint_delivery(self, checkpoint_id: str, error: str) -> PlanCheckpoint:
+    async def fail_checkpoint_delivery(
+        self, checkpoint_id: str, error: str, *, expected_attempt: int | None = None,
+    ) -> PlanCheckpoint:
         async with self.lock:
             checkpoint = self.checkpoints.get(checkpoint_id)
             if checkpoint is None:
                 raise LookupError("plan checkpoint not found")
+            if checkpoint.status == "resolved":
+                return deepcopy(checkpoint)
+            if expected_attempt is not None and (
+                checkpoint.status != "planning" or checkpoint.delivery_attempts != expected_attempt
+                or self.builds[checkpoint.build_id].status in {"cancelled", "failed", "completed"}
+            ):
+                return deepcopy(checkpoint)
             checkpoint.error = error
             checkpoint.lease_expires_at = None
             checkpoint.updated_at = now()
@@ -483,6 +525,10 @@ class InMemoryVideoProjectRepository:
             if existing is not None:
                 return deepcopy(self.plans[existing])
             plan = self.plans[stored.plan_id]
+            build = self.builds[stored.build_id]
+            if build.status in {"cancelled", "completed"} or (build.status == "failed" and not stored.phase.startswith("repair:")):
+                raise ValueError("cannot modify a terminal build")
+            self._assert_version(self._project(stored.project_id), build.base_project_version_id)
             latest_specs = self.project_spec_revisions[stored.project_id]
             latest_spec = self.video_spec_revisions[latest_specs[-1]]
             if plan.current_revision != checkpoint.base_plan_revision:
@@ -497,6 +543,9 @@ class InMemoryVideoProjectRepository:
                 state = self.build_steps[stored.build_id].get(step_id)
                 if state is None or state.status != "pending":
                     raise ValueError(f"cannot cancel non-pending build step: {step_id}")
+            # Validate all cancellations before mutating any state.
+            for step_id in plan_revision.cancelled_step_ids:
+                state = self.build_steps[stored.build_id][step_id]
                 state.status = "cancelled"
                 state.completed_at = now()
                 state.updated_at = now()
@@ -516,12 +565,20 @@ class InMemoryVideoProjectRepository:
                     skill_context=item.skill_context,
                 )
             stored.status = "resolved"
+            if stored.phase.startswith("repair:"):
+                for checkpoint_id in self.build_checkpoints[stored.build_id]:
+                    previous = self.checkpoints[checkpoint_id]
+                    if previous.id != stored.id and previous.status in {"pending", "planning", "failed"}:
+                        previous.status = "resolved"
+                        previous.lease_expires_at = None
+                        previous.updated_at = now()
             stored.lease_expires_at = None
             stored.error = None
             stored.updated_at = now()
             self.checkpoints[stored.id] = deepcopy(stored)
             build = self.builds[stored.build_id]
             build.status = "queued"
+            build.error = None
             build.message = f"Agent planned {stored.next_phase}"
             build.estimated_cost = updated_plan.estimated_cost
             build.updated_at = now()
@@ -656,6 +713,23 @@ class InMemoryVideoProjectRepository:
             })
             return deepcopy(step)
 
+    async def update_build_progress(
+        self, project_id: str, build_id: str, progress: float, actual_cost: float,
+    ) -> None:
+        """Update counters without overwriting a concurrent planning/cancel status."""
+        async with self.lock:
+            build = self.builds[build_id]
+            if build.project_id != project_id:
+                raise LookupError("build not found")
+            if build.status in {"failed", "cancelled", "completed"}:
+                return
+            build.progress, build.actual_cost = progress, actual_cost
+            build.updated_at = now()
+            self._append_event(project_id, "build.status", {
+                "build_id": build.id, "status": build.status,
+                "progress": progress, "message": build.message,
+            })
+
     async def stage_artifact(self, artifact: MediaArtifactVersion) -> MediaArtifactVersion:
         """Persist a draft without changing the active ProjectVersion."""
         async with self.lock:
@@ -762,8 +836,9 @@ class InMemoryVideoProjectRepository:
                 raise LookupError("build not found")
             if build.status != "failed":
                 raise ValueError("only failed builds can be retried")
+            superseded = {item.step_id for item in self.plans[build.plan_id].items if item.superseded_by}
             for step in self.build_steps[build_id].values():
-                if step.status == "completed":
+                if step.status in {"completed", "cancelled"} or step.plan_step_id in superseded:
                     continue
                 terminal_step_failure = step.status == "failed"
                 step.status = "pending"
@@ -786,6 +861,23 @@ class InMemoryVideoProjectRepository:
             build.updated_at = now()
             self.builds[build.id] = deepcopy(build)
             self._append_event(project_id, "build.retry_queued", {"build_id": build.id})
+            return deepcopy(build)
+
+    async def resume_cancelled_build(self, project_id: str, build_id: str) -> Build:
+        """Resume a user-stopped build without resetting paid or cancelled steps."""
+        async with self.lock:
+            build = self.builds.get(build_id)
+            if build is None or build.project_id != project_id:
+                raise LookupError("build not found")
+            if build.status != "cancelled":
+                return deepcopy(build)
+            self._assert_version(self._project(project_id), build.base_project_version_id)
+            build.status = "queued"
+            build.message = "Resumed by user; reconciling existing work"
+            build.updated_at = now()
+            self._append_event(project_id, "build.status", {
+                "build_id": build.id, "status": build.status, "message": build.message,
+            })
             return deepcopy(build)
 
     async def cancel_build(self, project_id: str, build_id: str) -> Build:

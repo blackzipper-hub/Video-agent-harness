@@ -244,6 +244,8 @@ export interface CheckpointResolutionRequest {
   phaseInputs?: Record<string, JsonValue>
   proposedSteps?: Array<Record<string, JsonValue>>
   cancelStepIds?: string[]
+  /** Failed task IDs mapped to new proposed task IDs; pending descendants are rewired atomically. */
+  replaceFailedStepIds?: Record<string, string>
   goalSatisfied?: boolean
   waitingForInput?: boolean
   response?: string

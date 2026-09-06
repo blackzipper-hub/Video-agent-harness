@@ -4,7 +4,11 @@ English | [中文](README.zh.md)
 
 Stable, high-level tools that let a DeepSeek agent operate a versioned video project without exposing provider-specific calls.
 
+`video_checkpoint_inspect` accepts `checkpoint_id="live"` to open a planning snapshot for a user edit during execution. Use the returned id and revisions with `video_plan_patch_submit`. Task completion/failure notifications and live edits share the same append/cancel path; only pending tasks can be cancelled, and unrelated running tasks continue. See the [Runtime scheduling rules](../../../services/video-runtime/README.md).
+
 ## Model Experience
+
+For corrected-parameter retries, submit `replace_failed_task_ids` mapping failed IDs to new `add_tasks` client keys. The Runtime replaces pending descendants atomically; completed outputs remain reusable. A failed continuous Build can be inspected with `checkpoint_id="live"` and stays stopped until the repair patch commits.
 
 ### Project video tools
 

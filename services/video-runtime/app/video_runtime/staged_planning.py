@@ -412,9 +412,9 @@ def compile_continuous_plan_initial(
         resolves=["next_plan_patch"],
         planner_instruction=(
             "Inspect the current project snapshot and the loaded Workflow contract. "
-            "Submit only the next executable task or independent task frontier. "
-            "After those tasks finish you will receive their real Artifacts and revise "
-            "the plan again. Do not precompile the whole production DAG."
+            "Submit the next tasks and their dependencies. Each task completion or "
+            "failure can trigger another planning turn while other work continues. "
+            "Do not invent creative details that depend on unavailable Artifacts."
         ),
         planning_mode="agentic",
     )
@@ -442,15 +442,8 @@ def append_continuous_plan_patch(
     spec: VideoSpec | None,
     spec_revision_id: str,
 ) -> tuple[RebuildPlan, list[str]]:
-    """Validate and append one Cuti-style ready frontier.
-
-    New tasks may depend only on tasks whose Artifacts already exist. This is
-    what makes the next Agent wake-up happen after every task/frontier instead
-    of silently executing a preplanned downstream DAG.
-    """
+    """Append Agent tasks; the scheduler admits only dependencies that are ready."""
     proposed = [item.model_copy(deep=True) for item in proposed_steps]
-    if not proposed:
-        raise BuildPlanValidationError("PlanPatch must add at least one executable task")
     if len(proposed) > 8:
         raise BuildPlanValidationError("PlanPatch may add at most eight ready tasks")
     existing_ids = {item.step_id for item in existing_plan.items}
@@ -475,10 +468,10 @@ def append_continuous_plan_patch(
             raise BuildPlanValidationError(
                 f"workflow does not allow capability {item.capability}"
             )
-        missing = sorted(set(item.depends_on) - completed_step_ids)
+        missing = sorted(set(item.depends_on) - (existing_ids | proposed_ids))
         if missing:
             raise BuildPlanValidationError(
-                f"PlanPatch task {item.step_id} depends on unfinished or unknown tasks: {missing}"
+                f"PlanPatch task {item.step_id} depends on unknown tasks: {missing}"
             )
         item.output_artifact_id = (
             item.output_artifact_id
@@ -486,14 +479,6 @@ def append_continuous_plan_patch(
         )
         item.order = len(existing_plan.items) + proposed.index(item) + 1
         item.reason = item.reason or "Agent-authored continuous PlanPatch"
-
-    # Multiple tasks in one patch are one independent frontier and execute in
-    # parallel, just as Cuti fills the currently available task slots.
-    if len(proposed) > 1:
-        group = f"plan-patch-{existing_plan.current_revision + 1}"
-        for item in proposed:
-            item.execution_group = item.execution_group or group
-            item.max_parallelism = item.max_parallelism or len(proposed)
 
     updated = deepcopy(existing_plan)
     updated.items.extend(proposed)
@@ -503,14 +488,14 @@ def append_continuous_plan_patch(
     updated.current_phase = "agent_execution"
     updated.next_checkpoint = PlanCheckpointDefinition(
         id=f"agent-plan-ready-{updated.current_revision}",
-        phase="task_frontier_completed",
+        phase="task_completed_or_failed",
         next_phase="agent_execution",
         required_artifact_types=[],
         resolves=["next_plan_patch"],
         planner_instruction=(
-            "Inspect every newly completed Artifact and revise the plan. Add only the "
-            "next ready task/frontier, or set goal_satisfied after the final playable "
-            "result exists."
+            "Inspect newly completed Artifacts and failed tasks, then append tasks or "
+            "cancel pending work. Set goal_satisfied only after the final playable "
+            "result exists and no active work remains."
         ),
         planning_mode="agentic",
     )

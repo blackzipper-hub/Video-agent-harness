@@ -543,6 +543,28 @@ class PostgresVideoProjectRepository:
             results.append(ValidationResult(**values))
         return results
 
+    async def claim_build_step(self, project_id: str, build_id: str, step_id: str) -> BuildStep | None:
+        """Admit a pending step with the same row lock used by cancellation."""
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""UPDATE {self.schema}.build_steps SET status='running',
+                started_at=COALESCE(started_at,$4),updated_at=$4
+                WHERE project_id=$1 AND build_id=$2 AND plan_step_id=$3 AND status='pending'
+                AND EXISTS (SELECT 1 FROM {self.schema}.builds b
+                            WHERE b.id=$2 AND b.status NOT IN ('failed','cancelled','completed'))
+                RETURNING *""", project_id, build_id, step_id, now(),
+            )
+            if row is None:
+                return None
+            await self._append_event(connection, project_id, "build.step_status", {
+                "build_id": build_id, "step_id": step_id, "status": "running",
+            })
+            values = dict(row)
+            for key in ("resolved_skills", "skill_context"):
+                if isinstance(values.get(key), str):
+                    values[key] = json.loads(values[key])
+            return BuildStep(**values)
+
     async def update_build_step(self, step: BuildStep) -> BuildStep:
         step.updated_at = now()
         async with self.pool.acquire() as connection, connection.transaction():
@@ -564,6 +586,21 @@ class PostgresVideoProjectRepository:
                 "artifact_version_id": step.result_artifact_version_id,
             })
         return step
+
+    async def update_build_progress(
+        self, project_id: str, build_id: str, progress: float, actual_cost: float,
+    ) -> None:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""UPDATE {self.schema}.builds SET progress=$3,actual_cost=$4,updated_at=$5
+                WHERE id=$1 AND project_id=$2 AND status NOT IN ('failed','cancelled','completed')
+                RETURNING status,message""", build_id, project_id, progress, actual_cost, now(),
+            )
+            if row is not None:
+                await self._append_event(connection, project_id, "build.status", {
+                    "build_id": build_id, "status": row["status"],
+                    "progress": progress, "message": row["message"],
+                })
 
     async def stage_artifact(self, artifact: MediaArtifactVersion) -> MediaArtifactVersion:
         async with self.pool.acquire() as connection, connection.transaction():
@@ -681,6 +718,19 @@ class PostgresVideoProjectRepository:
             )
             if build_row is None:
                 raise LookupError("build not found")
+            if build_row["status"] in {"cancelled", "completed"} or (build_row["status"] == "failed" and not checkpoint.phase.startswith("repair:")):
+                raise ValueError("cannot open a checkpoint for a stopped build")
+            if checkpoint.phase.startswith(("task-update:", "live:")):
+                outstanding = await connection.fetchrow(
+                    f"""SELECT * FROM {self.schema}.plan_checkpoints
+                    WHERE build_id=$1 AND status IN ('pending','planning','failed') LIMIT 1""",
+                    checkpoint.build_id,
+                )
+                if outstanding is not None:
+                    return self._checkpoint(outstanding)
+                current_plan = await self._get_plan(connection, checkpoint.plan_id)
+                if current_plan.current_revision != checkpoint.base_plan_revision:
+                    raise PlanRevisionConflict(checkpoint.base_plan_revision, current_plan.current_revision)
             inserted = await connection.fetchrow(
                 f"""INSERT INTO {self.schema}.plan_checkpoints
                 (id,project_id,build_id,plan_id,workflow_id,session_id,user_id,phase,next_phase,
@@ -712,10 +762,10 @@ class PostgresVideoProjectRepository:
                 )
                 return self._checkpoint(existing)
             await connection.execute(
-                f"""UPDATE {self.schema}.builds SET status='waiting_agent',message=$3,updated_at=$4
+                f"""UPDATE {self.schema}.builds SET status=CASE WHEN $5 THEN status ELSE 'waiting_agent' END,message=$3,updated_at=$4
                 WHERE id=$1 AND project_id=$2""",
                 checkpoint.build_id, checkpoint.project_id,
-                f"Waiting for Agent planning after {checkpoint.phase}", now(),
+                f"Waiting for Agent planning after {checkpoint.phase}", now(), checkpoint.phase.startswith("repair:"),
             )
             await self._append_event(connection, checkpoint.project_id, "build.phase.completed", {
                 "build_id": checkpoint.build_id, "phase": checkpoint.phase,
@@ -749,13 +799,24 @@ class PostgresVideoProjectRepository:
         )
         return [self._checkpoint(row) for row in rows]
 
+    async def list_planning_checkpoints(self) -> list[PlanCheckpoint]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                f"""SELECT c.* FROM {self.schema}.plan_checkpoints c
+                JOIN {self.schema}.builds b ON b.id=c.build_id
+                WHERE c.status='planning' AND b.status NOT IN ('cancelled','failed','completed')""",
+            )
+        return [self._checkpoint(row) for row in rows]
+
     async def claim_pending_checkpoint(self, lease_seconds: int = 120) -> PlanCheckpoint | None:
         current_time = now()
         async with self.pool.acquire() as connection, connection.transaction():
             row = await connection.fetchrow(
-                f"""SELECT * FROM {self.schema}.plan_checkpoints
-                WHERE status='pending'
-                   OR (status='planning' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1)
+                f"""SELECT * FROM {self.schema}.plan_checkpoints c
+                WHERE (status='pending'
+                   OR (status='planning' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1))
+                AND EXISTS (SELECT 1 FROM {self.schema}.builds b
+                            WHERE b.id=c.build_id AND b.status NOT IN ('cancelled','failed','completed'))
                 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
                 current_time,
             )
@@ -781,7 +842,9 @@ class PostgresVideoProjectRepository:
             })
         return checkpoint
 
-    async def fail_checkpoint_delivery(self, checkpoint_id: str, error: str) -> PlanCheckpoint:
+    async def fail_checkpoint_delivery(
+        self, checkpoint_id: str, error: str, *, expected_attempt: int | None = None,
+    ) -> PlanCheckpoint:
         async with self.pool.acquire() as connection, connection.transaction():
             row = await connection.fetchrow(
                 f"SELECT * FROM {self.schema}.plan_checkpoints WHERE id=$1 FOR UPDATE",
@@ -790,6 +853,15 @@ class PostgresVideoProjectRepository:
             if row is None:
                 raise LookupError("plan checkpoint not found")
             checkpoint = self._checkpoint(row)
+            if checkpoint.status == "resolved":
+                return checkpoint
+            if expected_attempt is not None:
+                build_status = await connection.fetchval(
+                    f"SELECT status FROM {self.schema}.builds WHERE id=$1 FOR UPDATE", checkpoint.build_id,
+                )
+                if (checkpoint.status != "planning" or checkpoint.delivery_attempts != expected_attempt
+                        or build_status in {"cancelled", "failed", "completed"}):
+                    return checkpoint
             checkpoint.error = error
             checkpoint.lease_expires_at = None
             checkpoint.updated_at = now()
@@ -827,6 +899,12 @@ class PostgresVideoProjectRepository:
         idempotency_key: str,
     ) -> RebuildPlan:
         async with self.pool.acquire() as connection, connection.transaction():
+            build_row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE id=$1 AND project_id=$2 FOR UPDATE",
+                checkpoint.build_id, checkpoint.project_id,
+            )
+            if build_row is None:
+                raise LookupError("build not found")
             stored_row = await connection.fetchrow(
                 f"""SELECT * FROM {self.schema}.plan_checkpoints
                 WHERE id=$1 AND project_id=$2 AND build_id=$3 FOR UPDATE""",
@@ -841,6 +919,13 @@ class PostgresVideoProjectRepository:
             )
             if existing:
                 return await self._get_plan(connection, existing)
+            if build_row["status"] in {"cancelled", "completed"} or (build_row["status"] == "failed" and not stored.phase.startswith("repair:")):
+                raise ValueError("cannot modify a terminal build")
+            project_row = await connection.fetchrow(
+                f"SELECT current_version_id FROM {self.schema}.projects WHERE id=$1 FOR UPDATE", stored.project_id,
+            )
+            if project_row["current_version_id"] != build_row["base_project_version_id"]:
+                raise ProjectVersionConflict(build_row["base_project_version_id"], project_row["current_version_id"])
             current_plan = await self._get_plan(connection, stored.plan_id)
             latest_spec_row = await connection.fetchrow(
                 f"""SELECT * FROM {self.schema}.video_spec_revisions
@@ -918,6 +1003,12 @@ class PostgresVideoProjectRepository:
                         )
                         for item in added
                     ],
+                )
+            if stored.phase.startswith("repair:"):
+                await connection.execute(
+                    f"""UPDATE {self.schema}.plan_checkpoints
+                    SET status='resolved',lease_expires_at=NULL,updated_at=$2
+                    WHERE build_id=$1 AND status IN ('pending','planning','failed')""", stored.build_id, now(),
                 )
             await connection.execute(
                 f"""UPDATE {self.schema}.plan_checkpoints
@@ -1020,18 +1111,21 @@ class PostgresVideoProjectRepository:
             build = self._build(row)
             if build.status != "failed":
                 raise ValueError("only failed builds can be retried")
+            plan = await self._get_plan(connection, build.plan_id)
+            superseded = [item.step_id for item in plan.items if item.superseded_by]
             await connection.execute(
                 f"""UPDATE {self.schema}.build_steps
                 SET status='pending',attempt=0,error=NULL,started_at=NULL,completed_at=NULL,
                     remote_operation_id=NULL,remote_provider=NULL,updated_at=$3
-                WHERE build_id=$1 AND project_id=$2 AND status='failed'""",
-                build_id, project_id, now(),
+                WHERE build_id=$1 AND project_id=$2 AND status='failed'
+                  AND NOT (plan_step_id=ANY($4::text[]))""",
+                build_id, project_id, now(), superseded,
             )
             await connection.execute(
                 f"""UPDATE {self.schema}.build_steps
                 SET status='pending',error=NULL,started_at=NULL,completed_at=NULL,updated_at=$3
                 WHERE build_id=$1 AND project_id=$2
-                  AND status NOT IN ('completed','failed')""",
+                  AND status NOT IN ('completed','failed','cancelled')""",
                 build_id, project_id, now(),
             )
             build.status = "queued"
@@ -1048,6 +1142,35 @@ class PostgresVideoProjectRepository:
                 connection, project_id, "build.retry_queued", {"build_id": build.id},
             )
         return build
+
+    async def resume_cancelled_build(self, project_id: str, build_id: str) -> Build:
+        """Resume stopped work, preserving step state and remote operation identities."""
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.builds WHERE id=$1 AND project_id=$2 FOR UPDATE",
+                build_id, project_id,
+            )
+            if row is None:
+                raise LookupError("build not found")
+            build = self._build(row)
+            if build.status != "cancelled":
+                return build
+            project = await connection.fetchrow(
+                f"SELECT * FROM {self.schema}.projects WHERE id=$1 FOR UPDATE", project_id,
+            )
+            if project["current_version_id"] != build.base_project_version_id:
+                raise ProjectVersionConflict(build.base_project_version_id, project["current_version_id"])
+            build.status = "queued"
+            build.message = "Resumed by user; reconciling existing work"
+            build.updated_at = now()
+            await connection.execute(
+                f"UPDATE {self.schema}.builds SET status=$2,message=$3,updated_at=$4 WHERE id=$1",
+                build.id, build.status, build.message, build.updated_at,
+            )
+            await self._append_event(connection, project_id, "build.status", {
+                "build_id": build.id, "status": build.status, "message": build.message,
+            })
+            return build
 
     async def cancel_build(self, project_id: str, build_id: str) -> Build:
         async with self.pool.acquire() as connection, connection.transaction():

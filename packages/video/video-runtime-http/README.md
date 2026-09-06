@@ -6,6 +6,8 @@ HTTP provider for the Video Runtime seam. It transports first-build and structur
 
 Configure `baseUrl` and, for authenticated deployments, `serviceToken`. `userId` supplies the deployment identity when the calling tool has only a DeepSeek Session id; multi-user deployments must set it from their authenticated BFF rather than share the local default.
 
+Inspecting checkpoint id `live` sends a POST because opening a planning snapshot changes state. Concrete checkpoint ids use GET. Both requests retain the same Session and user identity headers.
+
 ## Model Experience
 
 ### HTTP provider

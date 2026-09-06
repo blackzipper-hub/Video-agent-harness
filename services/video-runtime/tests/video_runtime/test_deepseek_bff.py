@@ -23,6 +23,7 @@ from app.video_runtime.deepseek_bff import (
 )
 from app.video_runtime.deepseek_client import DeepSeekHarnessError
 from app.video_runtime.runtime import VideoBuildRuntime
+from app.video_runtime.models import Build
 from app.video_runtime.skills import VideoSkillRuntime
 
 
@@ -92,6 +93,32 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.client.close()
         set_deepseek_client(None)
+
+    def test_stop_cancels_build_and_resume_requires_explicit_confirmation(self) -> None:
+        response = self.client.post("/chat-v1/service/v2/runs", json={
+            "objective": "Make a video", "idempotency_key": "stop-create",
+        })
+        project_id = response.json()["data"]["project_id"]
+        project = asyncio.run(self.runtime.repo.get_project(project_id))
+        build = Build(project_id=project_id, plan_id="test-plan",
+                      base_project_version_id=project.current_version_id,
+                      idempotency_key="test-build", status="waiting_agent")
+        self.runtime.repo.builds[build.id] = build
+        base = f"/chat-v1/service/v2/runs/{project_id}"
+        stopped = self.client.post(base + "/cancel")
+        self.assertEqual(stopped.status_code, 200)
+        self.assertEqual(stopped.json()["data"]["status"], "cancelled")
+        self.assertEqual(self.runtime.repo.builds[build.id].status, "cancelled")
+        denied = self.client.post(base + "/messages", json={
+            "content": "continue", "idempotency_key": "unconfirmed",
+        })
+        self.assertEqual(denied.status_code, 409)
+        resumed = self.client.post(base + "/resume", json={
+            "content": "continue", "idempotency_key": "confirmed",
+        })
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(self.runtime.repo.builds[build.id].status, "queued")
+        self.assertIn("Do not create a replacement build", self.deepseek.prompts[-1][1])
 
     def test_old_v2_paths_drive_deepseek_session_and_video_project(self) -> None:
         uploaded_url = "https://example.test/hero.png"

@@ -81,6 +81,11 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         audio_reference_steps = parameters.pop("audio_reference_from_steps", None) or []
         audio_reference_step = parameters.pop("audio_reference_from_step", None)
         audio_segment_index = parameters.pop("audio_segment_index", None)
+        required_steps = [start_step, strict_start_step, character_step, audio_reference_step,
+                          *character_steps, *reference_steps, *video_reference_steps, *audio_reference_steps]
+        for required in required_steps:
+            if required and (str(required) not in completed_by_step or not completed_by_step[str(required)].uri):
+                raise ValueError(f"required media dependency is unavailable: {required}")
         start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
         if start_artifact and start_artifact.uri:
             parameters.setdefault("start_image_url", start_artifact.uri)
@@ -130,7 +135,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             if audio_segment_index is not None:
                 segments = audio_reference.metadata.get("segments") or []
                 index = int(audio_segment_index)
-                if index >= len(segments):
+                if index < 0 or index >= len(segments):
                     raise ValueError(f"audio cut has no segment {index}")
                 segment = segments[index] if isinstance(segments[index], dict) else {}
                 audio_url = segment.get("audio_url") or audio_url
@@ -169,10 +174,15 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         parameters["prompt"] = prompt
         parameters.setdefault("artifact_title", source.title or source.type)
 
-        selected = [source, *[
-            MediaArtifactVersion.model_validate(item)
-            for item in completed_payload.values()
-        ]]
+        from .media_inputs import ordered_inputs, resolve_media_parameters
+        input_ids = (planned or {}).get("input_artifact_version_ids", [])
+        selected = ordered_inputs(completed_by_step, input_ids)
+        if any(item.project_id != envelope.grant.project_id for item in selected):
+            raise PermissionError("input artifact does not belong to this project")
+        # The output under construction is not an input image/video. Rebuilds
+        # retain the previous source as a fallback after explicit dependencies.
+        if planned is None:
+            selected.append(source)
         legacy_artifacts = [ArtifactVersion(
             id=item.id,
             artifact_id=item.artifact_id,
@@ -187,6 +197,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             metadata=item.metadata,
             created_at=item.created_at,
         ) for item in selected]
+        resolve_media_parameters(parameters, legacy_artifacts)
         run = AgentRun(
             id=f"video-build:{payload['build']['id']}",
             thread_id=envelope.grant.session_id,
@@ -222,6 +233,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
 
             profile = dict(parameters)
             profile.pop("workflow_parameters", None)
+            profile["idempotency_key"] = envelope.grant.idempotency_key
             generated = await generate_video(
                 profile, on_remote_submitted=envelope.report_remote_operation,
             )
@@ -250,6 +262,10 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             # post-generation identity/continuity validators. The Runtime also
             # preserves the immutable, unresolved plan parameters separately.
             "resolved_generation_parameters": dict(parameters),
+            "resolved_input_artifacts": [
+                {"version_id": item.id, "type": item.type, "uri": item.uri}
+                for item in selected if item.uri
+            ],
             "skill_prompt_applied": skill_prompt_applied,
         }
         digest_payload = json.dumps(

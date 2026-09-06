@@ -550,7 +550,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_checkpoint_inspect',
-    description: 'Inspect one durable semantic planning checkpoint, including real artifact summaries and the unresolved VideoSpec sections. Use only the project, build, and checkpoint named in the automatic continuation message.',
+    description: 'Inspect a durable planning checkpoint. For a user edit during an active continuous build, use checkpoint_id="live" to open or reuse a planning snapshot without waiting for task completion. Submit the returned checkpoint id and revisions in video_plan_patch_submit.',
     parameters: {
       project_id: { type: 'string', required: true },
       build_id: { type: 'string', required: true },
@@ -570,7 +570,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_checkpoint_resolve',
-    description: 'Submit one Cuti-style continuous PlanPatch after inspecting the latest Artifacts. Add only the next ready task frontier, or mark goal_satisfied after the final playable result exists.',
+    description: 'Resolve a planning checkpoint with creative fields and tasks. Continuous builds accept additions and pending-task cancellations while unrelated work is running; staged builds use their Workflow compiler.',
     parameters: {
       project_id: { type: 'string', required: true },
       build_id: { type: 'string', required: true },
@@ -602,7 +602,7 @@ export function apply(ctx: Context): void {
             skill_ids: { type: 'array', items: { type: 'string' } },
           },
         },
-        description: 'The next executable task or independent task frontier. Dependencies must already be completed; downstream work belongs in the next PlanPatch.',
+        description: 'Tasks may depend on existing tasks or tasks added in this patch. Only ready tasks execute. Use an empty list to acknowledge an update while other tasks continue.',
       },
       cancel_step_ids: { type: 'array', items: { type: 'string' } },
       goal_satisfied: { type: 'boolean' },
@@ -640,7 +640,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_plan_patch_submit',
-    description: 'Canonical Cuti-compatible planning tool. After each task frontier, inspect the project snapshot and submit the next ready tasks, pending-task cancellations, or goal_satisfied. The DeepSeek agent loop owns these repeated decisions; the Runtime only validates and executes them.',
+    description: 'Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.',
     parameters: {
       project_id: { type: 'string', required: true },
       build_id: { type: 'string', required: true },
@@ -667,6 +667,7 @@ export function apply(ctx: Context): void {
         },
       },
       cancel_task_ids: { type: 'array', items: { type: 'string' } },
+      replace_failed_task_ids: { type: 'object', additionalProperties: true, description: 'Map failed task IDs to new client_keys (string values) in add_tasks with corrected parameters. Runtime clones and rewires pending descendants atomically. For a failed Build, inspect checkpoint_id=live first; old work does not restart before this patch commits.' },
       goal_satisfied: { type: 'boolean' },
       waiting_for_input: { type: 'boolean' },
       response: { type: 'string' },
@@ -702,6 +703,12 @@ export function apply(ctx: Context): void {
         skill_ids: task.skill_ids ?? [],
       })),
       cancelStepIds: args.cancel_task_ids ?? [],
+      ...(args.replace_failed_task_ids === undefined ? {} : {
+        replaceFailedStepIds: Object.fromEntries(Object.entries(args.replace_failed_task_ids).map(([key, value]) => {
+          if (typeof value !== 'string') throw new Error('Replacement task IDs must be strings')
+          return [key, value]
+        })),
+      }),
       goalSatisfied: args.goal_satisfied ?? false,
       waitingForInput: args.waiting_for_input ?? false,
       response: args.response ?? '',

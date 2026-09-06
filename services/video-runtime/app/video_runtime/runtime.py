@@ -305,6 +305,9 @@ class VideoBuildRuntime:
         self._default_executor: BuildStepExecutor | None = None
         self._grant_signer: CapabilityGrantSigner | None = None
         self._build_tasks: dict[str, asyncio.Task] = {}
+        self._continuous_wakes: dict[str, asyncio.Event] = {}
+        self._execution_locks: dict[str, asyncio.Lock] = {}
+        self.session_control_locks: dict[str, asyncio.Lock] = {}
 
     async def create_project(
         self, *, user_id: str, title: str, idempotency_key: str | None = None,
@@ -1324,11 +1327,31 @@ class VideoBuildRuntime:
         self, *, project_id: str, build_id: str, checkpoint_id: str,
         session_id: str | None = None, user_id: str | None = None,
     ) -> PlanCheckpoint:
+        if checkpoint_id == "live":
+            build = await self.repo.get_build(project_id, build_id)
+            if session_id != build.session_id or user_id != build.user_id:
+                raise PermissionError("live PlanPatch requires the bound Session and user")
+            plan = await self.repo.get_plan(build.plan_id)
+            if not self._is_continuous_plan(plan) or plan.next_checkpoint is None or build.status in {"cancelled", "completed"}:
+                raise ValueError("live PlanPatch requires an active continuous build")
+            from .continuous_scheduler import _notify_agent
+            states = {item.plan_step_id: item for item in await self.repo.list_build_steps(project_id, build_id)}
+            completed = {
+                item.plan_step_id: await self.repo.get_artifact(project_id, item.result_artifact_version_id)
+                for item in states.values() if item.status == "completed" and item.result_artifact_version_id
+            }
+            checkpoint = await _notify_agent(self, build, plan, states, completed, force=True)
+            if checkpoint is None:
+                raise ValueError("plan changed while opening a live PlanPatch; inspect again")
+            return checkpoint
         checkpoint = await self.repo.get_checkpoint(project_id, build_id, checkpoint_id)
         if session_id is not None and checkpoint.session_id != session_id:
             raise PermissionError("checkpoint does not belong to this DeepSeek Session")
         if user_id is not None and checkpoint.user_id != user_id:
             raise PermissionError("checkpoint does not belong to this user")
+        if checkpoint.planning_mode == "agentic" and checkpoint.status != "resolved":
+            from .checkpoint_coordinator import refresh_checkpoint
+            checkpoint = await refresh_checkpoint(self, checkpoint)
         return checkpoint
 
     async def resolve_checkpoint(
@@ -1341,11 +1364,8 @@ class VideoBuildRuntime:
         session_id: str,
         user_id: str,
     ) -> RebuildPlan:
-        existing = await self.repo.get_operation_result(
-            project_id, f"checkpoint:{checkpoint_id}", resolution.idempotency_key,
-        )
-        if existing is not None:
-            return await self.repo.get_plan(existing)
+        if checkpoint_id == "live":
+            raise ValueError("inspect live first and submit its concrete checkpoint id")
         checkpoint = await self.inspect_checkpoint(
             project_id=project_id,
             build_id=build_id,
@@ -1353,6 +1373,11 @@ class VideoBuildRuntime:
             session_id=session_id,
             user_id=user_id,
         )
+        existing = await self.repo.get_operation_result(
+            project_id, f"checkpoint:{checkpoint_id}", resolution.idempotency_key,
+        )
+        if existing is not None:
+            return await self.repo.get_plan(existing)
         if checkpoint.base_plan_revision != resolution.base_plan_revision:
             from .repository import PlanRevisionConflict
             raise PlanRevisionConflict(
@@ -1465,6 +1490,15 @@ class VideoBuildRuntime:
             complete=supplied_spec is not None,
         )
 
+        if resolution.replace_failed_step_ids:
+            if not self._is_continuous_plan(plan):
+                raise ValueError("failed task replacement requires a continuous plan")
+            from .plan_repair import expand_repair
+            resolution = expand_repair(plan, {
+                item.plan_step_id: item for item in await self.repo.list_build_steps(project_id, build_id)
+            }, resolution)
+        if checkpoint.phase.startswith("repair:") and not resolution.replace_failed_step_ids:
+            raise ValueError("failed Build repair must replace failed tasks before resuming")
         cancelled_ids = list(dict.fromkeys(resolution.cancel_step_ids))
         if cancelled_ids:
             build_steps = {
@@ -1492,6 +1526,11 @@ class VideoBuildRuntime:
                     "cannot cancel tasks required by: " + ", ".join(dependants)
                 )
         base_plan = plan.model_copy(deep=True)
+        for item in base_plan.items:
+            if item.step_id in resolution.replace_failed_step_ids:
+                if item.superseded_by:
+                    raise ValueError(f"task already replaced: {item.step_id}")
+                item.superseded_by = resolution.replace_failed_step_ids[item.step_id]
         if cancelled_ids:
             base_plan.items = [
                 item for item in base_plan.items if item.step_id not in cancelled_ids
@@ -1501,6 +1540,14 @@ class VideoBuildRuntime:
             from .staged_planning import append_continuous_plan_patch
 
             if resolution.goal_satisfied:
+                active = [
+                    item.plan_step_id
+                    for item in await self.repo.list_build_steps(project_id, build_id)
+                    if item.status in {"pending", "running", "waiting_external"}
+                    and item.plan_step_id not in cancelled_ids
+                ]
+                if active:
+                    raise ValueError("goal_satisfied cannot leave active tasks: " + ", ".join(active))
                 completed_states = [
                     item for item in await self.repo.list_build_steps(project_id, build_id)
                     if item.status == "completed"
@@ -1524,6 +1571,11 @@ class VideoBuildRuntime:
                 added_ids: list[str] = []
             else:
                 build_step_states = await self.repo.list_build_steps(project_id, build_id)
+                if not resolution.proposed_steps and not any(
+                    item.status in {"pending", "running", "waiting_external"}
+                    and item.plan_step_id not in cancelled_ids for item in build_step_states
+                ):
+                    raise ValueError("PlanPatch must add work or finish the goal when no active tasks remain")
                 completed_ids = {
                     item.plan_step_id for item in build_step_states
                     if item.status == "completed"
@@ -1539,8 +1591,12 @@ class VideoBuildRuntime:
                     if item.action == "reuse" and item.artifact_version_id
                 })
                 normalized_steps: list[RebuildPlanItem] = []
+                known_ids = {item.plan_step_id for item in build_step_states}
                 for proposed in resolution.proposed_steps:
+                    if proposed.step_id in known_ids:
+                        raise ValueError(f"PlanPatch task id was already used: {proposed.step_id}")
                     proposed = proposed.model_copy(deep=True)
+                    proposed.superseded_by = None
                     try:
                         capability = self.skills.capabilities.get(proposed.capability)
                     except LookupError as exc:
@@ -1706,6 +1762,9 @@ class VideoBuildRuntime:
             idempotency_key=resolution.idempotency_key,
         )
         build = await self.repo.get_build(project_id, build_id)
+        wake = self._continuous_wakes.get(build_id)
+        if wake is not None:
+            wake.set()
         self._schedule_build(build)
         return saved
 
@@ -1748,6 +1807,7 @@ class VideoBuildRuntime:
             for project in await self._all_projects_for_recovery()
             for build in await self.repo.active_builds(project.id)
             if build.status != "waiting_agent"
+            or self._is_continuous_plan(await self.repo.get_plan(build.plan_id))
         ]
         for build in builds:
             self._schedule_build(build)
@@ -1762,7 +1822,7 @@ class VideoBuildRuntime:
 
     def _schedule_build(self, build: Build) -> None:
         if self._default_executor is None or build.status not in {
-            "queued", "running", "waiting_external",
+            "queued", "running", "waiting_external", "waiting_agent",
         } or build.id in self._build_tasks:
             return
         task = asyncio.create_task(self.execute_build(
@@ -1772,19 +1832,32 @@ class VideoBuildRuntime:
         ))
         self._build_tasks[build.id] = task
         task.add_done_callback(
-            lambda finished, build_id=build.id: self._settle_build_task(build_id, finished),
+            lambda finished, scheduled=build: self._settle_build_task(scheduled, finished),
         )
 
-    def _settle_build_task(self, build_id: str, task: asyncio.Task) -> None:
+    def _settle_build_task(self, scheduled: Build, task: asyncio.Task) -> None:
+        build_id = scheduled.id
         self._build_tasks.pop(build_id, None)
         if not task.cancelled():
             task.exception()
+            wake = self._continuous_wakes.get(build_id)
+            if wake is not None and wake.is_set():
+                # A patch may commit after the worker's last read but before
+                # this callback releases ownership. Do not lose that wake-up.
+                self._schedule_build(scheduled)
 
     async def cancel_build(self, *, project_id: str, build_id: str) -> Build:
         build = await self.repo.cancel_build(project_id, build_id)
         task = self._build_tasks.get(build_id)
         if task is not None:
             task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return build
+
+    async def resume_cancelled_build(self, *, project_id: str, build_id: str) -> Build:
+        """Continue only after user confirmation; reuse drafts and reconcile remote jobs."""
+        build = await self.repo.resume_cancelled_build(project_id, build_id)
+        self._schedule_build(build)
         return build
 
     async def retry_failed_build(self, *, project_id: str, build_id: str) -> Build:
@@ -1820,6 +1893,16 @@ class VideoBuildRuntime:
         return build, version
 
     async def execute_build(
+        self, *, project_id: str, build_id: str, executor: BuildStepExecutor,
+    ) -> tuple[Build, ProjectVersion | None]:
+        # One owner schedules a Build in this Runtime, including manual/API
+        # execution racing an automatic checkpoint continuation.
+        async with self._execution_locks.setdefault(build_id, asyncio.Lock()):
+            return await self._execute_build_owned(
+                project_id=project_id, build_id=build_id, executor=executor,
+            )
+
+    async def _execute_build_owned(
         self,
         *,
         project_id: str,
@@ -1838,6 +1921,9 @@ class VideoBuildRuntime:
                 execute_plan_step = getattr(executor, "execute_plan_step", None)
                 if execute_plan_step is None:
                     raise TypeError("initial builds require a plan step executor")
+                if self._is_continuous_plan(plan):
+                    from .continuous_scheduler import execute_continuous_build
+                    return await execute_continuous_build(self, build, executor)
                 return await self._execute_initial_build(build=build, plan=plan, executor=executor)
             source_by_id = {
                 item.id: item for item in await self.repo.current_artifacts(project_id)
@@ -2092,7 +2178,7 @@ class VideoBuildRuntime:
             if resume_existing_remote
             else range(state.attempt, retry_limit + 1)
         )
-        for _attempt in attempts:
+        for attempt_index, _attempt in enumerate(attempts):
             state.status = "running"
             if not resume_existing_remote:
                 state.attempt += 1
@@ -2105,9 +2191,11 @@ class VideoBuildRuntime:
                     state.remote_provider = provider
                     state.status = "waiting_external"
                     await self.repo.update_build_step(state)
-                    build.status = "waiting_external"
-                    build.message = f"Waiting for {provider} operation for {planned.step_id}"
-                    await self.repo.update_build(build)
+                    current_plan = await self.repo.get_plan(build.plan_id)
+                    if not self._is_continuous_plan(current_plan):
+                        build.status = "waiting_external"
+                        build.message = f"Waiting for {provider} operation for {planned.step_id}"
+                        await self.repo.update_build(build)
 
                 effective_step = planned
                 if state.remote_operation_id:
@@ -2176,9 +2264,13 @@ class VideoBuildRuntime:
                 state.completed_at = now()
                 await self.repo.update_build_step(state)
                 return artifact
-            except BaseException as exc:
+            except asyncio.CancelledError:
+                # Keep the durable remote operation (and its attempt) available
+                # for reconciliation after shutdown; cancellation is not failure.
+                raise
+            except Exception as exc:
                 last_error = exc
-                state.status = "failed"
+                state.status = "failed" if attempt_index + 1 == len(attempts) else "running"
                 state.error = str(exc) or repr(exc)
                 await self.repo.update_build_step(state)
         if last_error is None:
@@ -2214,7 +2306,11 @@ class VideoBuildRuntime:
         build.status = "running"
         build.message = "Executing initial video build"
         await self.repo.update_build(build)
-        validations: list[ValidationResult] = []
+        validations: list[ValidationResult] = [
+            ValidationResult.model_validate(result)
+            for artifact in completed.values() if artifact.type == "validation_result"
+            for result in artifact.metadata.get("validation_results", [])
+        ]
         retry_limit = plan.video_spec.automation.max_artifact_retries if plan.video_spec else 1
         processed_parallel_groups: set[str] = set()
         for index, planned in enumerate(ordered):

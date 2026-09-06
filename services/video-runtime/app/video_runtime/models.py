@@ -287,6 +287,7 @@ class VideoSpec(BaseModel):
 
 
 class RebuildPlanItem(BaseModel):
+    superseded_by: str | None = None
     step_id: str = Field(default_factory=uid)
     objective: str = ""
     input_artifact_version_ids: list[str] = Field(default_factory=list)
@@ -476,6 +477,7 @@ class CheckpointResolution(BaseModel):
     phase_inputs: dict[str, Any] = Field(default_factory=dict)
     proposed_steps: list[RebuildPlanItem] = Field(default_factory=list)
     cancel_step_ids: list[str] = Field(default_factory=list)
+    replace_failed_step_ids: dict[str, str] = Field(default_factory=dict)
     goal_satisfied: bool = False
     waiting_for_input: bool = False
     response: str = ""

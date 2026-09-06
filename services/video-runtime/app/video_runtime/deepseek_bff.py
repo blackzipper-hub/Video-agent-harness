@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from .repository import ProjectVersionConflict
 import hashlib
 import hmac
 import json
@@ -61,6 +62,7 @@ class CreateRunBody(BaseModel):
 class MessageBody(BaseModel):
     content: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
+    resume_builds: bool = False
     user_option: dict[str, Any] | None = None
     input_files: list[dict[str, Any]] = Field(default_factory=list)
     workflow_id: str | None = None
@@ -357,8 +359,10 @@ def _initial_video_build_prompt(
         (
             "Planning uses Cuti continuous PlanPatch semantics: start from ProjectIntent only. "
             "The Runtime will persist it, then repeatedly wake this same DeepSeek Session after "
-            "each completed task frontier so you can inspect real Artifacts and append the next "
-            "tasks. Do not try to precompile the complete production DAG in this turn."
+            "each task completion or failure so you can inspect real Artifacts and append or "
+            "cancel pending tasks while other work continues. For a user edit during execution, "
+            "inspect checkpoint_id=live and submit a PlanPatch with its returned id and revisions. "
+            "Do not try to precompile the complete production DAG in this turn."
             if os.getenv("VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED", "false").lower()
             in {"1", "true", "yes", "on"} else
             "Planning uses the configured Workflow planning contract."
@@ -596,6 +600,11 @@ async def _run_with_context(
     ), None)
     if locked_workflow:
         result["workflow_id"] = locked_workflow
+    builds = await runtime.repo.list_builds(project.id)
+    if builds:
+        latest = max(builds, key=lambda item: item.created_at)
+        if latest.status == "cancelled":
+            result["status"] = "cancelled"
     return result
 
 
@@ -661,7 +670,11 @@ async def _snapshot(
                 "objective": step.plan_step_id.replace("-", " "),
                 "input_artifact_version_ids": [],
                 "depends_on": [],
-                "status": status_map.get(step.status, "ready"),
+                "status": (
+                    "cancelled" if build.status == "cancelled"
+                    and step.status in {"pending", "running", "waiting_external"}
+                    else status_map.get(step.status, "ready")
+                ),
                 "remote_operation_id": step.remote_operation_id,
                 "error": step.error,
                 "progress": 100 if step.status == "completed" else round(build.progress * 100),
@@ -862,6 +875,26 @@ async def add_message(
             )
         if not is_empty_creation:
             prompt += _selection_context(workflow_id, activated_skill_ids)
+        builds = await runtime.repo.list_builds(project_id)
+        latest = max(builds, key=lambda item: item.created_at) if builds else None
+        stopped = latest is not None and latest.status == "cancelled"
+        if stopped and not body.resume_builds:
+            raise HTTPException(status_code=409, detail="Task stopped. Confirm resume before sending a continuation.")
+        if stopped:
+            # Only the latest stopped build is eligible, never historical cancelled plans.
+            if latest is not None:
+                try:
+                    await runtime.resume_cancelled_build(project_id=project_id, build_id=latest.id)
+                except ProjectVersionConflict as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                checkpoints = await runtime.repo.list_build_checkpoints(project_id, latest.id)
+                active = [item.id for item in checkpoints if item.status in {"pending", "planning"}]
+                prompt += (
+                    f"\nUser confirmed resume of existing build {latest.id}, project {project_id}. "
+                    "Do not create a replacement build or repeat completed tasks. Inspect existing "
+                    "artifacts and resume the pending checkpoint using the user's message. "
+                    f"Active checkpoints: {json.dumps(active)}."
+                )
         await dsh.prompt(binding.session_id, prompt)
         await runtime.repo.remember_operation_result(
             project_id, "compat-message", body.idempotency_key, binding.session_id,
@@ -881,7 +914,7 @@ async def resume_run(
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
 ) -> dict[str, Any]:
-    return await add_message(project_id, body, user_id, runtime, dsh)
+    return await add_message(project_id, body.model_copy(update={"resume_builds": True}), user_id, runtime, dsh)
 
 
 @router.get("/runs/{project_id}/messages")
@@ -1071,10 +1104,22 @@ async def cancel_run(
     dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
 ) -> dict[str, Any]:
     project, binding = await _project_and_binding(runtime, project_id, user_id)
-    try:
-        await dsh.cancel(binding.session_id)
-    except DeepSeekHarnessError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    # Stop durable execution before cancelling the conversational loop, including
+    # when the DeepSeek service is temporarily unreachable.
+    async def stop_builds() -> None:
+        for build in await runtime.repo.list_builds(project_id):
+            if build.status in {"queued", "running", "waiting_external", "waiting_agent"}:
+                await runtime.cancel_build(project_id=project_id, build_id=build.id)
+    lock = runtime.session_control_locks.setdefault(project_id, asyncio.Lock())
+    async with lock:
+        await stop_builds()
+        try:
+            await dsh.cancel(binding.session_id)
+        except DeepSeekHarnessError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            # Catch a tool submission that completed during session cancellation.
+            await stop_builds()
     return success(await _run_with_context(
         runtime, project, binding.session_id, await _history(dsh, binding.session_id),
     ))

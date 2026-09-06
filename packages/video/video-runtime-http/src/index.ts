@@ -182,7 +182,7 @@ export class HttpVideoRuntime extends VideoRuntime {
   ): Promise<PlanCheckpoint> {
     const path = `/api/video/projects/${encodeURIComponent(projectId)}`
       + `/builds/${encodeURIComponent(buildId)}/checkpoints/${encodeURIComponent(checkpointId)}`
-    return this.request(path, identity, { signal })
+    return this.request(path, identity, { signal, method: checkpointId === 'live' ? 'POST' : 'GET' })
   }
 
   resolveCheckpoint(request: CheckpointResolutionRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot> {

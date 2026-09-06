@@ -4,7 +4,11 @@
 
 一组稳定的高层工具，使 DeepSeek agent 能够操作带版本的视频项目，而不暴露 Provider 专用调用。
 
+`video_checkpoint_inspect` 接受 `checkpoint_id="live"`，为执行期间的用户编辑打开规划快照；随后使用返回的 ID 和版本调用 `video_plan_patch_submit`。任务完成/失败通知与主动编辑共用追加、取消路径；只能取消待执行任务，无关的运行中任务继续执行。参见 [Runtime 调度规则](../../../services/video-runtime/README.zh.md)。
+
 ## Model Experience
+
+修改参数后重试时，提交 `replace_failed_task_ids`，将失败 ID 映射到 `add_tasks` 中的新任务键。Runtime 原子替换待执行的下游任务，保留可复用的已完成产物。失败的持续 Build 可通过 `checkpoint_id="live"` 查看，并保持停止直到修复补丁提交。
 
 ### 项目视频工具
 

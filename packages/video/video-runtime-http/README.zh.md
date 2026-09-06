@@ -6,6 +6,8 @@ Video Runtime 能力 seam 的 HTTP Provider。它传输首次构建与结构化�
 
 请配置 `baseUrl`，认证部署还需配置 `serviceToken`。调用工具只提供 DeepSeek Session id 时，`userId` 提供部署身份；多用户部署必须由认证 BFF 设置该值，不能共享本地默认值。
 
+检查点 ID 为 `live` 时使用 POST，因为打开规划快照会修改状态；具体检查点 ID 使用 GET。两类请求均保留相同的 Session 和用户身份请求头。
+
 ## Model Experience
 
 ### HTTP Provider

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { ArtifactDocument } from './ArtifactDocument'
 import {
   AlertTriangle, Check, CheckCircle2, Circle, FileText, Film, Image, Loader2, Music, RefreshCw, Scissors,
 } from 'lucide-react'
@@ -331,23 +331,10 @@ const storyBody = (artifact: DeepAgentArtifact): string => {
   for (const key of ['script', 'content', 'outline', 'story', 'text', 'body', 'markdown', 'description']) {
     const value = meta[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
+    if (value && typeof value === 'object') return JSON.stringify(value)
   }
   if (Array.isArray(meta.chapters) && meta.chapters.length > 0) {
-    const lines: string[] = []
-    const title = typeof meta.title === 'string' ? meta.title.trim() : ''
-    if (title) lines.push(`# ${title}`)
-    meta.chapters.forEach((chapter, index) => {
-      if (!chapter || typeof chapter !== 'object') return
-      const row = chapter as Record<string, unknown>
-      const chapterTitle = typeof row.title === 'string' ? row.title : `Chapter ${index + 1}`
-      const chapterDesc = typeof row.description === 'string' ? row.description : ''
-      const duration = row.duration
-      const suffix = typeof duration === 'number' ? ` (${duration}s)` : ''
-      lines.push(`### ${index + 1}. ${chapterTitle}${suffix}`)
-      if (chapterDesc) lines.push(chapterDesc)
-    })
-    const joined = lines.join('\n').trim()
-    if (joined) return joined
+    return JSON.stringify({ ...(meta.title ? { title: meta.title } : {}), chapters: meta.chapters })
   }
   if (typeof meta.chapters === 'object' && meta.chapters && !Array.isArray(meta.chapters)) {
     try {
@@ -600,8 +587,8 @@ export function DeepAgentArtifacts({
     && !isVideoArtifact(artifact)
     && !isAudioArtifact(artifact),
   )
-  // Surface all generation-task briefs (plot / shot / segment) as readable scripts.
-  const segmentScripts = [...snapshot.tasks]
+  // Runtime task objectives are execution labels; only legacy runs use them as document fallbacks.
+  const segmentScripts = (runtimeWorkspace ? [] : [...snapshot.tasks])
     .filter(task =>
       /generate|seedance|video_gen|provider|ark_protocol|image\.|shot\.|keyframe\.|outline|scene|character/i
         .test(task.capability_id)
@@ -932,7 +919,7 @@ export function DeepAgentArtifacts({
                     <CardContent className="px-5 py-5 sm:px-6">
                       {body ? (
                         <article className="prose prose-sm max-w-none break-words text-foreground prose-headings:scroll-mt-4 prose-headings:font-semibold prose-h1:text-xl prose-h2:mt-7 prose-h2:text-lg prose-h3:text-base prose-p:leading-7 prose-li:my-1 prose-li:leading-7 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto dark:prose-invert">
-                          <ReactMarkdown>{body}</ReactMarkdown>
+                          <ArtifactDocument>{body}</ArtifactDocument>
                         </article>
                       ) : (
                         <p className="text-sm text-muted-foreground">
@@ -979,7 +966,7 @@ export function DeepAgentArtifacts({
                     <CardContent>
                       {body ? (
                         <div className="prose prose-sm max-w-none whitespace-pre-wrap text-foreground dark:prose-invert">
-                          <ReactMarkdown>{body}</ReactMarkdown>
+                          <ArtifactDocument>{body}</ArtifactDocument>
                         </div>
                       ) : (
                         <p className="text-xs text-muted-foreground">{t('da.workspace.scriptUnavailable')}</p>
@@ -1022,7 +1009,7 @@ export function DeepAgentArtifacts({
                     </CardHeader>
                     <CardContent>
                       <div className="prose prose-sm max-w-none whitespace-pre-wrap text-foreground dark:prose-invert">
-                        <ReactMarkdown>{task.objective}</ReactMarkdown>
+                        <ArtifactDocument>{task.objective}</ArtifactDocument>
                       </div>
                     </CardContent>
                   </Card>
@@ -1070,9 +1057,9 @@ export function DeepAgentArtifacts({
                         )}
                         {artifact.summary && (
                           <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                            <ReactMarkdown>
+                            <ArtifactDocument>
                               {artifact.summary.replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim()}
-                            </ReactMarkdown>
+                            </ArtifactDocument>
                           </div>
                         )}
                       </CardContent>
@@ -1168,7 +1155,7 @@ export function DeepAgentArtifacts({
                       )}
                       {artifact.summary && (
                         <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                          <ReactMarkdown>{artifact.summary}</ReactMarkdown>
+                          <ArtifactDocument>{artifact.summary}</ArtifactDocument>
                         </div>
                       )}
                       <GenerationPrompt artifact={artifact} />
@@ -1218,7 +1205,7 @@ export function DeepAgentArtifacts({
                       )}
                       {storyBody(artifact) && (
                         <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                          <ReactMarkdown>{storyBody(artifact)}</ReactMarkdown>
+                          <ArtifactDocument>{storyBody(artifact)}</ArtifactDocument>
                         </div>
                       )}
                     </CardContent>
@@ -1257,7 +1244,7 @@ export function DeepAgentArtifacts({
                 <CardContent className="space-y-3">
                   {body && (
                     <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                      <ReactMarkdown>{body}</ReactMarkdown>
+                      <ArtifactDocument>{body}</ArtifactDocument>
                     </div>
                   )}
                   {mediaUri && (

@@ -6,6 +6,12 @@ The Python Video Runtime owns long-lived video projects independently of an agen
 
 ## Run
 
+Provider dispatch resolves task input ArtifactVersions into ordered image, video, and audio URI lists for direct and atomic calls. Explicit media parameter order takes precedence; remaining task inputs follow their declared order and are merged without duplicates. Missing referenced media and invalid indexed prompt references fail before submission. Resolved input versions and concrete parameters are recorded on output artifacts. Remote operation IDs and idempotency keys survive dispatch; reference images do not implicitly become first frames.
+
+Failed-task repair accepts new parameters through PlanPatch replacement mappings. Pending descendants are cloned with rewired dependencies and their old steps are cancelled in the same revision transaction. Failed steps retain their original parameters and a `superseded_by` pointer; whole-build retries skip superseded and cancelled steps. Started descendants cannot be rewired. A failed continuous Build remains failed while a repair checkpoint is inspected and resumes only after a valid replacement patch commits against current plan, spec, and project versions.
+
+The Create stop action cancels both the DeepSeek turn and active Runtime builds. Stopped builds retain drafts, pending steps, and remote operation IDs; upstream jobs already submitted may continue and incur charges. Sending a follow-up requires explicit resume confirmation. Resume continues the latest stopped build against its original project version, reuses completed steps, and reconciles existing remote operations instead of creating a replacement build. Refreshing the page does not resume work.
+
 The standalone process needs only the dependencies in `requirements-runtime.txt`:
 
 ```sh
@@ -22,6 +28,10 @@ For local storage the standalone entrypoint defaults `PUBLIC_BASE_URL` to `http:
 The versioned API under `/api/video` creates and inspects projects, returns one aggregate editing workspace, previews structured edits and deterministic dependency impact, submits or cancels builds, selects artifact versions, restores project versions, exports a fixed project version, manages configured plugins, and streams project events. Every modifying call has an idempotency key where replay can cause duplicate work. Build, selection, restore, and export operations compare their base project version before changing authoritative state.
 
 ## Plugin execution
+
+With staged planning and `VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED` enabled, one Runtime worker owns each Build. It admits ready tasks up to the configured concurrency limit and reloads the persisted plan on task completion, terminal failure, or PlanPatch submission. A finished task requests Agent planning without waiting for unrelated Provider operations. One outstanding checkpoint per Build coalesces subsequent terminal updates into the next snapshot; delivery uses the bound DeepSeek Session, not a second planner. Failed tasks remain recorded and require an Agent-authored replacement with a new id.
+
+During execution, `POST /api/video/projects/{project_id}/builds/{build_id}/checkpoints/live` opens or reuses an active planning snapshot. Resolve its returned id with exact plan/spec revisions and an idempotency key. A patch can append tasks with dependencies on existing or newly appended tasks, or cancel pending tasks together with their pending dependants. Admission and cancellation compare the stored Step status atomically; running tasks cannot be cancelled through a pending-task patch. Goal completion rejects remaining active work. Shutdown preserves remote-operation ids for reconciliation, and recovery resumes continuous Builds even when Agent planning is outstanding. A single Runtime process must own execution for a repository; distributed worker leasing is not provided.
 
 `video-plugin.yaml` declares provider, workflow, style, validator, and media contributions plus dependencies and permissions. `VIDEO_PLUGIN_PATHS` may replace the bundled `plugins` root with platform-separated directories whose immediate child directories contain manifests. A plugin may extend `BaseVideoPlugin`; its `capability_handlers()` maps declared capability ids to executable handlers. Trusted built-ins can load in-process. An untrusted plugin declares `sandbox_runtime` (image, entrypoint, and timeout); the runtime never imports its module and executes the bundle through `services/sandbox-worker` with the signed grant's limits.
 
@@ -42,6 +52,8 @@ Scene-reference isolation is checked both at the provider boundary and against r
 If a pasted Create-Space URL names a DeepSeek Session whose Project binding is absent from the restored Runtime store, the BFF creates a fresh Session and returns its new `thread_id`; it never attaches a new Project to an unbound historical Session.
 
 ## Tests
+
+Checkpoint delivery reconciles consumed Session messages with completed turns. A turn that ends without resolving its checkpoint is retried within the existing delivery budget; retries and checkpoint inspection include current task results. Queued messages, active turns, resolved checkpoints, and cancelled Builds are not treated as missing acknowledgements. The lease remains the recovery mechanism for interrupted delivery.
 
 ```sh
 python -m unittest discover -s tests/video_runtime -v

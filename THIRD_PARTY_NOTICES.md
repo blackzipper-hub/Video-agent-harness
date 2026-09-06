@@ -125,6 +125,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`react-resizable-panels`](https://github.com/bvaughn/react-resizable-panels) | MIT |
 | [`react-router-dom`](https://github.com/remix-run/react-router) | MIT |
 | [`recharts`](https://github.com/recharts/recharts) | MIT |
+| [`remark-gfm`](https://github.com/remarkjs/remark-gfm) | MIT |
 | [`sharp`](https://github.com/lovell/sharp) | Apache-2.0 |
 | [`shiki`](https://github.com/shikijs/shiki) | MIT |
 | [`sonner`](https://github.com/emilkowalski/sonner) | MIT |

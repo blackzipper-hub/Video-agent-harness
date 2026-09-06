@@ -108,6 +108,7 @@ class CheckpointResolveBody(ApiBody):
     phase_inputs: dict = Field(default_factory=dict)
     proposed_steps: list[dict] = Field(default_factory=list)
     cancel_step_ids: list[str] = Field(default_factory=list)
+    replace_failed_step_ids: dict[str, str] = Field(default_factory=dict)
     goal_satisfied: bool = False
     waiting_for_input: bool = False
     response: str = ""
@@ -967,6 +968,28 @@ async def list_build_steps(
     return {"data": [item.model_dump(mode="json") for item in steps]}
 
 
+@router.post("/projects/{project_id}/builds/{build_id}/checkpoints/live")
+async def open_live_checkpoint(
+    project_id: str,
+    build_id: str,
+    identity: Annotated[tuple[str, str | None], Depends(_identity)],
+    build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
+) -> dict:
+    project = await _owned_and_bound(build_runtime, project_id, identity)
+    try:
+        checkpoint = await build_runtime.inspect_checkpoint(
+            project_id=project_id, build_id=build_id, checkpoint_id="live",
+            session_id=identity[1], user_id=project.user_id,
+        )
+        return {"data": checkpoint.model_dump(mode="json")}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get(
     "/projects/{project_id}/builds/{build_id}/checkpoints/{checkpoint_id}",
 )
@@ -977,6 +1000,8 @@ async def inspect_build_checkpoint(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
+    if checkpoint_id == "live":
+        raise HTTPException(status_code=405, detail="Use POST to open a live PlanPatch snapshot")
     project = await _owned_and_bound(build_runtime, project_id, identity)
     try:
         checkpoint = await build_runtime.inspect_checkpoint(
