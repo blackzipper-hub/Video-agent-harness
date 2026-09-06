@@ -1,27 +1,27 @@
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useState } from "react";
-import { toast } from "sonner";
-import characterCuti from "@/assets/character-cuti.png";
-import characterDucky from "@/assets/character-ducky-BTL0N4lq.jpg";
-import characterHana from "@/assets/character-human-hana-BtiGN0T0.png";
-import characterJay from "@/assets/character-human-jay-o1ZEwgqU.png";
-import characterLeo from "@/assets/character-human-leo-toLiEK8M.png";
-import characterLuna from "@/assets/character-human-luna-CPe4KvLL.png";
-import characterRuby from "@/assets/character-human-ruby-BDFXLu1L.png";
-import characterMiuMiu from "@/assets/character-MiuMiu.png";
-import { useLanguage } from "@/i18n/LanguageContext";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useState } from 'react'
+import { toast } from 'sonner'
+import characterCuti from '@/assets/character-cuti.png'
+import characterDucky from '@/assets/character-ducky-BTL0N4lq.jpg'
+import characterHana from '@/assets/character-human-hana-BtiGN0T0.png'
+import characterJay from '@/assets/character-human-jay-o1ZEwgqU.png'
+import characterLeo from '@/assets/character-human-leo-toLiEK8M.png'
+import characterLuna from '@/assets/character-human-luna-CPe4KvLL.png'
+import characterRuby from '@/assets/character-human-ruby-BDFXLu1L.png'
+import characterMiuMiu from '@/assets/character-MiuMiu.png'
+import { useLanguage } from '@/i18n/LanguageContext'
 
 interface Character {
-  id: string;
-  name: string;
-  image: string;
-  isDefault?: boolean;
+  id: string
+  name: string
+  image: string
+  isDefault?: boolean
 }
 
 interface CharacterSelectPopoverProps {
-  children: React.ReactNode;
-  onSelect: (characters: Character[]) => void;
-  selectedCharacters?: Character[];
+  children: React.ReactNode
+  onSelect: (characters: Character[]) => void
+  selectedCharacters?: Character[]
 }
 
 const DEFAULT_CHARACTERS: Character[] = [
@@ -33,39 +33,39 @@ const DEFAULT_CHARACTERS: Character[] = [
   { id: 'luna', name: 'Luna', image: characterLuna, isDefault: true },
   { id: 'ruby', name: 'Ruby', image: characterRuby, isDefault: true },
   { id: 'ducky', name: 'Ducky', image: characterDucky, isDefault: true },
-];
+]
 
 const CharacterSelectPopover = ({
   children,
   onSelect,
-  selectedCharacters = []
+  selectedCharacters = [],
 }: CharacterSelectPopoverProps) => {
-  const { t } = useLanguage();
-  const [characters, setCharacters] = useState<Character[]>(DEFAULT_CHARACTERS);
+  const { t } = useLanguage()
+  const [characters, setCharacters] = useState<Character[]>(DEFAULT_CHARACTERS)
   const [selected, setSelected] = useState<string[]>(
-    selectedCharacters.map(c => c.id)
-  );
+    selectedCharacters.map(c => c.id),
+  )
 
   const toggleCharacter = (id: string, name: string) => {
-    setSelected(prev => {
+    setSelected((prev) => {
       const newSelected = prev.includes(id)
         ? prev.filter(charId => charId !== id)
-        : [...prev, id];
+        : [...prev, id]
 
       // Auto-update selected characters
-      const selectedChars = characters.filter(c => newSelected.includes(c.id));
-      onSelect(selectedChars);
+      const selectedChars = characters.filter(c => newSelected.includes(c.id))
+      onSelect(selectedChars)
 
       // Show toast
       if (newSelected.includes(id)) {
-        toast.success(`${name} ${t('characterSelected')}`);
+        toast.success(`${name} ${t('characterSelected')}`)
       } else {
-        toast.success(`${name} ${t('characterDeselected')}`);
+        toast.success(`${name} ${t('characterDeselected')}`)
       }
 
-      return newSelected;
-    });
-  };
+      return newSelected
+    })
+  }
 
   return (
     <>
@@ -91,7 +91,7 @@ const CharacterSelectPopover = ({
             {/* Characters Grid */}
             <div className="flex gap-3 overflow-x-auto pb-2">
               {characters.map((character) => {
-                const isSelected = selected.includes(character.id);
+                const isSelected = selected.includes(character.id)
                 return (
                   <button
                     key={character.id}
@@ -121,14 +121,14 @@ const CharacterSelectPopover = ({
                       {character.name}
                     </span>
                   </button>
-                );
+                )
               })}
             </div>
           </div>
         </PopoverContent>
       </Popover>
     </>
-  );
-};
+  )
+}
 
-export default CharacterSelectPopover;
+export default CharacterSelectPopover

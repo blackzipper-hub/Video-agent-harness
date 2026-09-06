@@ -1,8 +1,8 @@
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
-import { useLanguage } from "@/i18n/LanguageContext";
-import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/hooks/useAuth'
+import { useLanguage } from '@/i18n/LanguageContext'
+import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Coins,
   Globe,
@@ -15,55 +15,55 @@ import {
   LayoutDashboard,
   Menu,
   CreditCard,
-} from "lucide-react";
-import defaultAvatar from "@/assets/user-avatar-capybara.png";
+} from 'lucide-react'
+import defaultAvatar from '@/assets/user-avatar-capybara.png'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useSidebar } from "@/components/ui/sidebar";
-import { toast } from "sonner";
+} from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useSidebar } from '@/components/ui/sidebar'
+import { toast } from 'sonner'
 
 interface NavbarProps {
-  showSidebarTrigger?: boolean;
-  hideBrand?: boolean;
+  showSidebarTrigger?: boolean
+  hideBrand?: boolean
 }
 
 const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) => {
-  const navigate = useNavigate();
-  const { isLoggedIn, user, logout, isLoading: authLoading } = useAuth();
-  const { t } = useLanguage();
-  const sidebar = showSidebarTrigger ? useSidebar() : null;
+  const navigate = useNavigate()
+  const { isLoggedIn, user, logout, isLoading: authLoading } = useAuth()
+  const { t } = useLanguage()
+  const sidebar = showSidebarTrigger ? useSidebar() : null
 
   const handleSignOut = async () => {
     try {
-      await logout();
-      toast.success(t('logoutSuccess'));
-      navigate("/auth");
+      await logout()
+      toast.success(t('logoutSuccess'))
+      navigate('/auth')
     } catch (error: unknown) {
-      toast.error(t('logoutFailedRetry'));
+      toast.error(t('logoutFailedRetry'))
     }
-  };
+  }
 
   const getUserInitials = () => {
-    if (!user?.email) return "U";
-    return user.email.charAt(0).toUpperCase();
-  };
+    if (!user?.email) return 'U'
+    return user.email.charAt(0).toUpperCase()
+  }
 
   const getUserName = () => {
     if (user?.email) {
-      return user.email.split('@')[0];
+      return user.email.split('@')[0]
     }
-    return 'User';
-  };
+    return 'User'
+  }
 
   const getUserAccount = () => {
-    return user?.email || user?.phone || '';
-  };
+    return user?.email || user?.phone || ''
+  }
 
   return (
     <TooltipProvider>
@@ -84,7 +84,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
               )}
 
               {!hideBrand && (
-                <button onClick={() => navigate("/")} className="flex items-center gap-1.5 sm:gap-2 hover:opacity-80 transition-opacity">
+                <button onClick={() => navigate('/')} className="flex items-center gap-1.5 sm:gap-2 hover:opacity-80 transition-opacity">
                   <img src={`${import.meta.env.BASE_URL}logo-internal.png`} alt="Cuti" className="w-6 h-6 sm:w-8 sm:h-8" />
                   <span className="font-righteous text-base sm:text-lg font-bold gradient-text">Cuti</span>
                 </button>
@@ -103,8 +103,8 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
                   <DropdownMenu>
                     <TooltipTrigger asChild>
                       <DropdownMenuTrigger asChild>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-8 sm:h-10 px-2 sm:px-3 gap-1.5 sm:gap-2"
                         >
                           <Coins className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.5} />
@@ -115,7 +115,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <DropdownMenuContent className="w-56" align="end">
-                      <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/pricing")}>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/pricing')}>
                         <ArrowUp className="mr-2 h-4 w-4" />
                         <span>{t('upgrade')}</span>
                       </DropdownMenuItem>
@@ -129,62 +129,62 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
 
               {/* User Dropdown */}
               {!authLoading && isLoggedIn ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="p-0 rounded-full">
-                    <Avatar className="w-7 h-7 sm:w-8 sm:h-8">
-                      <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
-                      <AvatarFallback className="bg-primary text-primary-foreground text-sm">
-                        {getUserInitials()}
-                      </AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end">
-                  <div className="px-2 py-2">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="w-10 h-10 flex-shrink-0">
-                      <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="p-0 rounded-full">
+                      <Avatar className="w-7 h-7 sm:w-8 sm:h-8">
+                        <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
                         <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                           {getUserInitials()}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium font-inter truncate">
-                          {getUserName()}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {getUserAccount()}
-                        </p>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-56" align="end">
+                    <div className="px-2 py-2">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="w-10 h-10 flex-shrink-0">
+                          <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
+                          <AvatarFallback className="bg-primary text-primary-foreground text-sm">
+                            {getUserInitials()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium font-inter truncate">
+                            {getUserName()}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {getUserAccount()}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/pricing")}>
-                    <Coins className="mr-2 h-4 w-4" />
-                    <span>{t('plansAndPricing')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/subscription")}>
-                    <CreditCard className="mr-2 h-4 w-4" />
-                    <span>{t('mySubscription')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
-                    <Users className="mr-2 h-4 w-4" />
-                    <span>{t('community')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
-                    <HelpCircle className="mr-2 h-4 w-4" />
-                    <span>{t('contactUs')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer" onClick={handleSignOut}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>{t('logOut')}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/pricing')}>
+                      <Coins className="mr-2 h-4 w-4" />
+                      <span>{t('plansAndPricing')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/subscription')}>
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      <span>{t('mySubscription')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="cursor-pointer">
+                      <Users className="mr-2 h-4 w-4" />
+                      <span>{t('community')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="cursor-pointer">
+                      <HelpCircle className="mr-2 h-4 w-4" />
+                      <span>{t('contactUs')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="cursor-pointer" onClick={handleSignOut}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>{t('logOut')}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : !authLoading ? (
-                <Button variant="ghost" size="icon" className="p-0 rounded-full" onClick={() => navigate("/auth")}>
+                <Button variant="ghost" size="icon" className="p-0 rounded-full" onClick={() => navigate('/auth')}>
                   <Avatar className="w-7 h-7 sm:w-8 sm:h-8">
                     <img src={defaultAvatar} alt={t('userAvatar')} className="w-full h-full object-cover" />
                     <AvatarFallback className="bg-muted text-muted-foreground">
@@ -198,7 +198,7 @@ const Navbar = ({ showSidebarTrigger = false, hideBrand = false }: NavbarProps) 
         </div>
       </header>
     </TooltipProvider>
-  );
-};
+  )
+}
 
-export default Navbar;
+export default Navbar
