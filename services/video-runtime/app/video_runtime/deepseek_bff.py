@@ -23,6 +23,11 @@ from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
 from .upload_security import sign_uploaded_file as _sign_uploaded_file
+from .retired import (
+    RETIRED_UNAVAILABLE_REASON,
+    is_retired_public_skill,
+    is_retired_public_workflow,
+)
 from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
 from app.chat.utils.file_utils import process_uploaded_files
 from app.chat.v2.language import (
@@ -270,6 +275,12 @@ _CHECKPOINT_PROMPT_MARKER = "CUTI_VIDEO_CHECKPOINT_V1"
 _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
+_UI_DEFAULTS_SEPARATOR = (
+    "\n\nUI defaults (creation controls) and inputs. "
+    "User-stated config in the message has higher priority; "
+    "keep defaults only for fields the user did not mention:\n"
+)
+_LEGACY_CONTROLS_SEPARATOR = "\n\nCurrent creation controls and inputs:\n"
 
 
 _EXPLICIT_SKILL = re.compile(r"(?<![A-Za-z0-9_-])[$/]([A-Za-z0-9][A-Za-z0-9_-]{0,63})")
@@ -286,6 +297,12 @@ def _requested_skill_selection(
         match.group(1) for match in _EXPLICIT_SKILL.finditer(text)
         if runtime.skills.catalog.has(match.group(1))
     ]
+    for skill_id in explicit:
+        if is_retired_public_skill(skill_id) or is_retired_public_workflow(skill_id):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workflow is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}",
+            )
     explicit_workflows = []
     helpers = list(requested_activated)
     for skill_id in explicit:
@@ -308,13 +325,10 @@ def _validate_workflow_selection(
 ) -> None:
     if not workflow:
         return
-    if workflow == "cuti.seedance-story":
+    if is_retired_public_workflow(workflow):
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Workflow is unavailable: cuti.seedance-story is a hidden legacy "
-                "compatibility workflow; select an installed Cuti Workflow Skill"
-            ),
+            detail=f"Workflow is unavailable: {workflow}: {RETIRED_UNAVAILABLE_REASON}",
         )
     if not runtime.skills.catalog.has(workflow):
         # Dedicated Video Plugins may expose a Workflow alias without adding a
@@ -356,9 +370,10 @@ def _visible_user_text(value: str) -> str:
     """Keep BFF orchestration instructions out of the legacy chat transcript."""
     if value.startswith(f"{_CHECKPOINT_PROMPT_MARKER}\n"):
         return ""
-    controls_separator = "\n\nCurrent creation controls and inputs:\n"
-    if controls_separator in value:
-        value = value.split(controls_separator, 1)[0]
+    for separator in (_UI_DEFAULTS_SEPARATOR, _LEGACY_CONTROLS_SEPARATOR):
+        if separator in value:
+            value = value.split(separator, 1)[0]
+            break
     if _SKILL_SELECTION_SEPARATOR in value:
         value = value.split(_SKILL_SELECTION_SEPARATOR, 1)[0]
     if not value.startswith(f"{_CREATE_PROMPT_MARKER}\n"):
@@ -413,7 +428,10 @@ def _initial_video_build_prompt(
             f"and bound project {project_id} to this Session. Do not create another project."
         ),
         f"The required base_project_version_id is {base_project_version_id}.",
-        f"Creation controls: {json.dumps(options, ensure_ascii=False, sort_keys=True)}",
+        (
+            "UI defaults (creation controls): "
+            f"{json.dumps(options, ensure_ascii=False, sort_keys=True)}"
+        ),
         f"Uploaded project Source Artifacts: {json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True)}",
         video_language_instruction(language_contract or resolve_video_language_contract(objective)),
         (
@@ -436,7 +454,12 @@ def _initial_video_build_prompt(
             f"{json.dumps(activated, ensure_ascii=False)}. "
             "Always use automation.mode automatic."
         ),
-        "Respect duration, aspect ratio, resolution, selected image/video providers, and attachments when present.",
+        (
+            "Configuration the user stated in the visible request has highest priority. "
+            "UI defaults apply only to fields the user did not mention. Do not treat UI "
+            "defaults as constraints that override the request. Do not infer a control "
+            "from creative content that did not name a setting."
+        ),
         (
             "Normalize UI provider names for VideoSpec: seedance_2_* means providers.video "
             "seedance-2.0; gpt_image_2 means providers.image gpt-image-2. If the UI value is "
@@ -499,6 +522,8 @@ async def _effective_skill_selection(
     for lock in await runtime.list_project_skill_locks(project_id):
         if not lock.enabled:
             continue
+        if is_retired_public_skill(lock.skill_id) or is_retired_public_workflow(lock.skill_id):
+            continue
         if not runtime.skills.catalog.has(lock.skill_id):
             raise HTTPException(status_code=409, detail=f"Locked Skill is no longer installed: {lock.skill_id}")
         metadata = runtime.skills.catalog.load(lock.skill_id).metadata
@@ -510,6 +535,11 @@ async def _effective_skill_selection(
     workflow = requested_workflow or locked_workflow
     _validate_workflow_selection(runtime, workflow)
     for skill_id in requested_activated:
+        if is_retired_public_skill(skill_id) or is_retired_public_workflow(skill_id):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workflow is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}",
+            )
         if not runtime.skills.catalog.has(skill_id):
             raise HTTPException(status_code=422, detail=f"Skill is not installed: {skill_id}")
         metadata = runtime.skills.catalog.load(skill_id).metadata
@@ -998,8 +1028,15 @@ async def add_message(
         )
         if not is_empty_creation and (body.user_option or imported_input_files):
             prompt += (
-                "\n\nCurrent creation controls and inputs:\n"
-                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
+                _UI_DEFAULTS_SEPARATOR
+                + json.dumps(
+                    {
+                        "user_option": body.user_option or {},
+                        "input_files": _prompt_input_files(imported_input_files),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             )
         if not is_empty_creation:
             prompt += _selection_context(workflow_id, activated_skill_ids)
@@ -1461,8 +1498,15 @@ async def studio_add_command(
         prompt = body.objective
         if body.user_option or imported_input_files:
             prompt += (
-                "\n\nCurrent creation controls and inputs:\n"
-                f"{json.dumps({'user_option': body.user_option or {}, 'input_files': _prompt_input_files(imported_input_files)}, ensure_ascii=False, sort_keys=True)}"
+                _UI_DEFAULTS_SEPARATOR
+                + json.dumps(
+                    {
+                        "user_option": body.user_option or {},
+                        "input_files": _prompt_input_files(imported_input_files),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             )
         await dsh.prompt(
             binding.session_id,

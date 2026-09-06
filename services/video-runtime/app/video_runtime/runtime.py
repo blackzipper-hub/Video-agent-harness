@@ -335,11 +335,14 @@ class VideoBuildRuntime:
         skill_id: str,
         enabled: bool,
     ) -> ProjectSkillLock:
+        from .retired import RETIRED_UNAVAILABLE_REASON, is_retired_public_skill
         if not self.skills.catalog.has(skill_id):
             raise LookupError(f"unknown Skill: {skill_id}")
         metadata = self.skills.catalog.load(skill_id).metadata
         if enabled and not metadata.enabled:
             raise ValueError(f"Skill is disabled: {skill_id}")
+        if enabled and is_retired_public_skill(skill_id):
+            raise ValueError(f"Skill is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}")
         raw = dict(metadata.metadata or {})
         if enabled and raw.get("kind") == "workflow":
             for existing in await self.repo.list_project_skill_locks(project_id):
@@ -375,7 +378,10 @@ class VideoBuildRuntime:
         ]
         workflow_id = video_spec.workflow_id
         activated = list(video_spec.activated_skill_ids)
+        from .retired import is_retired_public_skill, is_retired_public_workflow
         for lock in enabled:
+            if is_retired_public_skill(lock.skill_id) or is_retired_public_workflow(lock.skill_id):
+                continue
             if not self.skills.catalog.has(lock.skill_id):
                 raise LookupError(f"project Skill is no longer installed: {lock.skill_id}")
             metadata = self.skills.catalog.load(lock.skill_id).metadata
@@ -1230,8 +1236,12 @@ class VideoBuildRuntime:
         else:
             saved = await self.repo.save_plan(plan, idempotency_key)
         if self.skills.catalog.has(saved.workflow_id):
+            from .retired import is_retired_public_workflow
             metadata = self.skills.catalog.load(saved.workflow_id).metadata
-            if (metadata.metadata or {}).get("kind") == "workflow":
+            if (
+                (metadata.metadata or {}).get("kind") == "workflow"
+                and not is_retired_public_workflow(saved.workflow_id)
+            ):
                 await self.set_project_skill_enabled(
                     project_id=project_id,
                     skill_id=saved.workflow_id,

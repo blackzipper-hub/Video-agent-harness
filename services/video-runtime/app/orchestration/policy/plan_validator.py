@@ -50,7 +50,7 @@ MEDIA_TERMS["keyframe"] += ("关键帧",)
 
 # Workflows whose spine is music — allow music.generate even when the latest
 # short confirmation message does not restate "配乐/歌曲".
-MUSIC_SPINE_WORKFLOWS = frozenset({"mv", "seedance-mv"})
+MUSIC_SPINE_WORKFLOWS = frozenset({"mv"})
 
 # Keep these source-safe because this module still contains legacy mojibake.
 # Explicit video deliverables must win over the type of an uploaded reference
@@ -543,7 +543,7 @@ class PlanValidator:
                     "no confirmed workflow skill is activated; "
                     "propose a workflow via waiting_for_input "
                     "(interruption.category=workflow_confirm) and wait for the user "
-                    "to confirm with $workflow-… / $open-montage / $seedance2 "
+                    "to confirm with $seedance2 / $mv / $short-drama-workflow "
                     "before scheduling stage tasks"
                 )
             if capability_id == "keyframe.generate" and not workflow.requires_keyframe:
@@ -734,7 +734,7 @@ class PlanValidator:
         if "video" in requested_media:
             # Text/image planning artifacts are legitimate dependencies of a
             # composed video. Music remains opt-in unless the request/workflow
-            # explicitly asks for it (MV / 配乐 / seedance-mv).
+            # explicitly asks for it (MV / 配乐).
             proposed_media -= {
                 "story", "image", "outline", "character",
                 "scene", "shot", "keyframe",

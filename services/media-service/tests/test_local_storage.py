@@ -64,3 +64,35 @@ def test_local_backend_no_boto3_client(tmp_path, monkeypatch):
     """local 模式下不应初始化 S3 客户端（自托管零 AWS 依赖）。"""
     svc = _make_local_service(tmp_path, monkeypatch)
     assert svc._client is None
+
+
+def test_local_download_foreign_url_over_real_http(tmp_path, monkeypatch):
+    """Open-source media-service: vendor URLs HTTP-get; no S3."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    payload = b"N" * 240
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        svc = _make_local_service(tmp_path, monkeypatch)
+        url = f"http://127.0.0.1:{server.server_address[1]}/stems/clip.mp3"
+        out = tmp_path / "dl" / "clip.mp3"
+        ok = asyncio.run(svc.download(url, str(out)))
+        assert ok is True
+        assert out.read_bytes() == payload
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

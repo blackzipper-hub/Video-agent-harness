@@ -74,6 +74,7 @@ class VideoSkillRuntime:
 
     def prompt_view(self) -> list[dict]:
         """Return the public catalog shape consumed by the migrated Cuti UI."""
+        from .retired import is_retired_public_skill
         from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
         capabilities_by_skill = {
             item.skill_name: item
@@ -82,6 +83,8 @@ class VideoSkillRuntime:
         }
         result: list[dict] = []
         for metadata in self.catalog.list_metadata():
+            if not metadata.enabled or is_retired_public_skill(metadata.name):
+                continue
             view = metadata.prompt_view()
             capability = capabilities_by_skill.get(metadata.name)
             install_record: dict = {}

@@ -44,7 +44,7 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             "unavailableReason": None,
             "requiredCapabilities": pipeline,
             "missingCapabilities": [],
-            "userSelectable": True,
+            "userSelectable": False,
             "executionKind": "dedicated_plugin_compiler",
             "compiler": self.compiler_name,
             # This alias executes the original Cuti $mv contract.  Planning
@@ -61,8 +61,6 @@ class MusicVideoWorkflowPlugin(BaseVideoPlugin):
             skill_name=workflow_id,
             title="Cuti Music Video",
             # This plugin uses the same Suno + smart-cut contract as $mv.
-            # Labeling it seedance_mv made its initial staged phase call
-            # atomic.music.generate while its final compiler called Suno.
             mode="mv",
             parameters={"workflow_mode": "music_video", "content_category": "music_video"},
             pipeline=(

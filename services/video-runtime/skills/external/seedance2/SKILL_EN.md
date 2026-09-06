@@ -66,9 +66,8 @@ After receiving materials, decide on your own:
 1. Prompts **must be in Chinese** — ready to paste directly into Jimeng (即梦)
 2. @ references use only `@图片1`~`@图片9`, `@视频1`~`@视频3`, `@音频1`~`@音频3`, each with purpose noted
 3. Distinguish "reference" (borrow style/motion) from "edit" (modify the original)
-4. No realistic human face materials
-5. Camera/style terms from [reference.md](reference.md) vocabulary only — never invent terms
-6. Dialogue in quotes, tagged with character and emotion
+4. Camera/style terms from [reference.md](reference.md) vocabulary only — never invent terms
+5. Dialogue in quotes, tagged with character and emotion
 
 ## Search Suggestions
 

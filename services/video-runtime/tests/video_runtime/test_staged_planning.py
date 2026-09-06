@@ -91,13 +91,13 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
     def test_workflow_id_cannot_change_its_staged_planning_mode(self) -> None:
         wrong_mode = WorkflowSpec(
-            skill_name="seedance-mv",
-            title="Seedance MV",
-            mode="mv",
+            skill_name="mv",
+            title="Music Video",
+            mode="seedance2",
         )
         with self.assertRaisesRegex(
             BuildPlanValidationError,
-            "dedicated staged-planning contract requires seedance_mv",
+            "dedicated staged-planning contract requires mv",
         ):
             initial_checkpoint(wrong_mode, wrong_mode.skill_name)
 
@@ -335,7 +335,6 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "mv": ["intent", "music", "music-analysis", "music-cut"],
             "cuti.music-video": ["intent", "music", "music-analysis", "music-cut"],
             "cuti.lipsync-music-video": ["intent", "music", "music-analysis", "music-cut"],
-            "seedance-mv": ["intent", "music", "music-analysis", "music-window"],
             "workflow-keyframe-pipeline": ["intent", "story-draft"],
             "workflow-short-drama": ["intent", "story-draft"],
             "short-drama-workflow": ["intent", "story-draft"],
@@ -346,7 +345,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "cuti-scenario-product-workflow": ["intent", "source-1", "product-analysis"],
             "libtv-product-workflow": ["intent", "source-1", "product-analysis"],
         }
-        music = {"mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv"}
+        music = {"mv", "cuti.music-video", "cuti.lipsync-music-video"}
         products = {
             "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",
@@ -390,27 +389,6 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(plan.schema_version, 2)
             self.assertIsNotNone(plan.next_checkpoint)
-
-    async def test_seedance_mv_initial_phase_uses_original_music_capabilities(self) -> None:
-        intent = ProjectIntent(
-            title="Seedance MV",
-            brief="Create an original electronic song and matching MV",
-            target_duration_seconds=15,
-            workflow_id="seedance-mv",
-            workflow_parameters={"music_prompt": "electronic pop"},
-        )
-        plan = await self.runtime.plan_project(
-            project_id=self.project.id,
-            base_project_version_id=self.version.id,
-            project_intent=intent,
-            idempotency_key="plan-seedance-mv",
-        )
-        by_id = {item.step_id: item for item in plan.items}
-        self.assertEqual(by_id["music"].capability, "atomic.music.generate")
-        self.assertEqual(by_id["music-analysis"].capability, "media.audio_analyze")
-        self.assertEqual(by_id["music-window"].capability, "media.audio.trim")
-        self.assertNotIn("suno.generate", {item.capability for item in plan.items})
-        self.assertFalse(any(item.output_artifact_type == "video_clip" for item in plan.items))
 
     async def test_plugin_music_workflows_keep_suno_contract_across_phases(self) -> None:
         for index, workflow_id in enumerate(
@@ -549,7 +527,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_every_single_checkpoint_workflow_appends_its_own_compiler_plan(self) -> None:
         """Schema-v2 continuation may stage a compiler, but may never replace it."""
         workflows = (
-            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+            "mv", "cuti.music-video", "cuti.lipsync-music-video",
             "workflow-direct-video", "seedance2", "workflow-short-drama",
             "short-drama-workflow", "product-ad-video", "cuti-product-workflow",
             "cuti-scenario-product-workflow", "libtv-product-workflow",
@@ -559,7 +537,7 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "cuti-scenario-product-workflow", "libtv-product-workflow",
         }
         music_workflows = {
-            "mv", "cuti.music-video", "cuti.lipsync-music-video", "seedance-mv",
+            "mv", "cuti.music-video", "cuti.lipsync-music-video",
         }
         for index, workflow_id in enumerate(workflows, start=1):
             project, version = await self.runtime.create_project(
@@ -986,7 +964,7 @@ class ContinuousPlanInitializationTest(unittest.TestCase):
         # Include aliases and a plugin-owned workflow with no built-in compiler.
         # Availability is checked by Runtime before reaching this function.
         for workflow_id in (
-            "seedance2", "seedance-mv", "cuti.music-video",
+            "seedance2", "cuti.music-video",
             "cuti.lipsync-music-video", "product-ad-video",
             "cuti-scenario-product-workflow", "workflow-keyframe-pipeline",
             "third-party-agentic-workflow",
@@ -1137,3 +1115,207 @@ class ContinuousPlanPatchRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(completed.status, "completed")
         self.assertIsNotNone(version)
+
+    async def test_task_update_checkpoint_reopens_after_each_frontier(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Continuous Cuti loop",
+                brief="Generate clips in successive frontiers",
+                workflow_id="seedance2",
+            ),
+            idempotency_key="continuous-plan-two-frontiers",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-build-two-frontiers",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        first = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=first.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-patch-1",
+                video_spec_patch={"workflow_parameters": {"shot_count": 1}},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-1",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "first frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(waiting.status, "waiting_agent")
+        second = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertTrue(second.phase.startswith("task-update:"))
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=second.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=2,
+                base_spec_revision=2,
+                idempotency_key="continuous-patch-2",
+                video_spec_patch={},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-2",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "second frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["clip-1"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoints = await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        )
+        task_updates = [
+            item for item in checkpoints if item.phase.startswith("task-update:")
+        ]
+        self.assertEqual(len(task_updates), 3)
+        self.assertEqual(task_updates[-1].status, "pending")
+        self.assertNotEqual(task_updates[0].id, task_updates[-1].id)
+
+    async def test_second_frontier_reopens_waiting_agent_checkpoint(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Continuous Cuti loop",
+                brief="Generate clips in successive frontiers",
+                workflow_id="seedance2",
+            ),
+            idempotency_key="continuous-plan-two-frontiers",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-build-two-frontiers",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        first = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=first.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-patch-1",
+                video_spec_patch={"workflow_parameters": {"shot_count": 1}},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-1",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "first frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, _ = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertEqual(waiting.status, "waiting_agent")
+        second = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+        self.assertTrue(second.phase.startswith("task-update:"))
+        await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=second.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=2,
+                base_spec_revision=2,
+                idempotency_key="continuous-patch-2",
+                video_spec_patch={},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-2",
+                    action="create",
+                    capability="atomic.video.generate",
+                    parameters={
+                        "prompt": "second frontier clip",
+                        "model": "seedance-2.0",
+                        "generate_audio": True,
+                    },
+                    depends_on=["clip-1"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+        waiting, version = await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        self.assertIsNone(version)
+        self.assertEqual(waiting.status, "waiting_agent")
+        checkpoints = await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        )
+        task_updates = [
+            item for item in checkpoints if item.phase.startswith("task-update:")
+        ]
+        self.assertEqual(len(task_updates), 3)
+        self.assertEqual(task_updates[-1].status, "pending")
+        self.assertNotEqual(task_updates[0].id, task_updates[-1].id)

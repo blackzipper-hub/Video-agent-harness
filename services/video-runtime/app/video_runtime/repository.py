@@ -385,6 +385,20 @@ class InMemoryVideoProjectRepository:
             })
             return deepcopy(state)
 
+    def _mark_build_waiting_agent(self, build: Build, checkpoint: PlanCheckpoint) -> None:
+        if not checkpoint.phase.startswith("repair:"):
+            build.status = "waiting_agent"
+        build.message = f"Waiting for Agent planning after {checkpoint.phase}"
+        build.updated_at = now()
+        self.builds[build.id] = deepcopy(build)
+        self._append_event(checkpoint.project_id, "build.phase.completed", {
+            "build_id": build.id, "phase": checkpoint.phase,
+        })
+        self._append_event(checkpoint.project_id, "build.checkpoint.waiting", {
+            "build_id": build.id, "checkpoint_id": checkpoint.id,
+            "phase": checkpoint.phase, "next_phase": checkpoint.next_phase,
+        })
+
     async def create_checkpoint(self, checkpoint: PlanCheckpoint) -> PlanCheckpoint:
         async with self.lock:
             build = self.builds.get(checkpoint.build_id)
@@ -403,24 +417,22 @@ class InMemoryVideoProjectRepository:
             existing = next((
                 self.checkpoints[item]
                 for item in self.build_checkpoints[checkpoint.build_id]
-                if self.checkpoints[item].phase == checkpoint.phase
+                if (
+                    self.checkpoints[item].phase == checkpoint.phase
+                    and self.checkpoints[item].base_plan_revision
+                    == checkpoint.base_plan_revision
+                )
             ), None)
             if existing is not None:
+                if (
+                    existing.status in {"pending", "planning"}
+                    and build.status != "waiting_agent"
+                ):
+                    self._mark_build_waiting_agent(build, existing)
                 return deepcopy(existing)
             self.checkpoints[checkpoint.id] = deepcopy(checkpoint)
             self.build_checkpoints[checkpoint.build_id].append(checkpoint.id)
-            if not checkpoint.phase.startswith("repair:"):
-                build.status = "waiting_agent"
-            build.message = f"Waiting for Agent planning after {checkpoint.phase}"
-            build.updated_at = now()
-            self.builds[build.id] = deepcopy(build)
-            self._append_event(checkpoint.project_id, "build.phase.completed", {
-                "build_id": build.id, "phase": checkpoint.phase,
-            })
-            self._append_event(checkpoint.project_id, "build.checkpoint.waiting", {
-                "build_id": build.id, "checkpoint_id": checkpoint.id,
-                "phase": checkpoint.phase, "next_phase": checkpoint.next_phase,
-            })
+            self._mark_build_waiting_agent(build, checkpoint)
             return deepcopy(checkpoint)
 
     async def get_checkpoint(

@@ -30,7 +30,6 @@ WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
     "workflow-short-drama": ("short_drama", "story"),
     "seedance2": ("seedance2", "direct"),
     "mv": ("mv", "music_suno"),
-    "seedance-mv": ("seedance_mv", "music_seedance"),
     "short-drama-workflow": ("short_drama_workflow", "story"),
     "product-ad-video": ("product_ad_video", "product_ad"),
     "cuti-product-workflow": ("cuti_product_workflow", "product_cuti"),
@@ -105,7 +104,7 @@ def initial_checkpoint(workflow: WorkflowSpec | None, workflow_id: str) -> PlanC
             planner_instruction=declared.instruction,
             planning_mode="agentic" if planning_mode == "agentic" else "staged",
         )
-    if family in {"music_suno", "music_seedance"}:
+    if family == "music_suno":
         return PlanCheckpointDefinition(
             id="music_ready", phase="music_analysis", next_phase="visual_production",
             required_artifact_types=["audiomap", "audio_cut"],
@@ -234,7 +233,7 @@ def compile_initial_phase(
 
     checkpoint = initial_checkpoint(workflow, intent.workflow_id)
     family = _planning_family(workflow, intent.workflow_id)
-    if family in {"music_suno", "music_seedance"}:
+    if family == "music_suno":
         audio_sources = [
             source_steps[logical_id]
             for logical_id in intent.source_asset_ids
@@ -248,30 +247,18 @@ def compile_initial_phase(
                 or intent.workflow_parameters.get("bgm_prompt")
                 or intent.brief
             ).strip()
-            if family == "music_seedance":
-                music = add(
-                    "music", "audio_bgm", "atomic.music.generate",
-                    parameters={
-                        "prompt": prompt,
-                        "duration": intent.target_duration_seconds,
-                        "target_duration": intent.target_duration_seconds,
-                        "model": intent.providers.music,
+            music = add(
+                "music", "audio_bgm", "suno.generate",
+                parameters={
+                    "prompt": prompt,
+                    "title": intent.title,
+                    **{
+                        key: value for key, value in intent.workflow_parameters.items()
+                        if key in {"tags", "lyrics", "custom_mode", "instrumental", "vocal_gender"}
                     },
-                    depends_on=[intent_step], cost=0.10,
-                )
-            else:
-                music = add(
-                    "music", "audio_bgm", "suno.generate",
-                    parameters={
-                        "prompt": prompt,
-                        "title": intent.title,
-                        **{
-                            key: value for key, value in intent.workflow_parameters.items()
-                            if key in {"tags", "lyrics", "custom_mode", "instrumental", "vocal_gender"}
-                        },
-                    },
-                    depends_on=[intent_step], cost=0.10,
-                )
+                },
+                depends_on=[intent_step], cost=0.10,
+            )
         analysis = add(
             "music-analysis", "audiomap", "media.audio_analyze",
             parameters={
@@ -281,26 +268,15 @@ def compile_initial_phase(
             },
             depends_on=[music],
         )
-        if family == "music_seedance":
-            add(
-                "music-window", "audio_cut", "media.audio.trim",
-                parameters={
-                    "audio_step": music,
-                    "start": float(intent.workflow_parameters.get("start_sec", 0)),
-                    "duration": intent.target_duration_seconds,
-                },
-                depends_on=[music, analysis],
-            )
-        else:
-            add(
-                "music-cut", "audio_cut", "media.audio_cut",
-                parameters={
-                    "audio_step": music,
-                    "analysis_step": analysis,
-                    "duration": intent.target_duration_seconds,
-                },
-                depends_on=[music, analysis],
-            )
+        add(
+            "music-cut", "audio_cut", "media.audio_cut",
+            parameters={
+                "audio_step": music,
+                "analysis_step": analysis,
+                "duration": intent.target_duration_seconds,
+            },
+            depends_on=[music, analysis],
+        )
     elif family.startswith("product_"):
         image_sources = [
             source_steps[logical_id]

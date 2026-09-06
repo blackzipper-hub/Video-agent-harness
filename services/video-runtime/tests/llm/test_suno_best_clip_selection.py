@@ -242,3 +242,90 @@ async def test_best_clip_only_one_clip_works(monkeypatch):
     assert result.clips_count == 1
     assert result.clips[0].duration == 90
     assert result.message and "偏差30" in result.message
+
+
+@pytest.mark.asyncio
+async def test_suno_keeps_ingested_storage_url_not_vendor(monkeypatch):
+    """Local/open-source must persist /files (or dest CDN), not files.aimusicapi.ai."""
+    async def _ingest(url: str, generation_id: str = ""):
+        return f"http://localhost:8001/files/audios/{generation_id or 'clip'}.mp3"
+
+    monkeypatch.setattr(
+        "app.llm.suno_service.s3_utils.download_and_upload_audio_to_s3",
+        _ingest,
+    )
+    payload = _payload_two_clips(d1_sec=15, d2_sec=16)
+    monkeypatch.setattr(
+        "app.llm.suno_service.aiohttp.ClientSession",
+        _make_session_factory(payload),
+    )
+    svc = SunoService(api_key="dummy")
+    result = await svc.poll_task_until_complete(
+        task_id="keep-stored",
+        original_prompt="instrumental",
+        generation_params={
+            "has_lyrics": False,
+            "auto_lyrics": False,
+            "target_duration": None,
+            "prompt": "instrumental",
+            "custom_mode": True,
+            "make_instrumental": True,
+            "tags": "synth",
+            "vocal_gender": None,
+        },
+    )
+    assert result.success is True
+    assert all(
+        clip.audio_url.startswith("http://localhost:8001/files/audios/")
+        for clip in result.clips
+    )
+    assert all("example.com" not in clip.audio_url for clip in result.clips)
+
+
+@pytest.mark.asyncio
+async def test_null_clip_duration_does_not_crash(monkeypatch):
+    """Suno succeeded + audio_url with duration:null must not TypeError on +=."""
+    payload = {
+        "task_id": "t-null-duration",
+        "state": "succeeded",
+        "data": [
+            {
+                "clip_id": "null-dur-1",
+                "state": "succeeded",
+                "audio_url": "https://example.com/ready.mp3",
+                "duration": None,
+                "lyrics": "",
+                "title": "streaming",
+            },
+            {
+                "clip_id": "null-dur-2",
+                "state": "succeeded",
+                "audio_url": "https://example.com/ready2.mp3",
+                "duration": None,
+                "lyrics": "",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "app.llm.suno_service.aiohttp.ClientSession",
+        _make_session_factory(payload),
+    )
+    svc = SunoService(api_key="dummy")
+    result = await svc.poll_task_until_complete(
+        task_id="t-null-duration",
+        original_prompt="instrumental",
+        generation_params={
+            "has_lyrics": False,
+            "auto_lyrics": False,
+            "target_duration": None,
+            "prompt": "instrumental",
+            "custom_mode": True,
+            "make_instrumental": True,
+            "tags": "synth",
+            "vocal_gender": None,
+        },
+    )
+    assert result.success is True
+    assert result.clips_count == 2
+    assert result.clips[0].duration == 0
+    assert result.clips[1].duration == 0

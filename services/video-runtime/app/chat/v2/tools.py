@@ -106,8 +106,9 @@ def build_coordinator_tools(
         """Load one Skill's full Markdown instructions after it is selected or explicitly named."""
         if skills is None:
             raise LookupError("Skill catalog is not configured")
+        from app.video_runtime.retired import is_retired_public_skill
         skill = skills.load(name)
-        if not skill.metadata.enabled:
+        if not skill.metadata.enabled or is_retired_public_skill(name):
             raise ValueError(f"Skill is disabled: {name}")
         return {
             "name": skill.metadata.name,

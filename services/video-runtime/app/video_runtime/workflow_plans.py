@@ -26,7 +26,7 @@ UNAVAILABLE_WORKFLOW_CAPABILITIES = {
 
 SUPPORTED_WORKFLOW_MODES = {
     "keyframe_pipeline", "direct_video", "short_drama", "seedance2",
-    "mv", "seedance_mv", "short_drama_workflow", "product_ad_video",
+    "mv", "short_drama_workflow", "product_ad_video",
     "cuti_product_workflow", "cuti_scenario_product_workflow",
     "libtv_product_workflow",
 }
@@ -75,20 +75,6 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "requires_keyframe": False,
         "parameters": {"shot_workflow_mode": "seedance2_script"},
-    },
-    "seedance-mv": {
-        "mode": "seedance_mv",
-        "pipeline": (
-            "atomic.music.generate", "media.audio_analyze", "media.audio_trim",
-            "atomic.image.generate", "api.provider.generate",
-            "api.ark_protocol.generate", "media.extract_frame", "media.concat",
-            "media.mix_audio",
-        ),
-        "requires_keyframe": False,
-        "parameters": {
-            "shot_workflow_mode": "seedance2_script",
-            "content_category": "music_video",
-        },
     },
     "short-drama-workflow": {
         "mode": "short_drama_workflow",
@@ -861,7 +847,7 @@ def compile_seedance2(workflow: WorkflowSpec, context: PluginContext, spec: Vide
                 raise BuildPlanValidationError(
                     "seedance2 WaveSpeed continuation cannot combine a strict decoded "
                     "start frame with video/audio references; assign those references to "
-                    "a non-continuation shot or use seedance-mv for music-led continuity"
+                    "a non-continuation shot"
                 )
             previous_tail = b.add(
                 f"shot-{spec.shots[index - 1].id}-tail-for-{shot.id}",
@@ -1978,127 +1964,6 @@ def _validate_scenario_product_plan(
             )
 
 
-def compile_seedance_mv(
-    workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec,
-) -> RebuildPlan:
-    """Original Seedance MV: music spine, per-shot audio, strict tail continuation."""
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
-        "title": spec.title, "content": spec.model_dump(mode="json"),
-    })
-    wp = spec.workflow_parameters or {}
-    uploaded = [
-        b.source_steps[item] for item in spec.source_asset_ids
-        if b.sources[item].type in {"source_audio", "audio", "audio_bgm"}
-    ]
-    if uploaded:
-        music = uploaded[0]
-    elif spec.audio.bgm_prompt:
-        music = b.add(
-            "music", "audio_bgm", "atomic.music.generate",
-            parameters={
-                "prompt": spec.audio.bgm_prompt,
-                "duration": spec.target_duration_seconds,
-                "target_duration": spec.target_duration_seconds,
-                "model": spec.providers.music,
-            }, depends_on=[spec_step], cost=0.10, skills=[],
-        )
-    else:
-        raise BuildPlanValidationError(
-            "seedance-mv requires uploaded audio or audio.bgm_prompt"
-        )
-    analysis = b.add(
-        "music-analysis", "audiomap", "media.audio_analyze",
-        parameters={
-            "audio_step": music, "target_duration_sec": spec.target_duration_seconds,
-            "transcribe": True,
-        }, depends_on=[music],
-    )
-    music_window = b.add(
-        "music-window", "audio_cut", "media.audio.trim",
-        parameters={
-            "audio_step": music,
-            "start": float(wp.get("start_sec", 0)),
-            "duration": spec.target_duration_seconds,
-        }, depends_on=[music, analysis],
-    )
-    character_manifest = b.add(
-        "characters", "characters", "runtime.artifact.persist",
-        parameters={
-            "title": "MV character anchors",
-            "content": [item.model_dump(mode="json") for item in spec.characters],
-        }, depends_on=[spec_step],
-    )
-    identity_images = [
-        b.source_steps[item] for item in spec.source_asset_ids
-        if item in b.sources and b.sources[item].type in {
-            "source_image", "image", "character_reference",
-        }
-    ]
-    if identity_images:
-        refs_by_character = {
-            character.id: identity_images[index % len(identity_images)]
-            for index, character in enumerate(spec.characters)
-        }
-    else:
-        refs_by_character = b.character_references(character_manifest, skills=[])
-    clips: list[str] = []
-    previous_clip = ""
-    cursor = 0.0
-    for index, shot in enumerate(spec.shots):
-        audio = b.add(
-            f"shot-{shot.id}-audio", "audio_segment", "media.audio.trim",
-            parameters={
-                "audio_step": music_window, "start": cursor,
-                "duration": shot.duration_seconds,
-                "fade_in_sec": 0.0, "fade_out_sec": 0.0,
-            }, depends_on=[music_window],
-        )
-        cursor += shot.duration_seconds
-        look = [
-            refs_by_character[item]
-            for item in shot.character_ids if item in refs_by_character
-        ] or list(refs_by_character.values())
-        refs = list(dict.fromkeys([*look, *b.image_refs_for_shot(shot)]))
-        dependencies = [analysis, audio, *refs]
-        parameters: dict[str, Any] = {
-            "prompt": shot.visual_prompt, "duration": shot.duration_seconds,
-            "provider": "wavespeed", "model": "doubao-seedance-2-0",
-            "resolution": spec.resolution, "aspect_ratio": spec.aspect_ratio,
-            "generate_audio": True,
-            "generation_mode": "reference_to_video" if refs else "t2v",
-            "reference_from_steps": refs,
-            "audio_reference_from_step": audio,
-        }
-        if previous_clip:
-            previous_tail = b.add(
-                f"shot-{spec.shots[index - 1].id}-tail-for-{shot.id}",
-                "continuity_frame", "media.extract_frame",
-                parameters={
-                    "position": "last", "format": "png",
-                    "source_video_step": previous_clip,
-                }, depends_on=[previous_clip],
-            )
-            dependencies.append(previous_tail)
-            parameters.update({
-                "generation_mode": "i2v", "start_image_from_step": previous_tail,
-                "strict_start_frame": True,
-            })
-        clip = b.add(
-            f"shot-{shot.id}-video", "video_clip", "api.provider.generate",
-            parameters=parameters, depends_on=dependencies, cost=0.65, skills=[],
-        )
-        clips.append(clip)
-        previous_clip = clip
-    plan = b.finish(
-        clips, transition=0.125, require_audio=True, audio_step=music_window,
-        captions=False,
-    )
-    _validate_seedance_mv_plan(plan)
-    return plan
-
-
 def compile_mv_compat(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
     """Dest $mv boxes. Spec fields on the step; no second director."""
     b = WorkflowPlanBuilder(workflow, context, spec)
@@ -2286,39 +2151,6 @@ def _validate_mv_compat_plan(plan: RebuildPlan) -> None:
         raise BuildPlanValidationError("mv must restore the original music with replace mode")
 
 
-def _validate_seedance_mv_plan(plan: RebuildPlan) -> None:
-    by_id = _by_id(plan)
-    if "music-analysis" not in by_id or by_id["music-analysis"].capability != "media.audio_analyze":
-        raise BuildPlanValidationError("seedance-mv requires music analysis")
-    if "music-window" not in by_id or by_id["music-window"].capability != "media.audio.trim":
-        raise BuildPlanValidationError("seedance-mv requires a trimmed master music window")
-    clips = _video_clips(plan)
-    for index, clip in enumerate(clips):
-        audio_id = clip.parameters.get("audio_reference_from_step")
-        if not audio_id or by_id.get(audio_id) is None or by_id[audio_id].capability != "media.audio.trim":
-            raise BuildPlanValidationError("each seedance-mv segment requires its own ≤15s audio reference")
-        if clip.capability != "api.provider.generate":
-            raise BuildPlanValidationError("seedance-mv segments must call the provider bridge")
-        if clip.parameters.get("provider") != "wavespeed" or clip.parameters.get("model") != "doubao-seedance-2-0":
-            raise BuildPlanValidationError("seedance-mv must use WaveSpeed doubao-seedance-2-0")
-        if index > 0:
-            start = clip.parameters.get("start_image_from_step")
-            if not start or by_id.get(start) is None or by_id[start].capability != "media.extract_frame":
-                raise BuildPlanValidationError("seedance-mv continuation must use the real prior tail frame")
-        if clip.skill_ids:
-            raise BuildPlanValidationError("seedance-mv is self-contained and must not load seedance2")
-        duration = float(clip.parameters.get("duration") or 0)
-        if duration < 4 or duration > 15 or not duration.is_integer():
-            raise BuildPlanValidationError(
-                "seedance-mv segment durations must be integer seconds from 4 through 15"
-            )
-        if not _contains_cjk(str(clip.parameters.get("prompt") or "")):
-            raise BuildPlanValidationError("seedance-mv provider prompts must be written in Chinese")
-    final = by_id.get("final-video")
-    if final is None or final.capability != "media.mix_audio" or final.parameters.get("mode") != "replace":
-        raise BuildPlanValidationError("seedance-mv must restore the original music with replace mode")
-
-
 def compile_skill_workflow(
     workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec,
 ) -> RebuildPlan:
@@ -2350,7 +2182,6 @@ WORKFLOW_ID_COMPILERS = {
     "workflow-direct-video": ("direct_video", compile_direct),
     "seedance2": ("seedance2", compile_seedance2),
     "mv": ("mv", compile_mv_compat),
-    "seedance-mv": ("seedance_mv", compile_seedance_mv),
     "workflow-short-drama": ("short_drama", compile_system_short_drama),
     "short-drama-workflow": ("short_drama_workflow", compile_short_drama_workflow),
     "product-ad-video": ("product_ad_video", compile_product_ad),

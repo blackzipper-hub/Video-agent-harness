@@ -23,13 +23,103 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         "atomic.video.generate",
         "suno.generate",
         "api.provider.generate",
+        "research.generate",
     )
 
     def __init__(self, executor: AtomicExecutor | None = None) -> None:
         self._executor = executor
 
     def capability_handlers(self):
-        return {capability: self._generate for capability in self.CAPABILITIES}
+        handlers = {
+            capability: self._generate
+            for capability in self.CAPABILITIES
+            if capability != "research.generate"
+        }
+        handlers["research.generate"] = self._research
+        return handlers
+
+    async def _research(
+        self,
+        envelope: CapabilityExecutionEnvelope,
+        payload: dict[str, Any],
+    ) -> MediaArtifactVersion:
+        from app.services.agent.video.generate_research_by_request_service import (
+            generate_research_by_request,
+        )
+
+        planned = payload.get("step")
+        if planned is not None:
+            step = dict(planned)
+            parameters = dict(step.get("parameters") or {})
+            source = MediaArtifactVersion(
+                artifact_id=str(step.get("output_artifact_id") or ""),
+                project_id=envelope.grant.project_id,
+                type=str(step.get("output_artifact_type") or "research"),
+                title=str(parameters.get("title") or step.get("step_id") or "Research"),
+                summary=str(
+                    parameters.get("brief")
+                    or parameters.get("user_input")
+                    or step.get("objective")
+                    or ""
+                ),
+                metadata={
+                    "generation_parameters": parameters,
+                    "rebuild_capability": envelope.grant.capability,
+                    "plan_step_id": step.get("step_id"),
+                },
+            )
+        else:
+            source = MediaArtifactVersion.model_validate(payload["source"])
+            parameters = dict(source.metadata.get("generation_parameters") or {})
+            parameters.update(source.metadata.get("rebuild_parameters") or {})
+        brief = str(
+            parameters.get("user_input")
+            or parameters.get("brief")
+            or source.summary
+            or ""
+        ).strip()
+        generated = await generate_research_by_request(
+            thread_id=str(
+                parameters.get("thread_id")
+                or parameters.get("project_thread_id")
+                or envelope.grant.session_id
+            ),
+            run_id=str(parameters.get("run_id") or envelope.grant.idempotency_key),
+            user_input=brief,
+            content_category=str(parameters.get("content_category") or "") or None,
+            detected_language=str(
+                parameters.get("detected_language")
+                or parameters.get("language")
+                or ""
+            ) or None,
+        )
+        metadata = {
+            **dict(source.metadata),
+            **generated,
+            "rebuild_capability": envelope.grant.capability,
+        }
+        digest_payload = json.dumps(generated, sort_keys=True, default=str).encode()
+        return MediaArtifactVersion(
+            artifact_id=source.artifact_id,
+            project_id=source.project_id,
+            type=source.type if source.type else "research",
+            version=source.version + (0 if planned is not None else 1),
+            uri=generated.get("uri"),
+            title=str(generated.get("title") or source.title),
+            summary=str(generated.get("summary") or source.summary),
+            content_digest=hashlib.sha256(digest_payload).hexdigest(),
+            generation_spec_digest=hashlib.sha256(
+                json.dumps(parameters, sort_keys=True, default=str).encode(),
+            ).hexdigest(),
+            provider_id="research",
+            provider_version="video-research",
+            plugin_id="cuti.atomic-providers",
+            plugin_version="1.0.0",
+            provenance={
+                "idempotency_key": envelope.grant.idempotency_key,
+            },
+            metadata=metadata,
+        )
 
     async def _generate(
         self,

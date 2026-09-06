@@ -26,6 +26,16 @@ def virtual_skills_creative() -> str:
     return "/kit/skills/creative"
 
 
+def virtual_skills_builtin(domain: str) -> str:
+    """Virtual path for a platform builtin Skill domain.
+
+    Lets a stage agent mount the same package the v2 coordinator loads, so a
+    methodology shared by both does not get forked into a kit copy. The backend
+    root is AGENT_SERVICE_ROOT, so ``skills/`` is visible alongside ``kit/``.
+    """
+    return f"/skills/builtin/{domain}"
+
+
 def is_short_drama_category(content_category: Optional[str]) -> bool:
     """True when content_category is Short Drama (delivery/routing only)."""
     return (content_category or "").strip().lower() == "short drama"

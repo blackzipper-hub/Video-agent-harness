@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArtifactDocument } from './ArtifactDocument'
 import {
-  AlertTriangle, Check, CheckCircle2, Circle, FileText, Film, Image, Loader2, Music, RefreshCw, Scissors,
+  AlertTriangle, BookOpen, Check, CheckCircle2, Circle, FileText, Film, Image, Loader2, Music, RefreshCw, Scissors,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLanguage } from '@/i18n/LanguageContext'
@@ -176,9 +176,146 @@ const artifactMediaUri = (artifact: DeepAgentArtifact): string | undefined => {
   return undefined
 }
 
-const isStoryArtifact = (artifact: DeepAgentArtifact) =>
-  ['story', 'story_outline', 'outline', 'script'].includes(artifact.type)
-  || /story|script|outline|剧本|脚本|梗概/i.test(artifact.title || '')
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+)
+
+const stringField = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+const isResearchArtifact = (artifact: DeepAgentArtifact) => {
+  if (artifact.type === 'research') return true
+  const meta = asRecord(artifact.metadata)
+  return Boolean(typeof meta.research_summary === 'string' && Array.isArray(meta.directions))
+}
+
+const researchLinks = (items: unknown, keys: { title?: string; url?: string; note?: string }) => {
+  if (!Array.isArray(items)) return []
+  return items.flatMap((item, index) => {
+    const row = asRecord(item)
+    const url = keys.url ? stringField(row[keys.url]) : ''
+    const title = (keys.title ? stringField(row[keys.title]) : '') || url || `Item ${index + 1}`
+    const note = keys.note ? stringField(row[keys.note]) : ''
+    if (!url && !title) return []
+    return [{ key: `${index}-${title}`, title, url, note }]
+  })
+}
+
+function ResearchDetails({ artifact }: { artifact: DeepAgentArtifact }) {
+  const { t } = useLanguage()
+  const meta = asRecord(artifact.metadata)
+  const summary = stringField(meta.research_summary, artifact.summary)
+  const landscape = asRecord(meta.landscape)
+  const gaps = Array.isArray(landscape.underserved_gaps)
+    ? landscape.underserved_gaps.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+  const existing = researchLinks(landscape.existing_content, { title: 'title', url: 'url', note: 'what_it_misses' })
+  const directions = Array.isArray(meta.directions) ? meta.directions : []
+  const sources = researchLinks(meta.sources, { title: 'title', url: 'url', note: 'used_for' })
+  if (!summary && directions.length === 0 && sources.length === 0) return null
+  return (
+    <div className="space-y-4">
+      {summary ? (
+        <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
+          <ReactMarkdown>{summary}</ReactMarkdown>
+        </div>
+      ) : null}
+      {gaps.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t('da.workspace.researchGaps')}</p>
+          <ul className="list-disc space-y-1 pl-4 text-sm">
+            {gaps.map(gap => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {directions.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">{t('da.workspace.researchDirections')}</p>
+          {directions.map((item, index) => {
+            const row = asRecord(item)
+            const name = stringField(row.name) || interpolate(t('da.workspace.researchDirectionN'), { n: index + 1 })
+            const type = stringField(row.type)
+            const hook = stringField(row.hook)
+            const motion = stringField(row.motion_commitment)
+            const audio = stringField(row.mood_direction)
+            const refs = researchLinks(row.visual_references, { title: 'description', url: 'url', note: 'what_works' })
+            return (
+              <div key={`${artifact.id}-dir-${index}`} className="space-y-1 rounded-md border border-border/50 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{name}</p>
+                  {type ? <Badge variant="outline" className="font-normal">{type}</Badge> : null}
+                </div>
+                {hook ? <p className="text-sm leading-snug">{hook}</p> : null}
+                {motion ? <p className="text-xs text-muted-foreground">{motion}</p> : null}
+                {audio ? <p className="text-xs text-muted-foreground">{audio}</p> : null}
+                {refs.length > 0 && (
+                  <div className="space-y-0.5">
+                    {refs.map(ref => (
+                      <p key={ref.key} className="text-xs">
+                        {ref.url ? (
+                          <a href={ref.url} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+                            {ref.title}
+                          </a>
+                        ) : ref.title}
+                        {ref.note ? <span className="text-muted-foreground"> — {ref.note}</span> : null}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {existing.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t('da.workspace.researchExistingWork')}</p>
+          {existing.map(work => (
+            <p key={work.key} className="text-sm">
+              {work.url ? (
+                <a href={work.url} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+                  {work.title}
+                </a>
+              ) : work.title}
+              {work.note ? <span className="text-muted-foreground"> — {work.note}</span> : null}
+            </p>
+          ))}
+        </div>
+      )}
+      {sources.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t('da.workspace.researchSources')}</p>
+          <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border/50 p-2">
+            {sources.map(source => (
+              <p key={source.key} className="text-xs">
+                {source.url ? (
+                  <a href={source.url} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+                    {source.title}
+                  </a>
+                ) : source.title}
+                {source.note ? <span className="text-muted-foreground"> — {source.note}</span> : null}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const isStoryArtifact = (artifact: DeepAgentArtifact) => {
+  if (isResearchArtifact(artifact)) return false
+  return ['story', 'story_outline', 'outline', 'script'].includes(artifact.type)
+    || /story|script|outline|剧本|脚本|梗概/i.test(artifact.title || '')
+}
 
 const isImageArtifact = (artifact: DeepAgentArtifact) => {
   if (artifact.type.includes('video')) return false
@@ -271,6 +408,160 @@ const isAudioArtifact = (artifact: DeepAgentArtifact): boolean => [
   'tts',
   'voiceover',
 ].includes(normalizeArtifactType(artifact.type))
+
+const isAudioAnalysisArtifact = (artifact: DeepAgentArtifact): boolean => [
+  'audio_analysis',
+  'audiomap',
+  'audio_map',
+].includes(normalizeArtifactType(artifact.type))
+
+const boolField = (...values: unknown[]): boolean | undefined => {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value
+    if (value === 'true' || value === 'false') return value === 'true'
+  }
+  return undefined
+}
+
+const vocalGenderLabel = (value: string, t: Translate): string => {
+  if (value === 'f') return t('da.workspace.vocalFemale')
+  if (value === 'm') return t('da.workspace.vocalMale')
+  return value
+}
+
+function MetaField({ label, value }: { label: string; value?: string }) {
+  if (!value) return null
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-semibold text-foreground">{label}</p>
+      <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">{value}</p>
+    </div>
+  )
+}
+
+function MusicArtifactDetails({ artifact }: { artifact: DeepAgentArtifact }) {
+  const { t } = useLanguage()
+  const meta = artifact.metadata || {}
+  const params = asRecord(meta.generation_parameters)
+  const resolved = asRecord(meta.resolved_generation_parameters)
+  const lyrics = stringField(meta.lyrics, meta.generated_lyrics, params.lyrics, resolved.lyrics)
+  const style = stringField(meta.tags, params.tags, resolved.tags, meta.style)
+  const prompt = stringField(params.prompt, resolved.prompt, meta.prompt)
+  const title = stringField(meta.clip_title, params.title, resolved.title)
+  const vocal = stringField(meta.vocal_gender, params.vocal_gender, resolved.vocal_gender)
+  const instrumental = boolField(
+    meta.make_instrumental,
+    meta.instrumental,
+    params.make_instrumental,
+    params.instrumental,
+    resolved.make_instrumental,
+    resolved.instrumental,
+  )
+  const lyricsOrPrompt = lyrics || (instrumental ? '' : prompt)
+  const structurePrompt = instrumental ? prompt : (lyrics ? prompt : '')
+  if (!artifact.summary && !lyricsOrPrompt && !style && !title && vocal === '' && instrumental === undefined) {
+    return null
+  }
+  return (
+    <div className="space-y-3">
+      {artifact.summary ? (
+        <p className="text-xs text-muted-foreground">{artifact.summary}</p>
+      ) : null}
+      {instrumental === true ? (
+        <Badge variant="outline" className="text-[10px]">{t('da.workspace.instrumental')}</Badge>
+      ) : null}
+      <MetaField label={t('da.workspace.songTitle')} value={title} />
+      <MetaField label={t('da.workspace.musicStyle')} value={style} />
+      <MetaField
+        label={t('da.workspace.vocalGender')}
+        value={vocal ? vocalGenderLabel(vocal, t) : ''}
+      />
+      <MetaField label={t('da.workspace.lyrics')} value={lyricsOrPrompt} />
+      {structurePrompt && structurePrompt !== lyricsOrPrompt ? (
+        <MetaField label={t('da.workspace.musicPrompt')} value={structurePrompt} />
+      ) : null}
+    </div>
+  )
+}
+
+function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
+  const { t } = useLanguage()
+  const meta = artifact.metadata || {}
+  const sections = Array.isArray(meta.sections) ? meta.sections : []
+  const segments = Array.isArray(meta.segments) ? meta.segments : []
+  const instrumental = boolField(meta.is_instrumental)
+  const duration = typeof meta.audio_duration_sec === 'number'
+    ? `${meta.audio_duration_sec}s`
+    : stringField(meta.audio_duration_sec, meta.duration)
+  return (
+    <div className="space-y-3">
+      {artifact.summary ? (
+        <p className="text-xs text-muted-foreground">{artifact.summary}</p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <MetaField label={t('da.workspace.songName')} value={stringField(meta.song_name)} />
+        <MetaField label={t('da.workspace.genre')} value={stringField(meta.genre)} />
+        <MetaField label={t('da.workspace.globalBpm')} value={meta.global_bpm == null ? '' : String(meta.global_bpm)} />
+        <MetaField label={t('da.workspace.globalEmotion')} value={stringField(meta.global_emotion)} />
+        <MetaField label={t('da.workspace.suggestedTheme')} value={stringField(meta.suggested_global_theme)} />
+        <MetaField label={t('da.workspace.suggestedPalette')} value={stringField(meta.suggested_color_palette)} />
+        <MetaField label={t('da.workspace.audioDuration')} value={duration} />
+        <MetaField
+          label={t('da.workspace.isInstrumental')}
+          value={instrumental == null ? '' : instrumental ? t('da.workspace.yes') : t('da.workspace.no')}
+        />
+        <MetaField label={t('da.workspace.language')} value={stringField(meta.language)} />
+      </div>
+      <MetaField label={t('da.workspace.transcriptionText')} value={stringField(meta.text)} />
+      {sections.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-foreground">{t('da.workspace.sections')}</p>
+          {sections.map((item, index) => {
+            const row = asRecord(item)
+            const start = row.start_sec ?? row.start
+            const end = row.end_sec ?? row.end
+            return (
+              <div key={`section-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
+                <p className="text-xs font-medium">
+                  {stringField(row.section_type, `${t('da.workspace.section')} ${index + 1}`)}
+                  {start != null && end != null ? ` · ${start}–${end}s` : ''}
+                </p>
+                <p className="text-xs text-muted-foreground">{stringField(row.emotion, row.musical_features)}</p>
+                <p className="text-xs text-muted-foreground">{stringField(row.suggested_visual_theme)}</p>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+      {segments.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-foreground">{t('da.workspace.segments')}</p>
+          <div className="max-h-64 space-y-2 overflow-y-auto">
+            {segments.map((item, index) => {
+              const row = asRecord(item)
+              const start = row.start_sec ?? row.start
+              const end = row.end_sec ?? row.end
+              const gender = stringField(row.vocal_gender)
+              const presence = boolField(row.vocal_presence)
+              return (
+                <div key={`segment-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
+                  <p className="whitespace-pre-wrap text-xs">{stringField(row.text) || '—'}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {start != null && end != null ? `${start}–${end}s` : ''}
+                    {row.emotion ? ` · ${row.emotion}` : ''}
+                    {row.tempo ? ` · ${row.tempo}` : ''}
+                    {presence == null ? '' : ` · ${presence ? t('da.workspace.vocalsYes') : t('da.workspace.vocalsNo')}`}
+                    {gender ? ` · ${vocalGenderLabel(gender, t)}` : ''}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 const firstMarkdownHeading = (body: string): string | undefined => {
   const match = body.match(/^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/m)
@@ -563,37 +854,52 @@ export function DeepAgentArtifacts({
     ? artifactMediaUri(latestMediaArtifact)
     : undefined
   const storyArtifacts = visibleArtifacts.filter(isStoryArtifact)
+  const researchArtifacts = visibleArtifacts.filter(isResearchArtifact)
   const textArtifacts = visibleArtifacts.filter(artifact =>
-    !isStoryArtifact(artifact) && isReadableTextArtifact(artifact),
+    !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
+    && isReadableTextArtifact(artifact),
   )
   const imageArtifacts = visibleArtifacts.filter(artifact =>
     artifact.id !== latestMediaArtifact?.id
     && !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
     && isImageArtifact(artifact),
   )
   const videoArtifacts = visibleArtifacts.filter(artifact =>
     artifact.id !== latestMediaArtifact?.id
     && !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
     && isVideoArtifact(artifact),
   )
   const audioArtifacts = visibleArtifacts.filter(artifact =>
     !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
     && isAudioArtifact(artifact),
+  )
+  const analysisArtifacts = visibleArtifacts.filter(artifact =>
+    !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
+    && isAudioAnalysisArtifact(artifact),
   )
   const otherArtifacts = visibleArtifacts.filter(artifact =>
     !isStoryArtifact(artifact)
+    && !isResearchArtifact(artifact)
     && !isReadableTextArtifact(artifact)
     && !isImageArtifact(artifact)
     && !isVideoArtifact(artifact)
-    && !isAudioArtifact(artifact),
+    && !isAudioArtifact(artifact)
+    && !isAudioAnalysisArtifact(artifact),
   )
   // Runtime task objectives are execution labels; only legacy runs use them as document fallbacks.
   const segmentScripts = (runtimeWorkspace ? [] : [...snapshot.tasks])
     .filter(task =>
-      /generate|seedance|video_gen|provider|ark_protocol|image\.|shot\.|keyframe\.|outline|scene|character/i
+      task.capability_id !== 'research.generate'
+      && /generate|seedance|video_gen|provider|ark_protocol|image\.|shot\.|keyframe\.|outline|scene|character/i
         .test(task.capability_id)
       && task.objective.trim().length > 20
-      && !storyArtifacts.some(artifact => artifact.produced_by_task_id === task.id),
+      && !storyArtifacts.some(artifact => artifact.produced_by_task_id === task.id)
+      && !researchArtifacts.some(artifact => artifact.produced_by_task_id === task.id),
     )
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
   const visibleTasks = runtimeWorkspace
@@ -933,6 +1239,45 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
+          {researchArtifacts.length > 0 && (
+            <section className="space-y-3" data-testid="research-artifacts">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <BookOpen className="h-4 w-4" />
+                {t('da.workspace.research')}
+              </h3>
+              {researchArtifacts.map((artifact) => {
+                const selected = selectedIds.has(artifact.id)
+                return (
+                  <Card key={artifact.id} className="overflow-hidden border-border/60 bg-card/60">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                          <BookOpen className="h-4 w-4" />
+                          <span className="truncate">{artifact.title || t('da.workspace.researchTitle')}</span>
+                          <Badge variant="outline">research</Badge>
+                          <Badge variant="secondary">v{artifact.version}</Badge>
+                        </CardTitle>
+                        <Button
+                          size="sm"
+                          variant={selected ? 'secondary' : 'outline'}
+                          disabled={selected || selectingArtifactId === artifact.id}
+                          onClick={() => void handleSelectArtifact(artifact)}
+                        >
+                          {selectingArtifactId === artifact.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                          {selected && <Check className="mr-1 h-3.5 w-3.5" />}
+                          {selected ? t('da.workspace.selected') : t('da.workspace.useVersion')}
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <ResearchDetails artifact={artifact} />
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </section>
+          )}
+
           {(storyArtifacts.length > 0 || segmentScripts.length > 0) && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -1203,11 +1548,50 @@ export function DeepAgentArtifacts({
                       ) : (
                         <p className="text-xs text-muted-foreground">{t('da.workspace.audioMissing')}</p>
                       )}
-                      {storyBody(artifact) && (
-                        <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-                          <ArtifactDocument>{storyBody(artifact)}</ArtifactDocument>
-                        </div>
-                      )}
+                      <MusicArtifactDetails artifact={artifact} />
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </section>
+          )}
+
+          {analysisArtifacts.length > 0 && (
+            <section className="space-y-3">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Scissors className="h-4 w-4" />
+                {t('da.workspace.audioAnalysis')}
+              </h3>
+              {analysisArtifacts.map((artifact) => {
+                const selected = selectedIds.has(artifact.id)
+                const mediaUri = artifactMediaUri(artifact)
+                const title = artifactTitle(artifact.title, artifact.type, t)
+                return (
+                  <Card key={artifact.id} className="overflow-hidden border-border/60 bg-card/60">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                          <Scissors className="h-4 w-4" />
+                          <span className="truncate">{title}</span>
+                          <Badge variant="secondary">v{artifact.version}</Badge>
+                        </CardTitle>
+                        <Button
+                          size="sm"
+                          variant={selected ? 'secondary' : 'outline'}
+                          disabled={selected || selectingArtifactId === artifact.id}
+                          onClick={() => void handleSelectArtifact(artifact)}
+                        >
+                          {selectingArtifactId === artifact.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                          {selected && <Check className="mr-1 h-3.5 w-3.5" />}
+                          {selected ? t('da.workspace.selected') : t('da.workspace.useVersion')}
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {mediaUri ? (
+                        <audio src={mediaUri} controls className="w-full" />
+                      ) : null}
+                      <AudioAnalysisDetails artifact={artifact} />
                     </CardContent>
                   </Card>
                 )

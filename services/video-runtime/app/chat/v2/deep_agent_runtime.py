@@ -122,9 +122,10 @@ class DeepAgentRuntime:
     @staticmethod
     def _load_skill_files(roots: list[Path], create_file_data) -> dict:
         files = {}
+        from app.video_runtime.retired import is_retired_public_skill
         catalog = SkillCatalog(roots)
         for metadata in catalog.discover():
-            if not metadata.enabled:
+            if not metadata.enabled or is_retired_public_skill(metadata.name):
                 continue
             path = metadata.path
             text = path.read_text(encoding="utf-8")
@@ -139,8 +140,8 @@ define which pipeline to run. Non-workflow skills are helpers/bridges.
 
 Workflow selection (mandatory before stage work):
 1. Call list_skills. Prefer skills whose metadata.kind is "workflow":
-   workflow-keyframe-pipeline, workflow-short-drama, workflow-direct-video,
-   open-montage, seedance2, mv, seedance-mv.
+   seedance2, mv, short-drama-workflow, product-ad-video,
+   cuti-product-workflow, cuti-scenario-product-workflow, libtv-product-workflow.
    For MV / song / beat-sync / 角色唱这首歌, prefer mv over seedance2.
 2. If the user wrote `$name` / `/name` for a workflow, that workflow is confirmed —
    load it and follow its pipeline.
@@ -186,12 +187,12 @@ If load_skill reports has_executable_contract=true, prefer propose_plan_patch wi
 THAT Skill's own capability id. Instruction-only Skills coordinate enabled capabilities;
 they do not themselves create an artifact.
 Platform atomics: atomic.text/image/music/video.generate. Prefer them under
-workflow-direct-video or seedance2 as those workflows specify.
+seedance2 or the selected workflow as that workflow specifies.
 video.pipeline.generate remains paused. Prefer discrete stage capabilities under the
 active workflow. Host bridges include api.provider.generate, api.ark_protocol.generate,
 media.concat, media.extract_frame, media.audio_trim, media.audio_analyze,
 media.audio_cut, media.mix_audio, media.transcribe, subtitle.compose, media.subtitle_burn,
-media.hyperframes_caption, open_montage.tool.invoke.
+media.hyperframes_caption.
 When seedance2 runs scripts/seedance.py without a real ARK_API_KEY, the platform
 redirects Ark HTTP to the protocol bridge — do not edit seedance2.
 Provider error rule: category=provider_pending_timeout or retryable=true means the

@@ -54,6 +54,96 @@ def test_storage_local_upload_download_roundtrip(tmp_path, monkeypatch):
     asyncio.run(_run())
 
 
+def test_storage_local_download_fetches_foreign_http_url(tmp_path, monkeypatch):
+    """Gemini/analyze must HTTP-get Suno URLs; local open-source has no S3."""
+    monkeypatch.setattr(settings, "STORAGE_BACKEND", "local", raising=False)
+    monkeypatch.setattr(settings, "LOCAL_STORAGE_DIR", str(tmp_path), raising=False)
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "http://localhost:8000", raising=False)
+    from app.utils.s3_utils import S3Utils
+
+    payload = b"x" * 200
+    calls: list[str] = []
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        async def read(self):
+            return payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Session:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def get(self, url):
+            calls.append(url)
+            return _Response()
+
+    monkeypatch.setattr("app.utils.s3_utils.aiohttp.ClientSession", _Session)
+    s3 = S3Utils()
+    dst = os.path.join(str(tmp_path), "suno.mp3")
+    vendor = "https://files.aimusicapi.ai/stems/clip.mp3"
+    assert asyncio.run(s3.download_file(vendor, dst)) is True
+    assert calls == [vendor]
+    assert open(dst, "rb").read() == payload
+
+
+def test_storage_s3_download_uses_http_for_foreign_url(tmp_path, monkeypatch):
+    """dest/prod keep S3 for CDN; vendor hosts still HTTP-get without changing STORAGE_BACKEND."""
+    monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3", raising=False)
+    monkeypatch.setattr(settings, "CDN_DOMAIN", "https://cdn-dev.newai.land", raising=False)
+    from app.utils.s3_utils import S3Utils
+
+    payload = b"y" * 200
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        async def read(self):
+            return payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Session:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def get(self, url):
+            return _Response()
+
+    monkeypatch.setattr("app.utils.s3_utils.aiohttp.ClientSession", _Session)
+    s3 = S3Utils()
+    s3.s3_client = None
+    dst = os.path.join(str(tmp_path), "vendor.mp3")
+    assert asyncio.run(s3.download_file("https://files.aimusicapi.ai/stems/clip.mp3", dst)) is True
+    assert open(dst, "rb").read() == payload
+    # First-party CDN must not take the HTTP fallback (would skip S3).
+    assert asyncio.run(s3.download_file("https://cdn-dev.newai.land/audios/a.mp3", dst)) is False
+
+
 def test_storage_defaults_to_s3(monkeypatch):
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3", raising=False)
     from app.utils.s3_utils import S3Utils

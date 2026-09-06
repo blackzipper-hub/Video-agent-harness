@@ -17,6 +17,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, StructuredTool
 
@@ -167,6 +168,176 @@ def make_gemini_grounding_search_tool(
     )
 
 
+_TRACKING_PARAMS = ("utm_source", "utm_medium", "utm_campaign", "utm_term")
+
+
+def canonical_url(url: str) -> str:
+    """Strip the tracking params providers bolt onto cited links.
+
+    OpenAI appends ``?utm_source=openai`` to every citation. Left in place the
+    same page is two different strings depending on who found it, which breaks
+    any set membership test built on the citation record.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    text = str(url or "").strip()
+    if not text.startswith(("http://", "https://")):
+        return text
+    parts = urlsplit(text)
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_PARAMS
+    ]
+    return urlunsplit(parts._replace(query=urlencode(kept)))
+
+
+def search_queries(message: Any) -> List[str]:
+    """Queries the provider actually ran on one model turn.
+
+    OpenAI puts them on ``web_search_call`` content blocks; Gemini puts them
+    on ``response_metadata.grounding_metadata.web_search_queries``. Either
+    list is the search budget — text the model *says* it searched does not
+    count.
+    """
+    found: List[str] = []
+
+    def add(value: object) -> None:
+        text = str(value or "").strip()
+        if text and text not in found:
+            found.append(text)
+
+    metadata = getattr(message, "response_metadata", None) or {}
+    grounding = metadata.get("grounding_metadata") or {}
+    if isinstance(grounding, dict):
+        for query in grounding.get("web_search_queries") or []:
+            add(query)
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "web_search_call":
+                continue
+            action = block.get("action") or {}
+            add(action.get("query") if isinstance(action, dict) else action)
+    return found
+
+
+def _source_url(item: Any) -> str:
+    if isinstance(item, str):
+        return canonical_url(item)
+    if isinstance(item, dict):
+        return canonical_url(item.get("url") or item.get("uri") or "")
+    return ""
+
+
+def search_sources(message: Any) -> Dict[str, str]:
+    """URLs OpenAI put on ``web_search_call.action.sources``.
+
+    This is the full result list for the turn. It is only present when the
+    request asked for ``include=["web_search_call.action.sources"]``. Unlike
+    ``url_citation`` annotations, it survives a same-turn function call.
+    """
+    found: Dict[str, str] = {}
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return found
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        raw: Any = []
+        action = block.get("action")
+        if isinstance(action, dict):
+            raw = action.get("sources") or []
+        if not raw and block.get("type") in ("web_search_result", "server_tool_result"):
+            output = block.get("output")
+            if isinstance(output, dict):
+                raw = output.get("sources") or []
+        for item in raw or []:
+            url = _source_url(item)
+            if url:
+                title = item.get("title") if isinstance(item, dict) else ""
+                found.setdefault(url, str(title or ""))
+    return found
+
+
+def url_citations(message: Any) -> Dict[str, str]:
+    """Map canonical URL to title for every citation annotation on one message.
+
+    A subset of ``search_sources``: only pages the model cited in prose.
+    OpenAI reports the real destination here; Gemini grounding chunks only
+    ever expose an expiring redirect.
+    """
+    found: Dict[str, str] = {}
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return found
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        for annotation in block.get("annotations") or []:
+            if not isinstance(annotation, dict):
+                continue
+            if annotation.get("type") not in ("url_citation", "citation"):
+                continue
+            url = canonical_url(annotation.get("url") or "")
+            if url:
+                found.setdefault(url, str(annotation.get("title") or ""))
+    return found
+
+
+class CitationRegistry(BaseCallbackHandler):
+    """Every URL provider search returned during one stage run.
+
+    Attached as a callback rather than read off the final message list because
+    the write tool has to consult it *during* the run: rejecting a fabricated
+    citation is only useful if the agent still has a turn left to fix it.
+    """
+
+    def __init__(self) -> None:
+        self.urls: Dict[str, str] = {}
+        self.queries: List[str] = []
+
+    def on_llm_end(self, response: Any, **_: Any) -> None:  # noqa: ANN401
+        for batch in getattr(response, "generations", None) or []:
+            for generation in batch or []:
+                message = getattr(generation, "message", None)
+                if message is None:
+                    continue
+                self.urls.update(search_sources(message))
+                self.urls.update(url_citations(message))
+                for query in search_queries(message):
+                    if query not in self.queries:
+                        self.queries.append(query)
+
+    def allows(self, url: str) -> bool:
+        """True when search actually returned this page, or nothing searched.
+
+        An empty registry means the provider reported no citations at all —
+        Gemini's grounding path never populates one — so the gate stays open
+        rather than rejecting every source on a provider it cannot audit.
+        """
+        return not self.urls or canonical_url(url) in self.urls
+
+
+_OPENAI_SEARCH_SOURCES = "web_search_call.action.sources"
+
+
+def _with_search_sources(model: BaseChatModel) -> BaseChatModel:
+    """Ask Responses API for the full search-result URL list.
+
+    Default OpenAI output only stamps ``url_citation`` on prose. A same-turn
+    ``write_research`` call produces no prose, so the list never arrives unless
+    this include is set.
+    """
+    current = list(getattr(model, "include", None) or [])
+    if _OPENAI_SEARCH_SOURCES in current:
+        return model
+    try:
+        return model.model_copy(update={"include": [*current, _OPENAI_SEARCH_SOURCES]})
+    except Exception:
+        return model
+
+
 def resolve_provider_web_search(
     model: BaseChatModel,
 ) -> Tuple[BaseChatModel, List[ProviderSearchTool], str]:
@@ -176,7 +347,11 @@ def resolve_provider_web_search(
         (possibly_wrapped_model, search_tools, strategy_name)
     """
     if is_openai_model(model):
-        return model, [{"type": "web_search"}], "openai_web_search"
+        return (
+            _with_search_sources(model),
+            [{"type": "web_search"}],
+            "openai_web_search",
+        )
 
     if is_gemini3_model(model):
         wrapped = enable_gemini_server_side_tool_invocations(model)

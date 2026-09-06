@@ -22,6 +22,19 @@ from .models import AgentRun, ArtifactVersion, Task
 logger = logging.getLogger(__name__)
 
 
+def _detected_language_for_task(
+    run: AgentRun, task: Task, parameters: dict[str, Any],
+) -> str | None:
+    explicit = (
+        str(parameters.get("detected_language") or "").strip()
+        or str(parameters.get("language") or "").strip()
+        or str(task.parameters.get("language") or "").strip()
+    )
+    if explicit:
+        return explicit
+    return run.output_language
+
+
 def _merge_selected_image_uris(
     explicit_images: Any,
     selected: list[ArtifactVersion],
@@ -865,6 +878,23 @@ class CapabilityExecutor:
                 ),
                 "source_transcript_artifact_id": transcript.id,
             }
+        elif service_target == "generate_research_by_request":
+            from app.services.agent.video.generate_research_by_request_service import (
+                generate_research_by_request,
+            )
+            result = await generate_research_by_request(
+                thread_id=project_thread_id,
+                run_id=remote_run_id,
+                user_input=task.apply_skill_context(str(
+                    parameters.get("user_input")
+                    or parameters.get("brief")
+                    or task.objective
+                    or run.objective
+                    or ""
+                )),
+                content_category=str(parameters.get("content_category") or "") or None,
+                detected_language=_detected_language_for_task(run, task, parameters),
+            )
         elif service_target == "generate_outline_by_request":
             from app.services.agent.video.generate_outline_by_request_service import (
                 generate_outline_by_request,

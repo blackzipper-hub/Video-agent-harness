@@ -18,6 +18,7 @@ from app.video_runtime.deepseek_bff import (
     _compat_event,
     _load_run_context,
     _sign_uploaded_file,
+    _UI_DEFAULTS_SEPARATOR,
     router,
     set_deepseek_client,
     studio_router,
@@ -275,6 +276,8 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         names = {item["name"] for item in catalog.json()["data"]}
         self.assertIn("character-director", names)
         self.assertNotIn("cuti.atomic-providers", names)
+        from app.video_runtime.retired import RETIRED_PUBLIC_SKILLS
+        self.assertTrue(RETIRED_PUBLIC_SKILLS.isdisjoint(names))
 
         created = self.client.post(
             "/chat-v1/service/v2/runs",
@@ -370,16 +373,26 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             },
         )
         self.assertEqual(hidden_legacy.status_code, 409, hidden_legacy.text)
-        self.assertIn("hidden legacy", hidden_legacy.json()["detail"].lower())
+        self.assertIn("retired", hidden_legacy.json()["detail"].lower())
 
         ambiguous = self.client.post(
             "/chat-v1/service/v2/runs",
             json={
-                "objective": "$seedance2 or $workflow-direct-video",
+                "objective": "$seedance2 or $mv",
                 "idempotency_key": "workflow-ambiguous-1",
             },
         )
         self.assertEqual(ambiguous.status_code, 422, ambiguous.text)
+
+        retired_mention = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "$workflow-direct-video make a clip",
+                "idempotency_key": "workflow-retired-mention-1",
+            },
+        )
+        self.assertEqual(retired_mention.status_code, 409, retired_mention.text)
+        self.assertIn("retired", retired_mention.json()["detail"].lower())
 
     def test_dedicated_plugin_workflow_can_be_selected_without_a_synthetic_skill(self) -> None:
         asyncio.run(self.runtime.plugins.load_directories([
@@ -393,11 +406,8 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                 "workflow_id": "cuti.music-video",
             },
         )
-        self.assertEqual(selected.status_code, 200, selected.text)
-        self.assertEqual(
-            selected.json()["data"]["workflow_id"],
-            "cuti.music-video",
-        )
+        self.assertEqual(selected.status_code, 409, selected.text)
+        self.assertIn("retired", selected.json()["detail"].lower())
 
     def test_empty_project_follow_up_reapplies_create_contract(self) -> None:
         created = self.client.post(
@@ -505,6 +515,24 @@ Keep the requested visual tone consistent.
         })
         self.assertEqual(user["payload"]["message"]["content"], "Make a video")
 
+        user_defaults = _compat_event("project-1", {
+            "type": "user/message",
+            "seq": 12,
+            "time": 1005,
+            "data": {
+                "source": {"kind": "user"},
+                "content": [{
+                    "type": "text",
+                    "text": (
+                        "Make a video"
+                        + _UI_DEFAULTS_SEPARATOR
+                        + "{\"duration\": 15}"
+                    ),
+                }],
+            },
+        })
+        self.assertEqual(user_defaults["payload"]["message"]["content"], "Make a video")
+
         tool = _compat_event("project-1", {
             "type": "tool/call",
             "seq": 12,
@@ -585,6 +613,14 @@ Keep the requested visual tone consistent.
         self.assertIn('"mv"', prompt)
         self.assertIn("video_skill_load", prompt)
         self.assertIn("video_skill_read_resource", prompt)
+        self.assertIn("UI defaults (creation controls)", prompt)
+        self.assertIn("highest priority", prompt)
+        self.assertIn("only to fields the user did not mention", prompt)
+        self.assertNotIn("6smv", prompt)
+        self.assertNotIn(
+            "Respect duration, aspect ratio, resolution, selected image/video providers",
+            prompt,
+        )
         self.assertNotIn("load_skill", prompt)
         self.assertNotIn("read_skill_resource", prompt)
         self.assertNotIn("suno-song", prompt)

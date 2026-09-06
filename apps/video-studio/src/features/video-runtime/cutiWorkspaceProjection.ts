@@ -1,84 +1,92 @@
-import type { RuntimeArtifact, RuntimeWorkspace } from "./client";
+import type { RuntimeArtifact, RuntimeWorkspace } from './client'
 
-type JsonRecord = Record<string, unknown>;
+type JsonRecord = Record<string, unknown>
 
 export interface CutiWorkspaceProjection {
-  effectiveVideoSpec: JsonRecord | null;
-  storyOutlineData: JsonRecord | null;
-  analysisData: JsonRecord | null;
-  charactersData: JsonRecord | null;
-  scenesData: JsonRecord | null;
-  keyframesData: JsonRecord;
-  videosData: JsonRecord;
-  musicData: JsonRecord | null;
-  videoAssemblyData: JsonRecord | null;
+  effectiveVideoSpec: JsonRecord | null
+  storyOutlineData: JsonRecord | null
+  analysisData: JsonRecord | null
+  charactersData: JsonRecord | null
+  scenesData: JsonRecord | null
+  keyframesData: JsonRecord
+  videosData: JsonRecord
+  musicData: JsonRecord | null
+  videoAssemblyData: JsonRecord | null
 }
 
 const record = (value: unknown): JsonRecord | null => (
-  value && typeof value === "object" && !Array.isArray(value)
+  value && typeof value === 'object' && !Array.isArray(value)
     ? value as JsonRecord
     : null
-);
+)
 
 const arrayRecords = (value: unknown): JsonRecord[] => (
   Array.isArray(value)
     ? value.filter((item): item is JsonRecord => Boolean(record(item)))
     : []
-);
+)
 
-const artifactContent = (artifact?: RuntimeArtifact): unknown => artifact?.metadata?.content;
+const artifactContent = (artifact?: RuntimeArtifact): unknown => artifact?.metadata?.content
 
 const artifactPrompt = (artifact: RuntimeArtifact): string => {
-  const metadata = artifact.metadata || {};
-  const generation = record(metadata.generation_parameters);
+  const metadata = artifact.metadata || {}
+  const generation = record(metadata.generation_parameters)
+  const resolved = record(metadata.resolved_generation_parameters)
   for (const value of [
+    metadata.lyrics,
+    metadata.generated_lyrics,
+    generation?.lyrics,
+    resolved?.lyrics,
     metadata.generated_prompt,
     metadata.generation_prompt,
     generation?.prompt,
+    resolved?.prompt,
     generation?.visual_prompt,
     generation?.motion_prompt,
+    metadata.tags,
+    generation?.tags,
   ]) {
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return "";
-};
+  return ''
+}
 
 const byNewest = (left: RuntimeArtifact, right: RuntimeArtifact) => (
   right.version - left.version
-  || String(right.created_at || "").localeCompare(String(left.created_at || ""))
-);
+  || String(right.created_at || '').localeCompare(String(left.created_at || ''))
+)
 
 const groupedArtifacts = (workspace: RuntimeWorkspace): Map<string, RuntimeArtifact[]> => {
-  const groups = new Map<string, RuntimeArtifact[]>();
+  const groups = new Map<string, RuntimeArtifact[]>()
   workspace.artifacts.forEach((artifact) => {
-    const key = artifact.logicalId || artifact.artifact_id;
-    const group = groups.get(key) || [];
-    group.push(artifact);
-    groups.set(key, group);
-  });
-  groups.forEach((group) => group.sort(byNewest));
-  return groups;
-};
+    const key = artifact.logicalId || artifact.artifact_id
+    const group = groups.get(key) || []
+    group.push(artifact)
+    groups.set(key, group)
+  })
+  groups.forEach(group => group.sort(byNewest))
+  return groups
+}
 
 const preferredArtifact = (artifacts: RuntimeArtifact[]): RuntimeArtifact | undefined => (
-  artifacts.find((artifact) => artifact.isSelected) || artifacts[0]
-);
+  artifacts.find(artifact => artifact.isSelected) || artifacts[0]
+)
 
 const findPreferred = (
   groups: Map<string, RuntimeArtifact[]>,
   predicate: (artifact: RuntimeArtifact) => boolean,
 ): RuntimeArtifact | undefined => {
   const candidates = [...groups.values()]
-    .flatMap((group) => preferredArtifact(group) || [])
+    .flatMap(group => preferredArtifact(group) || [])
     .filter(predicate)
-    .sort(byNewest);
-  return candidates[0];
-};
+    .sort(byNewest)
+  return candidates[0]
+}
 
 const shotIdFromLogicalId = (logicalId: string | undefined, suffix: RegExp): string | null => {
-  const match = logicalId?.match(suffix);
-  return match?.[1] || null;
-};
+  const match = logicalId?.match(suffix)
+  return match?.[1] || null
+}
 
 /**
  * Project the durable Runtime graph into the data structures consumed by the
@@ -88,158 +96,169 @@ const shotIdFromLogicalId = (logicalId: string | undefined, suffix: RegExp): str
 export const projectRuntimeWorkspaceToCuti = (
   workspace: RuntimeWorkspace,
 ): CutiWorkspaceProjection => {
-  const groups = groupedArtifacts(workspace);
-  const specArtifact = findPreferred(groups, (artifact) => artifact.type === "video_spec");
-  const effectiveVideoSpec = record(workspace.videoSpec) || record(artifactContent(specArtifact));
-  const scriptArtifact = findPreferred(groups, (artifact) => artifact.type === "script");
-  const storyboardArtifact = findPreferred(groups, (artifact) => artifact.type === "storyboard");
+  const groups = groupedArtifacts(workspace)
+  const specArtifact = findPreferred(groups, artifact => artifact.type === 'video_spec')
+  const effectiveVideoSpec = record(workspace.videoSpec) || record(artifactContent(specArtifact))
+  const scriptArtifact = findPreferred(groups, artifact => artifact.type === 'script')
+  const storyboardArtifact = findPreferred(groups, artifact => artifact.type === 'storyboard')
   const characterDefinitionArtifact = findPreferred(
     groups,
-    (artifact) => artifact.type === "characters" || artifact.logicalId === "character:shared:definition",
-  );
+    artifact => artifact.type === 'characters' || artifact.logicalId === 'character:shared:definition',
+  )
 
   const shots = arrayRecords(artifactContent(storyboardArtifact)).length > 0
     ? arrayRecords(artifactContent(storyboardArtifact))
-    : arrayRecords(effectiveVideoSpec?.shots);
-  const scriptRows = arrayRecords(artifactContent(scriptArtifact));
-  const scriptByShot = new Map(scriptRows.map((item) => [String(item.shotId || item.id || ""), item]));
+    : arrayRecords(effectiveVideoSpec?.shots)
+  const scriptRows = arrayRecords(artifactContent(scriptArtifact))
+  const scriptByShot = new Map(scriptRows.map(item => [String(item.shotId || item.id || ''), item]))
   const characterDefinitions = arrayRecords(artifactContent(characterDefinitionArtifact)).length > 0
     ? arrayRecords(artifactContent(characterDefinitionArtifact))
-    : arrayRecords(effectiveVideoSpec?.characters);
+    : arrayRecords(effectiveVideoSpec?.characters)
 
   const storyStructure = shots.map((shot, index) => {
-    const id = String(shot.id || `shot-${index + 1}`);
-    const script = scriptByShot.get(id);
-    const beat = String(script?.beat || shot.beat || "");
-    const narration = String(script?.narration || shot.narration || "");
+    const id = String(shot.id || `shot-${index + 1}`)
+    const script = scriptByShot.get(id)
+    const beat = String(script?.beat || shot.beat || '')
+    const narration = String(script?.narration || shot.narration || '')
     return {
       order: index,
       title: String(shot.title || `Shot ${Number(shot.order || index + 1)}`),
-      description: [beat, narration].filter(Boolean).join("\n\n"),
+      description: [beat, narration].filter(Boolean).join('\n\n'),
       duration: Number(shot.duration_seconds || 0),
       runtime_shot_id: id,
-    };
-  });
+    }
+  })
 
   const characters = characterDefinitions.map((character, index) => {
-    const id = String(character.id || `character-${index + 1}`);
+    const id = String(character.id || `character-${index + 1}`)
     const characterArtifacts = [...groups.entries()]
       .filter(([logicalId]) => logicalId === `character:${id}:reference`)
-      .flatMap(([, artifacts]) => artifacts);
+      .flatMap(([, artifacts]) => artifacts)
     const versions = [...characterArtifacts]
       .sort((left, right) => left.version - right.version)
-      .map((artifact) => ({
+      .map(artifact => ({
         id: artifact.id,
         uuid: artifact.id,
         version_number: artifact.version,
-        character_image_url: artifact.uri || "",
+        character_image_url: artifact.uri || '',
         t2i_prompt: artifactPrompt(artifact),
         status: artifact.status,
-      }));
-    const selectedVersionId = characterArtifacts.find((artifact) => artifact.isSelected)?.id;
-    const selectedIndex = Math.max(0, versions.findIndex((version) => version.id === selectedVersionId));
-    const selectedVersion = versions[selectedIndex];
+      }))
+    const selectedVersionId = characterArtifacts.find(artifact => artifact.isSelected)?.id
+    const selectedIndex = Math.max(0, versions.findIndex(version => version.id === selectedVersionId))
+    const selectedVersion = versions[selectedIndex]
     return {
       ...character,
       uuid: id,
       name: String(character.name || id),
-      description: String(character.appearance || character.description || ""),
-      image_url: selectedVersion?.character_image_url || "",
+      description: String(character.appearance || character.description || ''),
+      image_url: selectedVersion?.character_image_url || '',
       versions,
       current_version_index: selectedIndex,
       selected_version_id: selectedVersion?.id,
       runtime_character_id: id,
-    };
-  });
+    }
+  })
 
   const scenes = shots.map((shot, index) => ({
     scene_number: Number(shot.order || index + 1),
     title: String(shot.title || `Shot ${Number(shot.order || index + 1)}`),
-    description: String(shot.beat || ""),
-    location: String(shot.location || ""),
-    narrations: String(shot.narration || "")
+    description: String(shot.beat || ''),
+    location: String(shot.location || ''),
+    narrations: String(shot.narration || '')
       ? [{ narration_text: String(shot.narration), duration: Number(shot.duration_seconds || 0) }]
       : [],
     runtime_shot_id: String(shot.id || `shot-${index + 1}`),
-  }));
+  }))
 
   const keyframeGroups = [...groups.entries()].flatMap(([logicalId, artifacts]) => {
-    const shotId = shotIdFromLogicalId(logicalId, /^shot:(.+):keyframe:(\d+)$/);
-    if (!shotId) return [];
-    const frameIndex = Number(logicalId.match(/:keyframe:(\d+)$/)?.[1] || 0);
-    const shotIndex = Math.max(0, shots.findIndex((shot) => String(shot.id) === shotId));
+    const shotId = shotIdFromLogicalId(logicalId, /^shot:(.+):keyframe:(\d+)$/)
+    if (!shotId) return []
+    const frameIndex = Number(logicalId.match(/:keyframe:(\d+)$/)?.[1] || 0)
+    const shotIndex = Math.max(0, shots.findIndex(shot => String(shot.id) === shotId))
     const versions = [...artifacts]
       .sort((left, right) => left.version - right.version)
-      .map((artifact) => ({
+      .map(artifact => ({
         uuid: artifact.id,
         version_number: artifact.version,
-        keyframe_url: artifact.uri || "",
+        keyframe_url: artifact.uri || '',
         t2i_prompt: artifactPrompt(artifact),
         frame_index: frameIndex,
         status: artifact.status,
-      }));
-    const selectedVersionId = artifacts.find((artifact) => artifact.isSelected)?.id;
-    const selectedIndex = Math.max(0, versions.findIndex((version) => version.uuid === selectedVersionId));
+      }))
+    const selectedVersionId = artifacts.find(artifact => artifact.isSelected)?.id
+    const selectedIndex = Math.max(0, versions.findIndex(version => version.uuid === selectedVersionId))
     return [{
       uuid: `${shotId}:keyframe:${frameIndex}`,
       shot_number: Number(shots[shotIndex]?.order || shotIndex + 1),
       frame_index: frameIndex,
       versions,
       current_version_index: selectedIndex,
-    }];
-  });
+    }]
+  })
 
   const videoGroups = [...groups.entries()].flatMap(([logicalId, artifacts]) => {
-    const shotId = shotIdFromLogicalId(logicalId, /^shot:(.+):clip$/);
-    if (!shotId) return [];
-    const shotIndex = Math.max(0, shots.findIndex((shot) => String(shot.id) === shotId));
+    const shotId = shotIdFromLogicalId(logicalId, /^shot:(.+):clip$/)
+    if (!shotId) return []
+    const shotIndex = Math.max(0, shots.findIndex(shot => String(shot.id) === shotId))
     const versions = [...artifacts]
       .sort((left, right) => left.version - right.version)
-      .map((artifact) => ({
+      .map(artifact => ({
         uuid: artifact.id,
         version_number: artifact.version,
-        video_url: artifact.uri || "",
+        video_url: artifact.uri || '',
         motion_prompt: artifactPrompt(artifact),
         duration: Number(shots[shotIndex]?.duration_seconds || 0),
         status: artifact.status,
-      }));
-    const selectedVersionId = artifacts.find((artifact) => artifact.isSelected)?.id;
-    const selectedIndex = Math.max(0, versions.findIndex((version) => version.uuid === selectedVersionId));
+      }))
+    const selectedVersionId = artifacts.find(artifact => artifact.isSelected)?.id
+    const selectedIndex = Math.max(0, versions.findIndex(version => version.uuid === selectedVersionId))
     return [{
       uuid: `${shotId}:clip`,
       shot_number: Number(shots[shotIndex]?.order || shotIndex + 1),
       versions,
       current_version_index: selectedIndex,
-    }];
-  });
+    }]
+  })
 
   const musicGroups = [...groups.entries()]
-    .filter(([logicalId]) => logicalId === "audio:bgm")
-    .flatMap(([, artifacts]) => artifacts);
+    .filter(([logicalId, artifacts]) => (
+      logicalId === 'audio:bgm'
+      || artifacts.some(artifact => ['audio', 'music', 'bgm'].includes(artifact.type))
+    ))
+    .flatMap(([, artifacts]) => artifacts)
   const musicVersions = musicGroups
     .sort((left, right) => left.version - right.version)
-    .map((artifact) => ({
-      uuid: artifact.id,
-      version_number: artifact.version,
-      audio_url: artifact.uri || "",
-      music_prompt: artifactPrompt(artifact),
-      status: artifact.status,
-    }));
-  const selectedMusicVersionId = musicGroups.find((artifact) => artifact.isSelected)?.id;
-  const selectedMusicIndex = Math.max(0, musicVersions.findIndex((version) => version.uuid === selectedMusicVersionId));
+    .map((artifact) => {
+      const metadata = artifact.metadata || {}
+      const generation = record(metadata.generation_parameters)
+      const resolved = record(metadata.resolved_generation_parameters)
+      const instrumental = [metadata.make_instrumental, metadata.instrumental, generation?.instrumental, resolved?.instrumental]
+        .some(value => value === true || value === 'true')
+      return {
+        uuid: artifact.id,
+        version_number: artifact.version,
+        audio_url: artifact.uri || '',
+        music_prompt: artifactPrompt(artifact),
+        status: artifact.status,
+        is_instrumental: instrumental,
+      }
+    })
+  const selectedMusicVersionId = musicGroups.find(artifact => artifact.isSelected)?.id
+  const selectedMusicIndex = Math.max(0, musicVersions.findIndex(version => version.uuid === selectedMusicVersionId))
 
   const finalArtifact = findPreferred(
     groups,
-    (artifact) => artifact.logicalId === "video:final" || artifact.type === "final_video",
-  );
+    artifact => artifact.logicalId === 'video:final' || artifact.type === 'final_video',
+  )
 
   return {
     effectiveVideoSpec,
     storyOutlineData: effectiveVideoSpec ? {
-      title: String(effectiveVideoSpec.title || specArtifact?.title || "Video story"),
-      theme: String(effectiveVideoSpec.style_id || ""),
-      description: String(effectiveVideoSpec.description || ""),
-      style_guide: String(effectiveVideoSpec.style_id || ""),
+      title: String(effectiveVideoSpec.title || specArtifact?.title || 'Video story'),
+      theme: String(effectiveVideoSpec.style_id || ''),
+      description: String(effectiveVideoSpec.description || ''),
+      style_guide: String(effectiveVideoSpec.style_id || ''),
       structure: storyStructure,
       target_duration_seconds: Number(effectiveVideoSpec.target_duration_seconds || 0),
     } : null,
@@ -259,16 +278,17 @@ export const projectRuntimeWorkspaceToCuti = (
     },
     musicData: musicVersions.length > 0 ? {
       music_generations: [{
-        uuid: "audio:bgm",
+        uuid: 'audio:bgm',
         versions: musicVersions,
         current_version_index: selectedMusicIndex,
+        is_instrumental: musicVersions.some(version => version.is_instrumental),
       }],
     } : null,
     videoAssemblyData: finalArtifact?.uri ? {
       uuid: finalArtifact.id,
       final_video_url: finalArtifact.uri,
-      success: finalArtifact.status !== "failed",
+      success: finalArtifact.status !== 'failed',
       total_duration: Number(effectiveVideoSpec?.target_duration_seconds || 0),
     } : null,
-  };
-};
+  }
+}

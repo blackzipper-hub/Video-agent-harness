@@ -740,7 +740,7 @@ class PostgresVideoProjectRepository:
                  semantic_repair_attempts,delivery_id,lease_expires_at,error,created_at,updated_at)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,
                  $14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
-                ON CONFLICT(build_id,phase) DO NOTHING RETURNING *""",
+                ON CONFLICT(build_id,phase,base_plan_revision) DO NOTHING RETURNING *""",
                 checkpoint.id, checkpoint.project_id, checkpoint.build_id, checkpoint.plan_id,
                 checkpoint.workflow_id, checkpoint.session_id, checkpoint.user_id,
                 checkpoint.phase, checkpoint.next_phase, checkpoint.status,
@@ -758,9 +758,28 @@ class PostgresVideoProjectRepository:
             if inserted is None:
                 existing = await connection.fetchrow(
                     f"""SELECT * FROM {self.schema}.plan_checkpoints
-                    WHERE build_id=$1 AND phase=$2""", checkpoint.build_id, checkpoint.phase,
+                    WHERE build_id=$1 AND phase=$2 AND base_plan_revision=$3""",
+                    checkpoint.build_id, checkpoint.phase, checkpoint.base_plan_revision,
                 )
-                return self._checkpoint(existing)
+                stored = self._checkpoint(existing)
+                if (
+                    stored.status in {"pending", "planning"}
+                    and build_row["status"] != "waiting_agent"
+                ):
+                    await connection.execute(
+                        f"""UPDATE {self.schema}.builds SET status='waiting_agent',message=$3,updated_at=$4
+                        WHERE id=$1 AND project_id=$2""",
+                        checkpoint.build_id, checkpoint.project_id,
+                        f"Waiting for Agent planning after {checkpoint.phase}", now(),
+                    )
+                    await self._append_event(connection, checkpoint.project_id, "build.phase.completed", {
+                        "build_id": checkpoint.build_id, "phase": checkpoint.phase,
+                    })
+                    await self._append_event(connection, checkpoint.project_id, "build.checkpoint.waiting", {
+                        "build_id": checkpoint.build_id, "checkpoint_id": stored.id,
+                        "phase": checkpoint.phase, "next_phase": checkpoint.next_phase,
+                    })
+                return stored
             await connection.execute(
                 f"""UPDATE {self.schema}.builds SET status=CASE WHEN $5 THEN status ELSE 'waiting_agent' END,message=$3,updated_at=$4
                 WHERE id=$1 AND project_id=$2""",

@@ -293,17 +293,27 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = {**raw, "uri": raw["audio_url"]}
         elif capability == "media.extract_frame":
             from app.chat.v2.host_gateway import HostGateway
-            source = self._required(completed, parameters.get("source_video_step"))
+            video_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("source_video_step"),
+                url=parameters.get("video_url") or parameters.get("uri"),
+                label="source_video_step or video_url",
+            )
             result = await HostGateway().media_extract_frame({
-                "video_url": source.uri,
+                "video_url": video_url,
                 "position": parameters.get("position", "last"),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
         elif capability in {"media.audio.analyze", "media.audio_analyze"}:
             from app.chat.v2.host_gateway import HostGateway
-            source = self._required(completed, parameters.get("audio_step"))
+            audio_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("audio_step"),
+                url=parameters.get("audio_url") or parameters.get("uri"),
+                label="audio_step or audio_url",
+            )
             result = await HostGateway().media_audio_analyze({
-                "audio_url": source.uri,
+                "audio_url": audio_url,
                 "target_duration_sec": parameters.get("target_duration_sec"),
                 "clip_id": parameters.get("clip_id"),
                 "generated_lyrics": parameters.get("generated_lyrics"),
@@ -315,7 +325,12 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability in {"media.audio.cut", "media.audio_cut"}:
             from app.chat.v2.host_gateway import HostGateway
-            source = self._required(completed, parameters.get("audio_step"))
+            audio_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("audio_step"),
+                url=parameters.get("audio_url") or parameters.get("uri"),
+                label="audio_step or audio_url",
+            )
             analysis: dict[str, Any] = {}
             analysis_step = parameters.get("analysis_step")
             if analysis_step:
@@ -324,7 +339,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                     raise ValueError(f"required media output is unavailable: {analysis_step}")
                 analysis = dict(item.metadata or {})
             result = await HostGateway().media_audio_cut({
-                "audio_url": source.uri,
+                "audio_url": audio_url,
                 "analysis": analysis,
                 "start_sec": parameters.get("start_sec", parameters.get("start")),
                 "duration": parameters.get("duration", parameters.get("duration_sec")),
@@ -335,7 +350,12 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability == "media.audio.trim":
             from app.chat.v2.host_gateway import HostGateway
-            source = self._required(completed, parameters.get("audio_step"))
+            audio_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("audio_step"),
+                url=parameters.get("audio_url") or parameters.get("uri"),
+                label="audio_step or audio_url",
+            )
             start = parameters.get("start", parameters.get("start_sec"))
             duration = parameters.get("duration", parameters.get("duration_sec"))
             analysis_step = parameters.get("analysis_step")
@@ -358,7 +378,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                     start = segment.get("start_sec", segment.get("start"))
                     duration = segment.get("duration_sec", segment.get("duration"))
             result = await HostGateway().media_audio_trim({
-                "audio_url": source.uri,
+                "audio_url": audio_url,
                 "start": start or 0,
                 "duration": duration,
                 **{
@@ -370,18 +390,28 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability == "media.probe":
             from app.utils import media_service_client as msc
-            source = self._required(completed, parameters.get("media_step"))
+            media_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("media_step"),
+                url=parameters.get("media_url") or parameters.get("uri") or parameters.get("video_url") or parameters.get("audio_url"),
+                label="media_step or media_url",
+            )
             media_type = str(parameters.get("media_type") or "video")
             result = (
-                await msc.audio_info(str(source.uri))
+                await msc.audio_info(media_url)
                 if media_type == "audio"
-                else await msc.video_info(str(source.uri))
+                else await msc.video_info(media_url)
             )
         elif capability == "media.transcribe":
             from app.services.subtitle_transcription_service import transcribe_video
-            source = self._required(completed, parameters.get("video_step"))
+            video_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("video_step"),
+                url=parameters.get("video_url") or parameters.get("uri"),
+                label="video_step or video_url",
+            )
             result = await transcribe_video(
-                str(source.uri),
+                video_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 language=parameters.get("language"),
                 model=parameters.get("model"),
@@ -401,19 +431,33 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = {"timeline": {"durationSeconds": cursor, "items": items}}
         elif capability == "media.concat":
             from app.chat.v2.host_gateway import HostGateway
-            sources = [self._required(completed, item) for item in parameters.get("video_steps", [])]
             result = await HostGateway().media_concat({
-                "video_urls": [item.uri for item in sources],
+                "video_urls": self._urls_from_steps_or_direct(
+                    completed,
+                    step_ids=parameters.get("video_steps"),
+                    urls=parameters.get("video_urls"),
+                    label="video_steps or video_urls",
+                ),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
                 "normalize": bool(parameters.get("normalize", True)),
                 "transition_duration": float(parameters.get("transition_duration") or 0.0),
             })
         elif capability == "media.mix_audio":
             from app.chat.v2.host_gateway import HostGateway
-            video = self._required(completed, parameters.get("video_step"))
-            audio = self._required(completed, parameters.get("audio_step"))
+            video_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("video_step"),
+                url=parameters.get("video_url") or parameters.get("uri"),
+                label="video_step or video_url",
+            )
+            audio_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("audio_step"),
+                url=parameters.get("audio_url") or parameters.get("music_url"),
+                label="audio_step or audio_url",
+            )
             result = await HostGateway().media_mix_audio({
-                "video_url": video.uri, "audio_url": audio.uri,
+                "video_url": video_url, "audio_url": audio_url,
                 "mode": parameters.get("mode", "replace"),
                 "audio_volume": parameters.get("audio_volume", 0.25),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
@@ -438,10 +482,20 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = {**result, "uri": result.get("result_url")}
         elif capability in {"media.subtitle.burn", "media.subtitle_burn"}:
             from app.utils import media_service_client as msc
-            video = self._required(completed, parameters.get("video_step"))
-            subtitle = self._required(completed, parameters.get("subtitle_step"))
+            video_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("video_step"),
+                url=parameters.get("video_url") or parameters.get("uri"),
+                label="video_step or video_url",
+            )
+            subtitle_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("subtitle_step"),
+                url=parameters.get("subtitle_url"),
+                label="subtitle_step or subtitle_url",
+            )
             result = await msc.subtitle_burn(
-                str(video.uri), str(subtitle.uri),
+                video_url, subtitle_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 style_preset=str(parameters.get("style_preset") or "clean"),
                 position=str(parameters.get("position") or "bottom-safe"),
@@ -450,23 +504,32 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = {**result, "uri": result.get("result_url")}
         elif capability == "media.hyperframes_caption":
             from app.utils import media_service_client as msc
-            video = self._required(completed, parameters.get("video_step"))
+            video_url = self._url_from_step_or_direct(
+                completed,
+                step_id=parameters.get("video_step"),
+                url=parameters.get("video_url") or parameters.get("uri"),
+                label="video_step or video_url",
+            )
             transcription_step = parameters.get("transcription_step")
             transcription = completed.get(str(transcription_step or ""))
-            if transcription is None:
+            caption_html = parameters.get("caption_html")
+            composition_html = parameters.get("composition_html")
+            words = list(parameters.get("words") or [])
+            cues = list(parameters.get("cues") or parameters.get("segments") or [])
+            if transcription is not None:
+                metadata = transcription.metadata or {}
+                words = words or metadata.get("words") or []
+                cues = cues or metadata.get("segments") or []
+            elif transcription_step:
                 raise ValueError(
                     f"required media output is unavailable: {transcription_step}"
                 )
-            caption_html = parameters.get("caption_html")
-            composition_html = parameters.get("composition_html")
-            words = transcription.metadata.get("words") or []
-            cues = transcription.metadata.get("segments") or []
             if not words and not cues:
                 raise ValueError(
                     "media.hyperframes_caption requires a timestamped transcript"
                 )
             result = await msc.hyperframes_caption(
-                str(video.uri),
+                video_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 words=words,
                 cues=cues,
@@ -533,3 +596,43 @@ class MediaCorePlugin(BaseVideoPlugin):
         if artifact is None or not artifact.uri:
             raise ValueError(f"required media output is unavailable: {step_id}")
         return artifact
+
+    @classmethod
+    def _url_from_step_or_direct(
+        cls,
+        completed: dict[str, MediaArtifactVersion],
+        *,
+        step_id: Any,
+        url: Any,
+        label: str,
+    ) -> str:
+        """Accept dest URLs or execute_build step ids for the same media input."""
+        direct = str(url or "").strip()
+        if direct:
+            return direct
+        if str(step_id or "").strip():
+            return str(cls._required(completed, step_id).uri)
+        raise ValueError(f"required media output is unavailable: {label}")
+
+    @classmethod
+    def _urls_from_steps_or_direct(
+        cls,
+        completed: dict[str, MediaArtifactVersion],
+        *,
+        step_ids: Any,
+        urls: Any,
+        label: str,
+    ) -> list[str]:
+        steps = [item for item in (step_ids or []) if item not in (None, "")]
+        if steps:
+            return [str(cls._required(completed, item).uri) for item in steps]
+        if isinstance(urls, str) and urls.strip():
+            return [urls.strip()]
+        collected = [
+            str(item).strip()
+            for item in (urls or [])
+            if str(item or "").strip()
+        ]
+        if collected:
+            return collected
+        raise ValueError(f"required media output is unavailable: {label}")

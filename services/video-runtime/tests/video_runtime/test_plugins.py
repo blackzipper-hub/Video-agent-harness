@@ -766,3 +766,61 @@ permissions:
         self.assertTrue(info["has_audio"])
         ffprobe.assert_awaited_once()
         media_service.assert_not_awaited()
+
+    async def test_cuti_provider_registers_research_generate(self):
+        plugin = CutiAtomicProviderPlugin()
+        handlers = plugin.capability_handlers()
+        self.assertIn("research.generate", handlers)
+
+        async def fake_research(**kwargs):
+            self.assertEqual(kwargs["user_input"], "15秒中文MV")
+            self.assertEqual(kwargs["thread_id"], "session-1")
+            return {
+                "topic": "15秒MV",
+                "research_summary": "grounded",
+                "directions": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+                "sources": [],
+                "title": "Reference research: 15秒MV",
+                "summary": "3 directions grounded in search",
+            }
+
+        envelope = CapabilityGrant(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            plugin_id="cuti.atomic-providers",
+            capability="research.generate",
+            allowed_capabilities=["research.generate"],
+            max_cost_usd=1,
+            timeout_seconds=30,
+            idempotency_key="research-1",
+            audit_id="audit-research-1",
+            nonce="nonce-research-1",
+            expires_at=int(time.time()) + 60,
+        )
+        from app.video_runtime.security import CapabilityExecutionEnvelope
+
+        with patch(
+            "app.services.agent.video.generate_research_by_request_service.generate_research_by_request",
+            new=fake_research,
+        ):
+            result = await handlers["research.generate"](
+                CapabilityExecutionEnvelope(envelope),
+                {
+                    "build": {"id": "build-1"},
+                    "step": {
+                        "step_id": "research-mv-references",
+                        "output_artifact_id": "mv-research",
+                        "output_artifact_type": "research",
+                        "objective": "调研参考",
+                        "parameters": {
+                            "brief": "15秒中文MV",
+                            "thread_id": "session-1",
+                        },
+                    },
+                },
+            )
+        self.assertEqual(result.type, "research")
+        self.assertEqual(result.title, "Reference research: 15秒MV")
+        self.assertEqual(result.metadata["topic"], "15秒MV")
+        self.assertIsNone(result.uri)

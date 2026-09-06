@@ -814,16 +814,19 @@ async def transcribe_audio_with_gemini(
         }
         audio_mime_type = mime_type_map.get(ext.lower(), 'audio/mpeg')
         
-        # 使用临时文件，自动清理
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=True) as temp_file:
+        # Use a directory-owned path rather than an open NamedTemporaryFile.
+        # Windows locks the latter and prevents the storage adapter from
+        # replacing it during download.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, f"audio{ext}")
             # 从S3下载音频文件到临时文件
-            success = await s3_utils.download_file(audio_url, temp_file.name)
+            success = await s3_utils.download_file(audio_url, temp_file_path)
             if not success:
                 logger.error(f"无法下载音频文件: {audio_url}")
                 return None
             
             # 异步读取音频文件
-            async with aiofiles.open(temp_file.name, "rb") as audio_file:
+            async with aiofiles.open(temp_file_path, "rb") as audio_file:
                 audio_bytes = await audio_file.read()
 
             # 获取实际音频时长用于验证
@@ -839,7 +842,7 @@ async def transcribe_audio_with_gemini(
             _AUDIO_INLINE_SIZE_LIMIT = 15 * 1024 * 1024  # 15MB
             if len(audio_bytes) > _AUDIO_INLINE_SIZE_LIMIT:
                 from app.utils.google_file_upload import upload_audio_to_google
-                file_uri, google_mime = await upload_audio_to_google(temp_file.name, max_wait_time=300)
+                file_uri, google_mime = await upload_audio_to_google(temp_file_path, max_wait_time=300)
                 if file_uri:
                     # ⚠️ 使用 file_uri 时，mime_type 必须用 Google Files API 识别的实际类型
                     # （如 audio/x-wav），而非我们自己映射的 audio/wav，否则 Gemini 返回 400

@@ -1,4 +1,4 @@
-"""Scope validation must allow MV music spine (seedance-mv / 确认生成原创配乐)."""
+"""Scope validation must allow MV music spine (确认生成原创配乐)."""
 from __future__ import annotations
 
 from app.chat.v2.capabilities import CapabilityRegistry
@@ -33,7 +33,7 @@ def _music_patch(base_revision: int = 0) -> PlanPatch:
     )
 
 
-def test_mv_goal_allows_music_generate_with_seedance_mv():
+def test_mv_goal_allows_music_generate():
     run = AgentRun(
         thread_id="t",
         project_id="t",

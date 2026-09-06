@@ -710,7 +710,6 @@ def test_mv_skill_files_and_workflow_contract():
         None,
     )
     assert is_workflow_skill("mv")
-    assert is_workflow_skill("seedance-mv")
     seedance2 = Path(__file__).resolve().parents[1] / "skills" / "external" / "seedance2" / "SKILL.md"
     if seedance2.is_file():
         assert is_workflow_skill("seedance2")
@@ -778,18 +777,16 @@ def test_h3_skill_is_instruction_helper():
 
 
 def test_hyperframes_captions_skill_is_instruction_helper():
-    root = Path(__file__).resolve().parents[1] / "skills" / "builtin" / "sound" / "hyperframes-captions"
     catalog = SkillCatalog([Path(__file__).resolve().parents[1] / "skills" / "builtin"])
     catalog.discover()
     skill = catalog.load("hyperframes-captions")
     assert skill.contract is None
     assert not is_workflow_skill("hyperframes-captions")
-    assert "media.hyperframes_caption" in skill.instructions
-    assert "Always" in skill.instructions
-    assert "style" in skill.instructions
-    assert "references/styles.md" in skill.instructions
-    assert "never animate" in skill.instructions.lower()
-    assert (root / "references" / "styles.md").exists()
+    text = skill.instructions
+    assert "media.hyperframes_caption" in text
+    assert "caption_html" in text
+    assert "video_skill_load" in text
+    assert "不要只报一个 registry 组件名" in text
     for name in (
         "hyperframes-core",
         "hyperframes-cli",
@@ -814,4 +811,32 @@ def test_hyperframes_caption_schema_keeps_original_style_contract():
     assert schema["properties"]["style"]["default"] == "caption-highlight"
     assert "caption_html" in schema["properties"]
     assert "composition_html" in schema["properties"]
+    assert "video_step" in schema["properties"]
+    assert "video_url" in schema["properties"]
     assert "caption_html" not in schema.get("required", [])
+
+
+def test_concat_and_mix_schemas_accept_dest_urls_or_step_ids():
+    registry = build_registry(include_platform=True)
+    from jsonschema.validators import validator_for
+
+    concat = registry.get("media.concat").parameters_schema
+    mix = registry.get("media.mix_audio").parameters_schema
+    validator_for(concat)(concat).validate({
+        "video_urls": ["https://cdn.example/a.mp4", "https://cdn.example/b.mp4"],
+        "transition_duration": 0,
+    })
+    validator_for(concat)(concat).validate({
+        "video_steps": ["shot-1-video", "shot-2-video"],
+        "normalize": True,
+    })
+    validator_for(mix)(mix).validate({
+        "video_url": "https://cdn.example/v.mp4",
+        "audio_url": "https://cdn.example/a.mp3",
+        "mode": "replace",
+    })
+    validator_for(mix)(mix).validate({
+        "video_step": "assembled-video",
+        "audio_step": "music-cut",
+        "mode": "replace",
+    })

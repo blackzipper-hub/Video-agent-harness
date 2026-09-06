@@ -66,6 +66,16 @@ Go：`Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
 | **Dev** | http://k8s-vdadev-cutistud-9e1f0bbc43-61600723.ap-southeast-2.elb.amazonaws.com | `vda-dev` |
 | **Prod** | http://k8s-vdaprod-cutistud-084c8e4334-770037228.ap-southeast-2.elb.amazonaws.com | `vda-prod` |
 
+本机隧道（不改公网 DNS）：
+
+```bash
+./deploy/port-forward.sh           # vda-dev Studio → http://127.0.0.1:3000
+./deploy/port-forward.sh prod 3001 # vda-prod Studio → :3001
+./deploy/port-forward.sh compose   # 跳板机 colleague-video compose（3000/8001/3080/8443/18080）
+```
+
+`compose` 走 `songsong_ap_southeast_2` 的 SSH `-L`；换机器时设 `COMPOSE_SSH_HOST`。
+
 ALB 已挂悉尼 ACM（443）。`dev.newai.land` 指 `vda-dev` ALB，`www.cuti.land` 指 `vda-prod` ALB。HTTPS 用这些域名；ALB 长域名走 https 会证书名对不上。
 
 

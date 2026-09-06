@@ -12,10 +12,10 @@ Failed-task repair accepts new parameters through PlanPatch replacement mappings
 
 The Create stop action cancels both the DeepSeek turn and active Runtime builds. Stopped builds retain drafts, pending steps, and remote operation IDs; upstream jobs already submitted may continue and incur charges. Sending a follow-up requires explicit resume confirmation. Resume continues the latest stopped build against its original project version, reuses completed steps, and reconciles existing remote operations instead of creating a replacement build. Refreshing the page does not resume work.
 
-The standalone process needs only the dependencies in `requirements-runtime.txt`:
+Install the same Python dependencies as the Runtime image, from `pyproject.toml`:
 
 ```sh
-python -m pip install -r requirements-runtime.txt
+python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 
