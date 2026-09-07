@@ -104,6 +104,21 @@ const mergeEntityById = <T extends { id: string; updated_at?: string; created_at
   return [...merged.values()]
 }
 
+const mergeRuns = (
+  durable: DeepAgentRunSummary[],
+  live: DeepAgentRunSummary[],
+): DeepAgentRunSummary[] => {
+  const merged = mergeEntityById(durable, live)
+  const liveById = new Map(live.map(item => [item.id, item]))
+  return merged.map((run) => {
+    const previous = liveById.get(run.id)
+    if (previous?.last_response && !run.last_response) {
+      return { ...run, last_response: previous.last_response }
+    }
+    return run
+  })
+}
+
 const suggestionsFromSnapshot = (snapshot: DeepAgentSnapshot): DeepAgentSuggestion[] => {
   const artifact = [...snapshot.artifacts].reverse().find(
     item => item.type === 'action_suggestions',
@@ -299,7 +314,7 @@ export function deepAgentReducer(
     case 'RUNS_LOADED':
       return {
         ...state,
-        runs: mergeEntityById(action.runs, state.runs)
+        runs: mergeRuns(action.runs, state.runs)
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
         isLoadingRuns: false,
       }

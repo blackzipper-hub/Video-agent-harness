@@ -153,16 +153,6 @@ export interface DeepAgentMessageOptions {
   activated_skill_ids?: string[]
 }
 
-export interface DeepAgentSnapshot {
-  run: DeepAgentRun
-  revisions: unknown[]
-  tasks: DeepAgentTask[]
-  artifacts: DeepAgentArtifact[]
-  selections: DeepAgentSelection[]
-  messages: DeepAgentMessage[]
-  last_event_sequence?: number
-}
-
 export interface DeepAgentEvent {
   id: string
   run_id: string
@@ -170,6 +160,17 @@ export interface DeepAgentEvent {
   type: string
   payload: Record<string, unknown>
   created_at: string
+}
+
+export interface DeepAgentSnapshot {
+  run: DeepAgentRun
+  revisions: unknown[]
+  tasks: DeepAgentTask[]
+  artifacts: DeepAgentArtifact[]
+  selections: DeepAgentSelection[]
+  messages: DeepAgentMessage[]
+  events?: DeepAgentEvent[]
+  last_event_sequence?: number
 }
 
 export interface DeepAgentTokenUsage {

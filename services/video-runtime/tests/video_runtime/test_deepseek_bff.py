@@ -35,6 +35,7 @@ class FakeDeepSeekClient:
         self.prompts: list[tuple[str, str]] = []
         self.missing_sessions: set[str] = set()
         self.session_count = 0
+        self.history_calls = 0
 
     async def list_sessions(self) -> list[dict]:
         return [{"sessionId": session_id} for session_id in self.events]
@@ -66,6 +67,7 @@ class FakeDeepSeekClient:
         ]
 
     async def history(self, session_id: str, **_options) -> dict:
+        self.history_calls += 1
         if session_id in self.missing_sessions:
             raise DeepSeekHarnessError(
                 f'session.history failed: session-not-found: session "{session_id}" not found',
@@ -200,6 +202,21 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["data"][0]["id"], created["id"])
         self.assertEqual(response.json()["data"][0]["thread_id"], created["thread_id"])
+
+    def test_list_runs_does_not_load_deepseek_history(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "Make a trailer", "idempotency_key": "list-no-history"},
+        ).json()["data"]
+        before = self.deepseek.history_calls
+        listed = self.client.get("/chat-v1/service/v2/runs").json()["data"]
+        self.assertEqual(self.deepseek.history_calls, before)
+        self.assertEqual(listed[0]["id"], created["id"])
+        snapshot = self.client.get(f"/chat-v1/service/v2/runs/{created['id']}").json()["data"]
+        listed = self.client.get("/chat-v1/service/v2/runs").json()["data"][0]
+        self.assertEqual(listed["last_response"], snapshot["run"]["last_response"])
+        self.assertTrue(snapshot["events"])
+        self.assertEqual(snapshot["messages"][-1]["content"], "Project opened")
 
     def test_orphaned_create_route_gets_a_fresh_deepseek_session(self) -> None:
         replacement = FakeDeepSeekClient()

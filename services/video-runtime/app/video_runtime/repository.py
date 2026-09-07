@@ -4,6 +4,7 @@ import asyncio
 from collections import defaultdict
 from copy import deepcopy
 from datetime import timedelta
+from typing import NamedTuple
 
 from .models import (
     ArtifactDependency,
@@ -46,6 +47,13 @@ class VideoSpecRevisionConflict(RuntimeError):
         super().__init__(f"VideoSpec revision changed: expected {expected}, current {actual}")
         self.expected = expected
         self.actual = actual
+
+
+class SidebarRun(NamedTuple):
+    project: Project
+    session_id: str
+    latest_build_status: str | None
+    context_json: str | None
 
 
 class InMemoryVideoProjectRepository:
@@ -114,12 +122,33 @@ class InMemoryVideoProjectRepository:
             raise LookupError("project not found")
         return deepcopy(project)
 
-    async def list_projects(self, user_id: str) -> list[Project]:
-        return sorted(
+    async def list_projects(self, user_id: str, *, limit: int | None = None) -> list[Project]:
+        projects = sorted(
             (deepcopy(item) for item in self.projects.values() if item.user_id == user_id),
             key=lambda item: item.updated_at,
             reverse=True,
         )
+        return projects[:limit] if limit is not None else projects
+
+    async def list_sidebar_runs(self, user_id: str, *, limit: int = 50) -> list[SidebarRun]:
+        rows: list[SidebarRun] = []
+        for project in await self.list_projects(user_id):
+            if len(rows) >= limit:
+                break
+            try:
+                binding = await self.latest_session_binding(project.id, user_id)
+            except LookupError:
+                continue
+            builds = [item for item in self.builds.values() if item.project_id == project.id]
+            latest = max(builds, key=lambda item: item.created_at) if builds else None
+            encoded = self.idempotency.get((project.id, "compat-run-context", "initial"))
+            rows.append(SidebarRun(
+                project=deepcopy(project),
+                session_id=binding.session_id,
+                latest_build_status=latest.status if latest is not None else None,
+                context_json=encoded if isinstance(encoded, str) else None,
+            ))
+        return rows
 
     async def list_all_projects(self) -> list[Project]:
         return [deepcopy(item) for item in self.projects.values()]
@@ -226,6 +255,16 @@ class InMemoryVideoProjectRepository:
             self.idempotency.setdefault(
                 (project_id, operation, idempotency_key), result_id,
             )
+
+    async def replace_operation_result(
+        self,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        result_id: str,
+    ) -> None:
+        async with self.lock:
+            self.idempotency[(project_id, operation, idempotency_key)] = result_id
 
     async def add_artifact(
         self, artifact: MediaArtifactVersion, dependencies: list[ArtifactDependency] | None = None,
@@ -368,6 +407,14 @@ class InMemoryVideoProjectRepository:
         await self.get_plan(plan_id)
         return deepcopy(self.plan_revisions[plan_id])
 
+    async def list_plan_revisions_for_plans(
+        self, plan_ids: list[str],
+    ) -> dict[str, list[BuildPlanRevision]]:
+        return {
+            plan_id: deepcopy(self.plan_revisions.get(plan_id, []))
+            for plan_id in plan_ids
+        }
+
     async def claim_build_step(self, project_id: str, build_id: str, step_id: str) -> BuildStep | None:
         """Atomically admit pending work; a cancelled step can never be admitted."""
         async with self.lock:
@@ -448,6 +495,19 @@ class InMemoryVideoProjectRepository:
     ) -> list[PlanCheckpoint]:
         await self.get_build(project_id, build_id)
         return [deepcopy(self.checkpoints[item]) for item in self.build_checkpoints[build_id]]
+
+    async def list_build_checkpoints_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[PlanCheckpoint]]:
+        grouped: dict[str, list[PlanCheckpoint]] = {build_id: [] for build_id in build_ids}
+        for checkpoint in self.checkpoints.values():
+            if checkpoint.project_id != project_id or checkpoint.build_id not in grouped:
+                continue
+            grouped[checkpoint.build_id].append(deepcopy(checkpoint))
+        for build_id, items in grouped.items():
+            order = {item: index for index, item in enumerate(self.build_checkpoints.get(build_id, []))}
+            items.sort(key=lambda item: order.get(item.id, len(order)))
+        return grouped
 
     async def list_planning_checkpoints(self) -> list[PlanCheckpoint]:
         return [deepcopy(item) for item in self.checkpoints.values()
@@ -701,11 +761,27 @@ class InMemoryVideoProjectRepository:
         await self.get_build(project_id, build_id)
         return deepcopy(list(self.build_steps[build_id].values()))
 
+    async def list_build_steps_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[BuildStep]]:
+        grouped: dict[str, list[BuildStep]] = {}
+        for build_id in build_ids:
+            grouped[build_id] = deepcopy(list(self.build_steps.get(build_id, {}).values()))
+        return grouped
+
     async def list_validation_results(
         self, project_id: str, build_id: str,
     ) -> list[ValidationResult]:
         await self.get_build(project_id, build_id)
         return deepcopy(self.validations[build_id])
+
+    async def list_validation_results_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[ValidationResult]]:
+        return {
+            build_id: deepcopy(self.validations.get(build_id, []))
+            for build_id in build_ids
+        }
 
     async def update_build_step(self, step: BuildStep) -> BuildStep:
         async with self.lock:

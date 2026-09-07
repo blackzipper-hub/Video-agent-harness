@@ -288,24 +288,37 @@ def _artifact_payload(project_id: str, artifact, selected_ids: set[str]) -> dict
 
 async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id: str) -> dict:
     project = await _owned_project(build_runtime, project_id, user_id)
-    current_version = await build_runtime.repo.get_project_version(project.current_version_id)
-    artifacts = await build_runtime.repo.list_artifact_versions(project_id)
+    current_version, artifacts, versions, builds, spec_revisions, edges = await asyncio.gather(
+        build_runtime.repo.get_project_version(project.current_version_id),
+        build_runtime.repo.list_artifact_versions(project_id),
+        build_runtime.repo.list_project_versions(project_id),
+        build_runtime.repo.list_builds(project_id),
+        build_runtime.repo.list_video_spec_revisions(project_id),
+        build_runtime.repo.current_dependencies(project_id),
+    )
     selected_ids = set(current_version.selections.values())
-    versions = await build_runtime.repo.list_project_versions(project_id)
-    builds = await build_runtime.repo.list_builds(project_id)
+    selected_builds = builds[:10]
+    build_ids = [item.id for item in selected_builds]
+    plan_ids = [item.plan_id for item in selected_builds if item.plan_id]
+    steps_by_build, validations_by_build, checkpoints_by_build, revisions_by_plan = await asyncio.gather(
+        build_runtime.repo.list_build_steps_for_builds(project_id, build_ids),
+        build_runtime.repo.list_validation_results_for_builds(project_id, build_ids),
+        build_runtime.repo.list_build_checkpoints_for_builds(project_id, build_ids),
+        build_runtime.repo.list_plan_revisions_for_plans(plan_ids),
+    )
     build_payloads = []
     active_checkpoint = None
     plan_revision_history: list[dict] = []
-    for build in builds[:10]:
-        steps = await build_runtime.repo.list_build_steps(project_id, build.id)
-        validations = await build_runtime.repo.list_validation_results(project_id, build.id)
-        checkpoints = await build_runtime.repo.list_build_checkpoints(project_id, build.id)
+    for build in selected_builds:
+        steps = steps_by_build.get(build.id, [])
+        validations = validations_by_build.get(build.id, [])
+        checkpoints = checkpoints_by_build.get(build.id, [])
         if active_checkpoint is None:
             active_checkpoint = next(
                 (item for item in reversed(checkpoints) if item.status in {"pending", "planning"}),
                 None,
             )
-        plan_revisions = await build_runtime.repo.list_plan_revisions(build.plan_id)
+        plan_revisions = revisions_by_plan.get(build.plan_id, [])
         plan_revision_history.extend(
             item.model_dump(mode="json") for item in plan_revisions
         )
@@ -327,7 +340,6 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
     for artifact in artifacts:
         payload = _artifact_payload(project_id, artifact, selected_ids)
         grouped.setdefault(payload["logicalId"], []).append(payload)
-    spec_revisions = await build_runtime.repo.list_video_spec_revisions(project_id)
     current_spec_revision = spec_revisions[-1] if spec_revisions else None
     return {
         "project": project.model_dump(mode="json"),
@@ -335,10 +347,7 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
         "videoSpec": spec,
         "artifacts": [_artifact_payload(project_id, item, selected_ids) for item in artifacts],
         "artifactGroups": grouped,
-        "artifactEdges": [
-            item.model_dump(mode="json")
-            for item in await build_runtime.repo.current_dependencies(project_id)
-        ],
+        "artifactEdges": [item.model_dump(mode="json") for item in edges],
         "builds": build_payloads,
         "projectVersions": [item.model_dump(mode="json") for item in reversed(versions)],
         "videoSpecRevision": (
