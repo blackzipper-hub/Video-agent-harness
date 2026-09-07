@@ -72,6 +72,10 @@ class S3Service:
             return True
         return False
 
+    def is_our_url(self, url: str) -> bool:
+        """Public ownership check used by idempotent media pipelines."""
+        return self._is_our_url(url)
+
     def _local_url_to_key(self, url: str) -> Optional[str]:
         """{public_base_url}/files/<key> → <key>。"""
         key = urlparse(url).path.lstrip("/")

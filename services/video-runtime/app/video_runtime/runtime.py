@@ -36,6 +36,7 @@ from .models import (
     now,
 )
 from .initial_build import topological_steps
+from .video_generation_contracts import validate_video_generation_steps
 from .repository import InMemoryVideoProjectRepository
 from .plugins import PluginContext, VideoPluginRegistry
 from .capabilities import RuntimeCapabilityRegistry
@@ -62,6 +63,36 @@ _CHECKPOINT_METADATA_KEYS = {
     "language_contract",
     "language_validation",
 }
+
+_MEDIA_REFERENCE_PARAMETER_KEYS = frozenset({
+    "images", "image_urls", "reference_images", "reference_urls",
+    "input_image_urls", "videos", "video_urls", "reference_videos",
+    "audios", "audio_urls", "reference_audios",
+    "start_image_url", "start_image", "first_frame_url", "first_frame",
+    "continuity_frame_url", "end_image_url", "end_image", "last_image_url",
+    "last_image", "audio_url", "video_url",
+})
+
+
+def _implicit_artifact_inputs(
+    parameters: dict[str, Any], known_artifact_version_ids: set[str],
+) -> list[str]:
+    """Recognize ArtifactVersion ids used in provider-facing media fields.
+
+    Cuti planners historically placed ids directly in ``reference_images`` and
+    sibling fields.  Treat those values as explicit task inputs so dependency
+    wiring and URI resolution happen before provider dispatch.  Unknown strings
+    remain ordinary URLs and are validated by the execution envelope.
+    """
+    result: list[str] = []
+    for key in _MEDIA_REFERENCE_PARAMETER_KEYS:
+        value = parameters.get(key)
+        values = value if isinstance(value, list) else [value]
+        for candidate in values:
+            candidate_id = str(candidate) if isinstance(candidate, str) else ""
+            if candidate_id in known_artifact_version_ids and candidate_id not in result:
+                result.append(candidate_id)
+    return result
 
 
 def _bounded_checkpoint_value(value: Any, *, limit: int = 16_000) -> Any:
@@ -1005,6 +1036,7 @@ class VideoBuildRuntime:
         for loaded in self.plugins.loaded:
             plan = await loaded.implementation.after_plan(context, plan)
         topological_steps(plan.items)
+        validate_video_generation_steps(plan.items)
         await self._resolve_plan_skills(plan)
         return await self.repo.save_change_and_plan(change, plan, idempotency_key)
 
@@ -1642,6 +1674,13 @@ class VideoBuildRuntime:
                     input_versions = proposed.input_artifact_version_ids
                     if not isinstance(input_versions, list):
                         raise ValueError("input_artifact_version_ids must be an array")
+                    input_versions = list(dict.fromkeys([
+                        *[str(value) for value in input_versions],
+                        *_implicit_artifact_inputs(
+                            proposed.parameters, set(artifact_step_ids),
+                        ),
+                    ]))
+                    proposed.input_artifact_version_ids = input_versions
                     unknown_inputs = sorted(
                         str(value) for value in input_versions
                         if str(value) not in artifact_step_ids
@@ -1745,6 +1784,15 @@ class VideoBuildRuntime:
                             + ", ".join(unsupported_types)
                         )
                 allowed = workflow.allowed_capabilities if workflow is not None else None
+                # PlanPatch capabilities are explicitly opted into by installed
+                # plugins and form the Harness-wide dynamic edit surface.  They
+                # must remain composable across Workflows; the Workflow allow-list
+                # continues to constrain only Workflow-specific generation work.
+                dynamic_capabilities = frozenset(
+                    item.capability for item in self.plan_patch_capability_catalog()
+                )
+                if allowed is not None:
+                    allowed = frozenset({*allowed, *dynamic_capabilities})
                 if plan.workflow_id == "cuti.lipsync-music-video" and allowed is not None:
                     allowed = frozenset({*allowed, "media.lipsync"})
                 updated_plan, added_ids = append_continuous_plan_patch(
@@ -1788,6 +1836,7 @@ class VideoBuildRuntime:
                 raise ValueError("checkpoint resolution did not add a build phase")
         await self._resolve_plan_skills(updated_plan)
         topological_steps(updated_plan.items)
+        validate_video_generation_steps(updated_plan.items)
         plan_revision = BuildPlanRevision(
             plan_id=plan.id,
             project_id=project_id,

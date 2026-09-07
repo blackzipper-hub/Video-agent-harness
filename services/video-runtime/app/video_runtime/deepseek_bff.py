@@ -450,6 +450,13 @@ def _initial_video_build_prompt(
             "Turn the visible user request and creation controls into one complete, valid VideoSpec."
         ),
         (
+            "For planning documents that you can already derive from the user request, Skill, "
+            "conversation, and completed Artifacts, write their final content in the PlanPatch and "
+            "persist it with runtime.artifact.persist. Do not call atomic.text.generate merely to "
+            "ask a second LLM to repeat planning you already performed. Reserve atomic.text.generate "
+            "for genuinely independent text transformation or generation that is not already known."
+        ),
+        (
             f"Set {'ProjectIntent' if staged else 'VideoSpec'}.activated_skill_ids exactly to "
             f"{json.dumps(activated, ensure_ascii=False)}. "
             "Always use automation.mode automatic."

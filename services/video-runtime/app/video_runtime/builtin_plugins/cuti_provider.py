@@ -264,6 +264,13 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             prompt = skill_context.apply_to(prompt)
         parameters["prompt"] = prompt
         parameters.setdefault("artifact_title", source.title or source.type)
+        # Generated media is a reusable canonical Artifact, not a presentation
+        # derivative.  Keep it clean so tail frames, retries and PlanPatches do
+        # not feed a baked watermark back into image/video generation.
+        if envelope.grant.capability in {
+            "atomic.image.generate", "atomic.video.generate", "api.provider.generate",
+        }:
+            parameters["watermark"] = False
 
         from .media_inputs import ordered_inputs, resolve_media_parameters
         input_ids = (planned or {}).get("input_artifact_version_ids", [])
@@ -288,7 +295,13 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             metadata=item.metadata,
             created_at=item.created_at,
         ) for item in selected]
-        resolve_media_parameters(parameters, legacy_artifacts)
+        # A text blueprint may document the slot syntax consumed by a future
+        # media task. Only leaf media providers require those slots now.
+        resolve_media_parameters(
+            parameters,
+            legacy_artifacts,
+            validate_prompt_slots=envelope.grant.capability != "atomic.text.generate",
+        )
         if envelope.grant.capability == "api.provider.generate":
             from app.integrations.providers.provider_bridge import normalize_video_profile
 
@@ -375,6 +388,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
                 for item in selected if item.uri
             ],
             "skill_prompt_applied": skill_prompt_applied,
+            "watermark_policy": "clean_canonical",
         }
         digest_payload = json.dumps(
             {"uri": generated.get("uri"), "metadata": generated_metadata},

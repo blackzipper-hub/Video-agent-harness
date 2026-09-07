@@ -148,6 +148,7 @@ async def test_atomic_text_ignores_video_model_and_uses_configured_llm(monkeypat
             OPENAI_API_KEY_FALLBACK="",
             DEEP_AGENT_V2_OPENAI_BASE_URL="https://api.openai.com/v1",
             DEEP_AGENT_V2_TIMEOUT_SECONDS=60,
+            DEEP_AGENT_V2_PROVIDER_TIMEOUT_SECONDS=900,
         ),
     )
     run = AgentRun(
@@ -177,6 +178,8 @@ async def test_atomic_text_ignores_video_model_and_uses_configured_llm(monkeypat
     )
 
     assert captured["model"] == "gpt-5.6-terra"
+    assert captured["timeout"] == 900
+    assert captured["streaming"] is True
     assert artifact["metadata"]["model"] == "gpt-5.6-terra"
     assert artifact["metadata"]["ignored_non_text_model"] == "seedance-2.5"
 
@@ -242,6 +245,23 @@ async def test_atomic_image_routes_gpt_image_2_with_run_reference(monkeypatch):
     assert captured["runtime"].context.model.value == "gpt-image-2"
     assert artifact["uri"] == "https://media.example/concept.webp"
     assert artifact["metadata"]["artifact_role"] == "product_360_reference"
+
+
+def test_atomic_image_model_accepts_planpatch_provider_and_run_option():
+    from app.chat.v2.atomic_executor import _atomic_image_model_value
+
+    run = AgentRun(
+        thread_id="thread-model",
+        project_id="project-model",
+        user_id="user-model",
+        objective="model routing",
+        idempotency_key="request-model",
+        user_option={"image_generation_tool": "gpt_image_2"},
+    )
+
+    assert _atomic_image_model_value(run, {}) == "gpt-image-2"
+    assert _atomic_image_model_value(run, {"provider": "gpt-image-2"}) == "gpt-image-2"
+    assert _atomic_image_model_value(run, {"model": "nano_banana_2"}) == "gemini-3.1-flash-image-preview"
 
 
 @pytest.mark.asyncio

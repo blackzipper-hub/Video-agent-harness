@@ -350,6 +350,7 @@ permissions:
         self.assertEqual(result.provenance["remote_operation_id"], "provider-task-1")
         self.assertEqual(result.provenance["skills"][0]["skill_id"], "video-director")
         self.assertEqual(len(captured["task"].parameters["images"]), 4)
+        self.assertIs(captured["task"].parameters["watermark"], False)
         self.assertEqual(
             result.metadata["resolved_generation_parameters"]["images"],
             [
@@ -358,6 +359,7 @@ permissions:
             ],
         )
         self.assertFalse(result.metadata["skill_prompt_applied"])
+        self.assertEqual(result.metadata["watermark_policy"], "clean_canonical")
 
     async def test_cuti_image_provider_keeps_leaf_prompt_isolated_from_workflow_skill(self):
         captured = {}
@@ -425,6 +427,7 @@ permissions:
             "Generate a character sheet",
             captured["task"].parameters["prompt"],
         )
+        self.assertIs(captured["task"].parameters["watermark"], False)
         self.assertEqual(
             captured["task"].resolved_skills[0].skill_id,
             "cuti-scenario-product-workflow",

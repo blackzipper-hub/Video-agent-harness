@@ -85,7 +85,7 @@ export function AgentProductionProgress({
   const tools = events.filter(event => event.type === 'agent.tool.started')
     .map(event => ({
       id: String(event.payload.callId || event.id),
-      name: String(event.payload.name || 'tool'),
+      name: String(event.payload.tool || event.payload.name || 'tool'),
     }))
     .slice(-6)
   const hasBuildTool = tools.some(tool => tool.name === 'video_project_build')

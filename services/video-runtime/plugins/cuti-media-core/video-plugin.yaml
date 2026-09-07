@@ -27,6 +27,7 @@ contributions:
   media_operators:
     - cuti.media-core
   plan_patch_capabilities:
+    - runtime.artifact.persist
     - media.transcribe
     - subtitle.compose
     - media.subtitle_burn

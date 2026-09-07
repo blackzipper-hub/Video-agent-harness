@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
 
+def should_apply_watermark(*, requested: bool, source_is_first_party: bool) -> bool:
+    """A persisted first-party artifact must never receive a second watermark."""
+    return bool(requested and not source_is_first_party)
+
+
 @router.post("/segment-process", response_model=SegmentProcessResponse)
 async def segment_process(req: SegmentProcessRequest, request: Request):
     """Download multiple videos → align durations → concat → normalize → trim → upload.
@@ -71,7 +76,13 @@ async def segment_process(req: SegmentProcessRequest, request: Request):
 
 @router.post("/ensure-on-s3", response_model=MediaResult)
 async def ensure_on_s3(req: EnsureOnS3Request, request: Request):
-    """Download external URL → single-pass FFmpeg (resize+fps+strip-audio+trim+watermark) → upload."""
+    """Download external URL and normalize it without compounding watermarks.
+
+    A first-party URL may be submitted again during retry, recovery, or an
+    incremental edit.  It is already a persisted artifact, so applying the
+    delivery watermark again would permanently stack another copy into the
+    pixels.  Normalization may still run, but watermarking is one-shot.
+    """
     import time as _time
     _req_t0 = _time.monotonic()
     logger.info(
@@ -101,7 +112,16 @@ async def ensure_on_s3(req: EnsureOnS3Request, request: Request):
     )
 
     wm_path = None
-    if req.watermark:
+    apply_watermark = should_apply_watermark(
+        requested=req.watermark,
+        source_is_first_party=s3.is_our_url(req.external_url),
+    )
+    if req.watermark and not apply_watermark:
+        logger.info(
+            "ensure_on_s3: skip repeated watermark for first-party artifact: %.120s",
+            req.external_url,
+        )
+    if apply_watermark:
         from ...config import resolve_watermark_image_path
         cfg = get_settings()
         wm_path = resolve_watermark_image_path(cfg.watermark_image_path)

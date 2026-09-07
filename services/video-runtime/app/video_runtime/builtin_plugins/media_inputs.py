@@ -21,7 +21,7 @@ def ordered_inputs(completed, version_ids):
     return result
 
 
-def resolve_media_parameters(parameters, selected):
+def resolve_media_parameters(parameters, selected, *, validate_prompt_slots=True):
     """Reuse Cuti ID resolution and merging for direct and atomic execution alike."""
     for field, aliases, kinds in (
         ("images", ("images", "image_urls", "reference_images", "reference_urls"), _IMAGE_ARTIFACT_TYPES),
@@ -40,9 +40,10 @@ def resolve_media_parameters(parameters, selected):
             for alias in aliases:
                 if alias in parameters:
                     parameters[alias] = values
-    for pattern, field in ((r"@(?:图片|image)\s*(\d+)", "images"),
-                           (r"@(?:视频|video)\s*(\d+)", "videos"),
-                           (r"@(?:音频|audio)\s*(\d+)", "audios")):
-        for index in re.findall(pattern, str(parameters.get("prompt") or ""), re.IGNORECASE):
-            if not 1 <= int(index) <= len(parameters.get(field) or []):
-                raise ValueError(f"prompt references missing {field} slot {index}")
+    if validate_prompt_slots:
+        for pattern, field in ((r"@(?:图片|image)\s*(\d+)", "images"),
+                               (r"@(?:视频|video)\s*(\d+)", "videos"),
+                               (r"@(?:音频|audio)\s*(\d+)", "audios")):
+            for index in re.findall(pattern, str(parameters.get("prompt") or ""), re.IGNORECASE):
+                if not 1 <= int(index) <= len(parameters.get(field) or []):
+                    raise ValueError(f"prompt references missing {field} slot {index}")

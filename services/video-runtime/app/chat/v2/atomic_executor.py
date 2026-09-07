@@ -19,7 +19,9 @@ from .models import AgentRun, ArtifactVersion, Task
 
 _IMAGE_ARTIFACT_TYPES = {
     "image", "source_image", "keyframe", "character", "character_reference",
-    "product_setting", "continuity_frame",
+    "character_setting_reference", "scene_reference", "scene_setting_reference",
+    "product_reference", "product_setting", "product_setting_reference",
+    "continuity_frame",
 }
 _AUDIO_ARTIFACT_TYPES = {
     "audio", "source_audio", "music", "audio_bgm", "audio_narration",
@@ -191,6 +193,45 @@ def _message_text(content: Any) -> str:
     return str(content or "")
 
 
+def _atomic_image_model_value(run: AgentRun, params: dict[str, Any]) -> str:
+    """Resolve one requested image model without silently changing providers."""
+    configured = None
+    if isinstance(run.user_option, dict):
+        configured = run.user_option.get("image_generation_tool")
+    value = str(
+        params.get("model")
+        or params.get("provider")
+        or configured
+        or "gemini-3.1-flash-image-preview"
+    ).strip()
+    aliases = {
+        "gpt_image_2": "gpt-image-2",
+        "gpt-image-2": "gpt-image-2",
+        "nano_banana": "gemini-2.5-flash-image",
+        "nano-banana": "gemini-2.5-flash-image",
+        "nano_banana_2": "gemini-3.1-flash-image-preview",
+        "nano-banana-2": "gemini-3.1-flash-image-preview",
+        "nano_banana_pro": "gemini-3-pro-image-preview",
+        "nano-banana-pro": "gemini-3-pro-image-preview",
+    }
+    return aliases.get(value.lower(), value)
+
+
+def _atomic_text_timeout(settings: Any) -> float:
+    """Use the leaf-provider budget for durable text artifacts.
+
+    The coordinator timeout is intentionally short for interactive turns, but a
+    production blueprint can be several thousand tokens and is an asynchronous
+    build task. Applying the interactive timeout here caused deterministic
+    failures around 120 seconds.
+    """
+    interactive = float(settings.DEEP_AGENT_V2_TIMEOUT_SECONDS)
+    provider = float(
+        getattr(settings, "DEEP_AGENT_V2_PROVIDER_TIMEOUT_SECONDS", interactive)
+    )
+    return max(interactive, provider)
+
+
 async def execute_atomic(
     *,
     run: AgentRun,
@@ -218,9 +259,13 @@ async def execute_atomic(
             api_key=(settings.DEEP_AGENT_V2_OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip(),
             fallback_api_key=settings.OPENAI_API_KEY_FALLBACK,
             base_url=settings.DEEP_AGENT_V2_OPENAI_BASE_URL,
-            timeout=settings.DEEP_AGENT_V2_TIMEOUT_SECONDS,
+            timeout=_atomic_text_timeout(settings),
             temperature=0,
             use_responses_api=model_name.startswith("gpt-5"),
+            # Long production blueprints can take several minutes. Streaming
+            # keeps the upstream connection alive while LangChain still
+            # aggregates the chunks into one durable text Artifact.
+            streaming=True,
         )
         image_urls = _atomic_input_images(run, params, selected)
         if image_urls:
@@ -256,11 +301,7 @@ async def execute_atomic(
         from app.models.tool_enums import AspectRatio, Resolution, ToolType
 
         images = _atomic_input_images(run, params, selected)
-        model_value = str(params.get("model") or ToolType.GEMINI_3_1_FLASH_IMAGE_PREVIEW.value)
-        # UserOption serializes this model as ``gpt_image_2`` while ToolType
-        # uses the provider-facing ``gpt-image-2`` value.
-        if model_value == "gpt_image_2":
-            model_value = ToolType.GPT_IMAGE_2.value
+        model_value = _atomic_image_model_value(run, params)
         aspect_ratio = AspectRatio(str(params.get("aspect_ratio") or "16:9"))
         resolution = Resolution(str(params.get("resolution") or "1080p"))
         model_type = ToolType(model_value)

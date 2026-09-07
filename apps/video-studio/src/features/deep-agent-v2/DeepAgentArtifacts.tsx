@@ -189,6 +189,26 @@ const stringField = (...values: unknown[]): string => {
   return ''
 }
 
+const buildStepEntityNames = (videoSpec: Record<string, unknown> | null | undefined) => {
+  const names: Record<string, string> = {}
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 8 || !value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      value.forEach(item => visit(item, depth + 1))
+      return
+    }
+    const entity = asRecord(value)
+    if (Object.keys(entity).length > 0) {
+      const id = stringField(entity.id, entity.character_id, entity.scene_id, entity.shot_id)
+      const name = stringField(entity.name, entity.display_name, entity.title)
+      if (id && name) names[id] = name
+      Object.values(entity).forEach(item => visit(item, depth + 1))
+    }
+  }
+  visit(videoSpec)
+  return names
+}
+
 const isResearchArtifact = (artifact: DeepAgentArtifact) => {
   if (artifact.type === 'research') return true
   const meta = asRecord(artifact.metadata)
@@ -731,7 +751,7 @@ export function DeepAgentArtifacts({
           setRuntimeWorkspace(next)
           setWorkspaceError(null)
         }
-      } catch (error) {
+      } catch {
         if (active) {
           setWorkspaceError(t('da.runtime.requestFailed'))
         }
@@ -760,6 +780,10 @@ export function DeepAgentArtifacts({
   }, [projectId, t])
 
   const latestRuntimeBuild = runtimeWorkspace?.builds[0]
+  const stepEntityNames = useMemo(
+    () => buildStepEntityNames(runtimeWorkspace?.videoSpec),
+    [runtimeWorkspace?.videoSpec],
+  )
   useEffect(() => {
     if (!latestRuntimeBuild) {
       onRuntimeProgress?.(null)
@@ -780,7 +804,7 @@ export function DeepAgentArtifacts({
       } : null,
       steps: latestRuntimeBuild.steps.map(step => ({
         id: step.id,
-        name: planStepLabel(step.plan_step_id, t),
+        name: planStepLabel(step.plan_step_id, t, stepEntityNames),
         status: step.status,
         error: step.error,
         skills: (step.resolved_skills || []).map(skill => skill.skill_id),
@@ -791,6 +815,7 @@ export function DeepAgentArtifacts({
     onRuntimeProgress,
     runtimeWorkspace?.activeCheckpoint,
     runtimeWorkspace?.currentBuildPhase,
+    stepEntityNames,
     t,
   ])
 
@@ -834,7 +859,7 @@ export function DeepAgentArtifacts({
       toast.success(interpolate(t('da.workspace.frameSaved'), {
         time: formatTimestamp(options.timestamp),
       }))
-    } catch (error) {
+    } catch {
       toast.error(t('da.workspace.frameExtractFailed'))
     } finally {
       setExtractingKey(null)
@@ -924,7 +949,7 @@ export function DeepAgentArtifacts({
       )
       setRuntimeWorkspace(await videoRuntimeClient.workspace(projectId))
       toast.success(t('da.workspace.artifactSwitched'))
-    } catch (error) {
+    } catch {
       toast.error(t('da.runtime.requestFailed'))
     } finally {
       setSelectingArtifactId(null)
@@ -939,7 +964,7 @@ export function DeepAgentArtifacts({
         setRuntimeWorkspace(await videoRuntimeClient.workspace(projectId))
         setWorkspaceError(null)
       }
-    } catch (error) {
+    } catch {
       setWorkspaceError(t('da.runtime.requestFailed'))
     } finally {
       setWorkspaceLoading(false)
@@ -999,7 +1024,7 @@ export function DeepAgentArtifacts({
                       <Progress value={(build.progress || 0) * 100} className="h-1.5" />
                       <div className="mt-3 grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">
                         {build.steps.map(step => (
-                          <span key={step.id}>{step.status === 'completed' ? '✓' : '○'} {planStepLabel(step.plan_step_id, t)}</span>
+                          <span key={step.id}>{step.status === 'completed' ? '✓' : '○'} {planStepLabel(step.plan_step_id, t, stepEntityNames)}</span>
                         ))}
                       </div>
                       {build.error && (

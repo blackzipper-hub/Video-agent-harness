@@ -102,12 +102,12 @@ pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no
 On Windows PowerShell:
 
 ```powershell
-$env:OPENAI_API_KEY = "your-openai-key"
-$env:VIDEO_AGENT_MODEL = "gpt-5.6-terra"
-$env:VIDEO_RUNTIME_URL = "http://127.0.0.1:8001"
-$env:VIDEO_RUNTIME_SERVICE_TOKEN = "video-harness-runtime-local"
-pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
+Copy-Item .env.example .env
+# Fill in OPENAI_API_KEY and the required media provider keys in .env
+.\scripts\start-video-harness.ps1
 ```
+
+The Windows launcher reads the repository `.env`. In a migration workspace without that file, it can temporarily reuse keys from the sibling `cuti-video-agent/.env`. It also passes an enabled Windows user proxy to Node so model requests do not time out while browser networking still works.
 
 Keep this terminal running. DeepSeek Harness listens at `http://127.0.0.1:3080` by default.
 

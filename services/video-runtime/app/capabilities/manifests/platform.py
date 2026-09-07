@@ -44,6 +44,22 @@ def _manifest(
 def platform_capabilities() -> list[CapabilityManifest]:
     """Return platform-owned atomic execution capabilities."""
     return [
+        _manifest(
+            "runtime.artifact.persist",
+            "Persist Agent-authored structured or textual planning content as a durable project Artifact without invoking another model.",
+            "local.service",
+            "document",
+            alias="runtime-artifact-persist",
+            parameters_schema={
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                    "content": {},
+                    "title": {"type": "string"},
+                },
+                "additionalProperties": True,
+            },
+        ),
         _manifest("atomic.text.generate", "Generate one text artifact directly from the final prompt. Media model IDs are never used for this language-model call.", "atomic.direct", "text", alias="atomic-text", optional=["text", "image"], parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "llm_model": {"type": "string", "description": "Optional OpenAI language-model override"}, "model": {"type": "string", "description": "Legacy text-model override; media model IDs are ignored"}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
         _manifest("atomic.image.generate", "Generate one image directly from the final prompt and explicit references.", "atomic.direct", "image", alias="atomic-image", optional=["text", "image"], parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "model": {"type": "string"}, "resolution": {"type": "string", "enum": ["480p", "720p", "1080p"]}, "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]}, "images": {"type": "array", "items": {"type": "string"}}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),
         _manifest("atomic.music.generate", "Generate one music artifact directly from the final prompt.", "atomic.direct", "music", alias="atomic-music", parameters_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string", "minLength": 1}, "has_lyrics": {"type": "boolean"}, "auto_lyrics": {"type": "boolean"}, "target_duration": {"type": "integer", "minimum": 1}, "tags": {"type": "string"}, "vocal_gender": {"type": "string", "enum": ["f", "m"]}, "mv": {"type": "string"}, "artifact_title": {"type": "string"}}, "additionalProperties": True}),

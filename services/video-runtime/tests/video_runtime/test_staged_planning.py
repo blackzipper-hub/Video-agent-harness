@@ -14,7 +14,7 @@ from app.video_runtime.models import (
 from app.video_runtime.repository import PlanRevisionConflict
 from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator, checkpoint_prompt
 from app.video_runtime.models import PlanCheckpoint
-from app.video_runtime.runtime import _checkpoint_artifact_summary
+from app.video_runtime.runtime import _checkpoint_artifact_summary, _implicit_artifact_inputs
 from app.video_runtime.staged_planning import (
     append_phase,
     compile_continuous_plan_initial,
@@ -54,6 +54,21 @@ class _DeepSeek:
 
 
 class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    def test_media_parameter_artifact_ids_become_authoritative_inputs(self) -> None:
+        image_id = "9ea8e8dc-1346-4ef0-8fcb-64e4caa9ad3e"
+        audio_id = "223c2431-84d6-4109-8fa5-f7b191b3036b"
+        self.assertEqual(
+            _implicit_artifact_inputs(
+                {
+                    "reference_images": [image_id, "https://cdn.test/reference.webp"],
+                    "audio_url": audio_id,
+                    "prompt": image_id,
+                },
+                {image_id, audio_id},
+            ),
+            [image_id, audio_id],
+        )
+
     def test_legacy_intent_receives_a_complete_language_contract(self) -> None:
         intent = ProjectIntent(
             title="English film", brief="Make a film", language="en-US",
@@ -1019,6 +1034,60 @@ class ContinuousPlanPatchRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.runtime.close()
+
+    async def test_plugin_plan_patch_capability_is_available_to_every_workflow(self) -> None:
+        plan = await self.runtime.plan_project(
+            project_id=self.project.id,
+            base_project_version_id=self.version.id,
+            project_intent=ProjectIntent(
+                title="Short drama",
+                brief="Create a short drama from an Agent-authored blueprint",
+                workflow_id="short-drama-workflow",
+            ),
+            idempotency_key="continuous-universal-persist-plan",
+        )
+        build = await self.runtime.start_build(
+            project_id=self.project.id,
+            plan_id=plan.id,
+            base_project_version_id=self.version.id,
+            idempotency_key="continuous-universal-persist-build",
+            session_id="session-1",
+            user_id="user-1",
+        )
+        await self.runtime.execute_build(
+            project_id=self.project.id,
+            build_id=build.id,
+            executor=FakePlanExecutor(),
+        )
+        checkpoint = (await self.runtime.repo.list_build_checkpoints(
+            self.project.id, build.id,
+        ))[-1]
+
+        updated = await self.runtime.resolve_checkpoint(
+            project_id=self.project.id,
+            build_id=build.id,
+            checkpoint_id=checkpoint.id,
+            resolution=CheckpointResolution(
+                base_plan_revision=1,
+                base_spec_revision=1,
+                idempotency_key="continuous-universal-persist-patch",
+                video_spec_patch={},
+                proposed_steps=[RebuildPlanItem(
+                    step_id="production-blueprint",
+                    action="create",
+                    capability="runtime.artifact.persist",
+                    output_artifact_type="production_blueprint",
+                    parameters={"content": {"segments": [{"duration": 15}]}},
+                    depends_on=["intent"],
+                )],
+            ),
+            session_id="session-1",
+            user_id="user-1",
+        )
+
+        persisted = next(item for item in updated.items if item.step_id == "production-blueprint")
+        self.assertEqual(persisted.capability, "runtime.artifact.persist")
+        self.assertEqual(persisted.output_artifact_type, "production_blueprint")
 
     async def test_deepseek_adds_one_frontier_then_finishes_from_real_artifact(self) -> None:
         plan = await self.runtime.plan_project(

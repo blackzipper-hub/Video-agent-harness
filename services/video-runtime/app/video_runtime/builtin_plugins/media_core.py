@@ -154,6 +154,25 @@ class MediaCorePlugin(BaseVideoPlugin):
 
         return [
             MediaCapabilityContract(
+                capability="runtime.artifact.persist",
+                description=(
+                    "Persist Agent-authored planning content as a durable project Artifact "
+                    "without invoking another language model. The PlanPatch chooses the "
+                    "specific document Artifact type."
+                ),
+                output_artifact_type="document",
+                estimated_cost=0.0,
+                parameters_schema={
+                    "type": "object",
+                    "required": ["content"],
+                    "properties": {
+                        "content": {},
+                        "title": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
+            ),
+            MediaCapabilityContract(
                 capability="media.transcribe",
                 description="Transcribe the complete selected video into timestamped speech.",
                 inputs=[source("video", ["video"], "video_step")],

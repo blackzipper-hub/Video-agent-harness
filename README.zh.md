@@ -101,12 +101,12 @@ pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no
 Windows PowerShell：
 
 ```powershell
-$env:OPENAI_API_KEY = "your-openai-key"
-$env:VIDEO_AGENT_MODEL = "gpt-5.6-terra"
-$env:VIDEO_RUNTIME_URL = "http://127.0.0.1:8001"
-$env:VIDEO_RUNTIME_SERVICE_TOKEN = "video-harness-runtime-local"
-pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
+Copy-Item .env.example .env
+# 在 .env 中填写 OPENAI_API_KEY 和需要的媒体 Provider Key
+.\scripts\start-video-harness.ps1
 ```
+
+Windows 启动脚本会读取仓库 `.env`；迁移工作区中未创建该文件时，也可以临时读取同级 `cuti-video-agent/.env` 的现有 Key。脚本会把已启用的 Windows 用户代理传给 Node，避免浏览器可以联网而模型请求持续超时。
 
 保持这个终端运行。DeepSeek Harness 默认监听 `http://127.0.0.1:3080`。
 

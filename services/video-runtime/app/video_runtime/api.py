@@ -31,6 +31,7 @@ from .models import (
 from .plugins import PluginDependencyError, VideoPluginManifest
 from .plugins.registry import configured_plugin_roots
 from .upload_security import verify_uploaded_file
+from .video_generation_contracts import video_generation_contracts
 
 
 router = APIRouter(prefix="/api/video", tags=["video-runtime"])
@@ -498,10 +499,31 @@ async def list_plugins(
 
 def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
     workflows: list[dict] = []
-    for loaded in build_runtime.plugins.loaded:
+    for loaded in tuple(build_runtime.plugins.loaded):
         describe = getattr(loaded.implementation, "describe_workflows", None)
         if callable(describe):
-            workflows.extend(describe())
+            try:
+                workflows.extend(describe())
+            except Exception as exc:
+                workflows.extend({
+                    "id": workflow_id,
+                    "title": workflow_id,
+                    "mode": "plugin",
+                    "parameters": {},
+                    "pipeline": [],
+                    "requiresKeyframe": None,
+                    "entrypoints": [],
+                    "skillDependencies": list(loaded.manifest.skills),
+                    "source": "plugin",
+                    "pluginId": loaded.manifest.id,
+                    "available": False,
+                    "unavailableReason": f"Workflow contract failed to load: {exc}",
+                    "requiredCapabilities": [],
+                    "missingCapabilities": [],
+                    "userSelectable": False,
+                    "executionKind": "unavailable",
+                    "compiler": None,
+                } for workflow_id in loaded.manifest.contributions.workflows)
             continue
         workflows.extend({
             "id": workflow_id,
@@ -527,8 +549,15 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
     from .retired import is_retired_public_workflow
     for item in workflows:
         if build_runtime.skills.catalog.has(item["id"]):
-            metadata = build_runtime.skills.catalog.load(item["id"]).metadata
-            item["description"] = metadata.description
+            try:
+                metadata = build_runtime.skills.catalog.load(item["id"]).metadata
+                item["description"] = metadata.description
+            except Exception as exc:
+                item["available"] = False
+                item["userSelectable"] = False
+                item["executionKind"] = "unavailable"
+                item["unavailableReason"] = f"Workflow Skill failed to load: {exc}"
+                item.setdefault("description", item["title"])
         else:
             item.setdefault("description", item["title"])
     return sorted(
@@ -648,6 +677,7 @@ async def get_workflow(
         resource_contents = []
     return {"data": {
         **view,
+        "videoModelCapabilities": video_generation_contracts(),
         "instructions": instructions,
         "resourceOwnerSkillId": instruction_skill_id,
         "resources": resources,

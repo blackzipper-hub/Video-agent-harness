@@ -325,6 +325,8 @@ export interface WorkflowDetail extends WorkflowSummary {
   resourceOwnerSkillId: string
   resources: string[]
   resourceContents: Array<{ path: string; content: string }>
+  /** Runtime-owned provider facts; Workflow Skills only teach planning policy. */
+  videoModelCapabilities?: Array<Record<string, JsonValue>>
 }
 
 export interface SkillDetail {

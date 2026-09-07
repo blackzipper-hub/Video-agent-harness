@@ -258,7 +258,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.title)}\nMode: ${String(value.mode)}\nExecution: ${String(value.executionKind)}\nCompiler: ${value.compiler == null ? 'none' : String(value.compiler)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n${bundledResourceHeader(value)}Required Skill dependencies (load each with video_skill_load): ${Array.isArray(value.skillDependencies) && value.skillDependencies.length > 0 ? value.skillDependencies.join(', ') : 'none'}\n\nAUTHORITATIVE WORKFLOW INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
+        text: `${String(value.title)}\nMode: ${String(value.mode)}\nExecution: ${String(value.executionKind)}\nCompiler: ${value.compiler == null ? 'none' : String(value.compiler)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n${bundledResourceHeader(value)}Required Skill dependencies (load each with video_skill_load): ${Array.isArray(value.skillDependencies) && value.skillDependencies.length > 0 ? value.skillDependencies.join(', ') : 'none'}\n\nRUNTIME VIDEO MODEL CAPABILITIES (authoritative execution facts; narrative shots are not provider calls):\n${JSON.stringify(value.videoModelCapabilities ?? [], null, 2)}\n\nAUTHORITATIVE WORKFLOW INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadWorkflow(args.workflow_id, identityOf(exec.agent), exec.signal)
@@ -660,7 +660,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_plan_patch_submit',
-    description: 'Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.',
+    description: 'Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. Persist planning documents whose final content is already known with runtime.artifact.persist; do not call atomic.text.generate just to repeat the Agent planning already done. Reserve atomic.text.generate for genuinely independent text generation or transformation. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.',
     parameters: {
       project_id: { type: 'string', required: true },
       build_id: { type: 'string', required: true },

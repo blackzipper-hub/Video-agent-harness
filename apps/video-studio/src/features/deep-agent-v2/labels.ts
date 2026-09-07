@@ -43,11 +43,22 @@ export function capabilityLabel(capabilityId: string, t: Translate): string {
 }
 
 function numberedShotPart(value: string): string | null {
-  const match = value.match(/^(?:shot-)?(\d+)$/i)
-  return match ? match[1] : null
+  const match = value.match(/^(?:(?:shot|segment)[-_]?)?(\d+)$/i)
+  if (!match) return null
+  return String(Number.parseInt(match[1], 10))
 }
 
-export function planStepLabel(stepId: string, t: Translate): string {
+export type StepEntityNames = Readonly<Record<string, string>>
+
+function entityName(id: string, names: StepEntityNames): string {
+  return names[id] || names[id.replace(/-/g, '_')] || id.replace(/[-_]/g, ' ')
+}
+
+export function planStepLabel(
+  stepId: string,
+  t: Translate,
+  entityNames: StepEntityNames = {},
+): string {
   const id = (stepId || '').trim()
   if (!id) return id
   const exact = lookup(t, `da.step.${id}`)
@@ -58,16 +69,35 @@ export function planStepLabel(stepId: string, t: Translate): string {
     const n = numberedShotPart(shotVideo[1])
     return n
       ? interpolate(t('da.step.shotVideo'), { n })
-      : interpolate(t('da.step.shotVideoNamed'), { id: shotVideo[1] })
+      : interpolate(t('da.step.shotVideoNamed'), { id: entityName(shotVideo[1], entityNames) })
   }
   const shotKeyframe = id.match(/^shot-(.+)-keyframe$/i)
   if (shotKeyframe) {
     const n = numberedShotPart(shotKeyframe[1])
-    return interpolate(t('da.step.shotKeyframe'), { n: n || shotKeyframe[1] })
+    return interpolate(t('da.step.shotKeyframe'), { n: n || entityName(shotKeyframe[1], entityNames) })
   }
   const characterRef = id.match(/^character-(.+)-reference$/i)
   if (characterRef) {
-    return interpolate(t('da.step.characterReferenceNamed'), { id: characterRef[1] })
+    return interpolate(t('da.step.characterReferenceNamed'), {
+      id: entityName(characterRef[1], entityNames),
+    })
+  }
+  const sceneRef = id.match(/^scene-(.+)-reference$/i)
+  if (sceneRef) {
+    return interpolate(t('da.step.sceneReferenceNamed'), {
+      id: entityName(sceneRef[1], entityNames),
+    })
+  }
+  const source = id.match(/^source-(\d+)$/i)
+  if (source) {
+    return interpolate(t('da.step.sourceNamed'), { n: source[1] })
+  }
+  const productValidation = id.match(/^shot-(.+)-product-validation$/i)
+  if (productValidation) {
+    const n = numberedShotPart(productValidation[1])
+    return interpolate(t('da.step.shotProductValidation'), {
+      n: n || entityName(productValidation[1], entityNames),
+    })
   }
   return id.replace(/[-_]/g, ' ')
 }

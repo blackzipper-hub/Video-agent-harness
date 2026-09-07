@@ -423,12 +423,19 @@ class S3Utils:
         target_fps: int = 24,
         target_duration: Optional[float] = None,
         strip_audio: bool = True,
-        watermark: bool = True,
+        watermark: bool = False,
         update_version_uuid: Optional[str] = None,
     ) -> str:
-        """统一入口：若已是本 CDN 直接返回；否则下载→单次 FFmpeg 归一化
-        (resize+fps+strip audio+trim+watermark)→上传。
-        默认统一到 24fps、去除音轨、叠加水印，确保后续 -c copy concat 安全。"""
+        """Persist a clean canonical video, returning first-party URLs unchanged.
+
+        Video Runtime artifacts are build inputs: they can be trimmed, retried,
+        tail-frame chained, or reused by a later PlanPatch.  A presentation
+        watermark must therefore never be baked into this canonical copy or it
+        becomes generation input and compounds on every reuse.  Callers that
+        deliberately create a delivery derivative may still pass
+        ``watermark=True``; normal provider ingestion defaults to a clean
+        master.
+        """
         if not video_url or not video_url.strip():
             return video_url or ""
         if is_our_cdn_url(video_url):

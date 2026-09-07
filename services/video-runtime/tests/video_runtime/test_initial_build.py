@@ -844,6 +844,8 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         project = await runtime.repo.get_project(project.id)
 
         catalog = {item.capability: item for item in runtime.plan_patch_capability_catalog()}
+        self.assertIn("runtime.artifact.persist", catalog)
+        self.assertEqual(catalog["runtime.artifact.persist"].estimated_cost, 0)
         self.assertIn("media.transcribe", catalog)
         self.assertIn("subtitle.compose", catalog)
         self.assertIn("media.subtitle_burn", catalog)
