@@ -12,7 +12,6 @@ CAPABILITY_ALIASES = {
     "generate-image": "image.generate",
     "generate-music": "music.generate",
     "generate-video": "video.generate",
-    "generate-video-pipeline": "video.pipeline.generate",
     "generate-video-direct": "video_gen.generate",
     "edit-video": "video.edit",
     "video-edit": "video.edit",
@@ -146,13 +145,11 @@ def default_terminal_events(output_type: str) -> list[str]:
 
 
 def default_capabilities() -> list[CapabilityManifest]:
-    """Load platform, provider, and legacy manifests independently of Skills."""
+    """Load platform and provider manifests independently of Skills."""
     from app.capabilities.manifests.platform import platform_capabilities
     from app.integrations.providers.manifests import provider_capabilities
-    from app.legacy.video_pipeline.capability import legacy_video_pipeline_capability
 
     return [
         *platform_capabilities(),
         *provider_capabilities(),
-        legacy_video_pipeline_capability(),
     ]

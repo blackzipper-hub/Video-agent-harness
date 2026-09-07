@@ -20,7 +20,7 @@ STAGE_CAPABILITY_IDS = frozenset({
     "keyframe.generate", "shot.video.generate", "video.assemble",
     "keyframe.regenerate", "character.regenerate", "shot.video.regenerate",
     "story.generate", "image.generate", "music.generate", "video.generate",
-    "video_gen.generate", "video.edit", "video.pipeline.generate",
+    "video_gen.generate", "video.edit",
     "api.provider.generate", "api.ark_protocol.generate", "media.concat",
     "media.extract_frame", "media.audio_trim", "media.audio_analyze",
     "media.audio_cut",
