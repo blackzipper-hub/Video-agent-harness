@@ -946,6 +946,11 @@ class ContinuousPlanInitializationTest(unittest.TestCase):
                 self.assertEqual(plan.workflow_id, workflow_id)
                 self.assertEqual(plan.estimated_cost, 0)
                 self.assertEqual(plan.next_checkpoint.planning_mode, "agentic")
+                self.assertIn(
+                    "The loaded Workflow supplies creative choices the user left open.",
+                    plan.next_checkpoint.planner_instruction,
+                )
+                self.assertNotIn("unavailable Artifacts", plan.next_checkpoint.planner_instruction)
 
     def test_sources_are_reused_but_missing_or_foreign_sources_are_rejected(self) -> None:
         source = MediaArtifactVersion(

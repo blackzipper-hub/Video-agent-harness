@@ -428,8 +428,8 @@ def _initial_video_build_prompt(
             "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
         ),
         (
-            "Create a ProjectIntent containing only known goals and constraints. Do not invent "
-            "shots, captions, timing, or other details that depend on media not generated yet."
+            "Create a ProjectIntent containing only known goals and constraints. "
+            "Shots, captions, and timing wait for media that does not exist yet."
             if staged else
             "Turn the visible user request and creation controls into one complete, valid VideoSpec."
         ),

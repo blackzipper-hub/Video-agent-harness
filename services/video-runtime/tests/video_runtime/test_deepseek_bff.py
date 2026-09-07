@@ -605,6 +605,30 @@ Keep the requested visual tone consistent.
         self.assertEqual(run["workflow_id"], "mv")
         self.assertEqual(run["activated_skill_ids"], [])
 
+    def test_staged_project_intent_prompt_states_brief_job(self):
+        from unittest.mock import patch
+        from app.video_runtime.deepseek_bff import _initial_video_build_prompt
+
+        with patch.dict("os.environ", {
+            "VIDEO_STAGED_PLANNING_ENABLED": "true",
+            "VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED": "true",
+        }):
+            prompt = _initial_video_build_prompt(
+                objective="做个mv 30s $mv",
+                project_id="p1",
+                base_project_version_id="v1",
+                idempotency_key="k1",
+                user_option=None,
+                input_files=[],
+                workflow_id="mv",
+                activated_skill_ids=[],
+            )
+        self.assertIn("containing only known goals and constraints", prompt)
+        self.assertIn("Shots, captions, and timing wait for media that does not exist yet", prompt)
+        self.assertNotIn("or other details that depend on media not generated yet", prompt)
+        self.assertNotIn("brief is the requested film", prompt)
+        self.assertNotIn("Example: user asked", prompt)
+
     def test_create_persists_independent_ui_and_content_languages(self):
         created = self.client.post(
             "/chat-v1/service/v2/runs",
