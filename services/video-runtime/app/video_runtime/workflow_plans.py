@@ -9,24 +9,17 @@ from typing import Any
 
 from app.orchestration.workflow_compiler.registry import WorkflowSpec
 
-from .initial_build import BuildPlanValidationError, topological_steps
+from .plan_utils import BuildPlanValidationError, topological_steps
 from .models import MediaArtifactVersion, RebuildPlan, RebuildPlanItem, VideoSpec
 from .plugins import PluginContext
 
 
-UNAVAILABLE_WORKFLOW_MODES = {
-    "open_montage": "OpenMontage Bridge is not installed in the Video Runtime",
-    "ink_press_product_workflow": "Video Shotcraft/Remotion template runtime is not installed",
-}
+UNAVAILABLE_WORKFLOW_MODES: dict[str, str] = {}
 
-UNAVAILABLE_WORKFLOW_CAPABILITIES = {
-    "open_montage": ["open_montage.tool.invoke"],
-    "ink_press_product_workflow": ["video-shotcraft.render"],
-}
+UNAVAILABLE_WORKFLOW_CAPABILITIES: dict[str, list[str]] = {}
 
 SUPPORTED_WORKFLOW_MODES = {
-    "keyframe_pipeline", "direct_video", "short_drama", "seedance2",
-    "mv", "short_drama_workflow", "product_ad_video",
+    "seedance2", "mv", "short_drama_workflow", "product_ad_video",
     "cuti_product_workflow", "cuti_scenario_product_workflow",
     "libtv_product_workflow",
 }
@@ -37,36 +30,6 @@ SUPPORTED_WORKFLOW_MODES = {
 # Harness extension, while these fields are the Cuti workflow's source
 # contract and must not drift during migration.
 ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
-    "workflow-keyframe-pipeline": {
-        "mode": "keyframe_pipeline",
-        "pipeline": (
-            "outline.generate", "character.generate", "scene.generate",
-            "shot.generate", "keyframe.generate", "shot.video.generate",
-            "video.assemble",
-        ),
-        "requires_keyframe": True,
-        "parameters": {"shot_workflow_mode": "keyframe_i2v"},
-    },
-    "workflow-direct-video": {
-        "mode": "direct_video",
-        "pipeline": (
-            "atomic.video.generate", "video_gen.generate", "video.generate",
-        ),
-        "requires_keyframe": False,
-        "parameters": {"shot_workflow_mode": "direct"},
-    },
-    "workflow-short-drama": {
-        "mode": "short_drama",
-        "pipeline": (
-            "outline.generate", "character.generate", "scene.generate",
-            "shot.generate", "shot.video.generate", "video.assemble",
-        ),
-        "requires_keyframe": False,
-        "parameters": {
-            "shot_workflow_mode": "reference_t2v",
-            "content_category": "short_drama",
-        },
-    },
     "seedance2": {
         "mode": "seedance2",
         "pipeline": (
@@ -146,28 +109,6 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
             "workflow_mode": "libtv_product_workflow",
             "shot_workflow_mode": "product_multiref_seedance2",
             "content_category": "product_ad",
-        },
-    },
-    "open-montage": {
-        "mode": "open_montage",
-        "pipeline": (
-            "outline.generate", "character.generate", "scene.generate",
-            "shot.generate", "keyframe.generate", "shot.video.generate",
-            "video.assemble", "open_montage.tool.invoke", "api.provider.generate",
-            "media.concat", "media.extract_frame",
-        ),
-        "requires_keyframe": True,
-        "parameters": {"shot_workflow_mode": "open_montage"},
-    },
-    "ink-press-product-workflow": {
-        "mode": "ink_press_product_workflow",
-        "pipeline": ("atomic.text.generate", "media.extract_frame"),
-        "requires_keyframe": False,
-        "parameters": {
-            "workflow_mode": "ink_press_product_workflow",
-            "content_category": "product_ad",
-            "source_skill": "video-shotcraft",
-            "template_name": "ink_press",
         },
     },
     # $mv was installed in Cuti's runtime Skill store rather than the checked-in
@@ -543,34 +484,8 @@ def _reject_capabilities(plan: RebuildPlan, workflow_id: str, forbidden: set[str
         )
 
 
-def _validate_keyframe_plan(plan: RebuildPlan) -> None:
-    by_id = _by_id(plan)
-    for required in ("outline", "characters", "scenes", "shots"):
-        if required not in by_id:
-            raise BuildPlanValidationError(f"keyframe pipeline is missing stage {required}")
-    keyframes = [item for item in plan.items if item.output_artifact_type == "keyframe"]
-    clips = _video_clips(plan)
-    if not keyframes or len(keyframes) != len(clips):
-        raise BuildPlanValidationError("keyframe pipeline requires one keyframe per video clip")
-    for clip in clips:
-        start = clip.parameters.get("start_image_from_step")
-        if not start or start not in by_id or by_id[start].output_artifact_type != "keyframe":
-            raise BuildPlanValidationError("keyframe pipeline video must start from its keyframe")
-    _reject_capabilities(plan, plan.workflow_id, {
-        "media.tts", "atomic.music.generate", "suno.generate",
-        "media.subtitle.compose", "subtitle.compose", "media.subtitle.burn",
-    })
 
 
-def _validate_direct_plan(plan: RebuildPlan) -> None:
-    forbidden_types = {"script", "characters", "storyboard", "outline", "scenes", "shots", "keyframe"}
-    present = sorted({item.output_artifact_type for item in plan.items} & forbidden_types)
-    if present:
-        raise BuildPlanValidationError(
-            "direct video must not create full production stages: " + ", ".join(present)
-        )
-    if not _video_clips(plan):
-        raise BuildPlanValidationError("direct video produced no clip")
 
 
 def _validate_seedance2_plan(plan: RebuildPlan) -> None:
@@ -650,127 +565,10 @@ def _validate_external_short_drama_plan(plan: RebuildPlan) -> None:
             raise BuildPlanValidationError("short-drama-workflow must not inject Director Skills")
 
 
-def _validate_system_short_drama_plan(plan: RebuildPlan) -> None:
-    by_id = _by_id(plan)
-    for required in ("outline", "characters", "scenes", "shots"):
-        if required not in by_id:
-            raise BuildPlanValidationError(f"workflow-short-drama is missing stage {required}")
-    if any(item.output_artifact_type == "keyframe" for item in plan.items):
-        raise BuildPlanValidationError("workflow-short-drama must skip keyframes")
-    for clip in _video_clips(plan):
-        if clip.parameters.get("generation_mode") != "t2v":
-            raise BuildPlanValidationError("workflow-short-drama must use reference T2V")
-        if "start_image_from_step" in clip.parameters or clip.skill_ids:
-            raise BuildPlanValidationError(
-                "workflow-short-drama must not tail-chain or inject legacy Director Skills"
-            )
 
 
-def compile_keyframe(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
-    """Compile Cuti's outline→references→keyframes→video stage chain."""
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
-        "title": spec.title, "content": spec.model_dump(mode="json"),
-    })
-    outline = b.add("outline", "outline", "runtime.artifact.persist", parameters={
-        "title": f"{spec.title} outline",
-        "content": [{
-            "shotId": shot.id, "beat": shot.beat,
-            "visualPrompt": shot.visual_prompt, "narration": shot.narration,
-        } for shot in spec.shots],
-    }, depends_on=[spec_step])
-    characters = b.add("characters", "characters", "runtime.artifact.persist", parameters={
-        "title": "Characters", "content": [item.model_dump(mode="json") for item in spec.characters],
-    }, depends_on=[outline])
-    scenes = b.add("scenes", "scenes", "runtime.artifact.persist", parameters={
-        "title": "Scenes", "content": spec.workflow_parameters.get("scenes", []),
-    }, depends_on=[outline, characters])
-    shots = b.add("shots", "shots", "runtime.artifact.persist", parameters={
-        "title": "Shots", "content": [shot.model_dump(mode="json") for shot in spec.shots],
-    }, depends_on=[scenes, characters])
-    character_refs = b.character_references(characters, skills=[])
-    scene_refs = b.scene_references(scenes)
-    clips: list[str] = []
-    for shot in spec.shots:
-        refs = [character_refs[item] for item in shot.character_ids if item in character_refs]
-        refs = list(dict.fromkeys([*refs, *scene_refs, *b.image_refs_for_shot(shot)]))
-        keyframe = b.add(
-            f"shot-{shot.id}-keyframe", "keyframe", "atomic.image.generate",
-            parameters={
-                "prompt": shot.visual_prompt, "model": spec.providers.image,
-                "aspect_ratio": spec.aspect_ratio, "shot_id": shot.id,
-                "artifact_role": "shot_keyframe", "reference_from_steps": refs,
-            },
-            depends_on=[shots, *refs], cost=0.08, skills=[],
-        )
-        clips.append(b.add(
-            f"shot-{shot.id}-video", "video_clip", "atomic.video.generate",
-            parameters={
-                "prompt": shot.visual_prompt, "duration": shot.duration_seconds,
-                "model": spec.providers.video, "resolution": spec.resolution,
-                "aspect_ratio": spec.aspect_ratio, "generate_audio": True,
-                "generation_mode": "i2v", "start_image_from_step": keyframe,
-                "reference_from_steps": refs,
-                "character_reference_from_steps": [
-                    character_refs[item] for item in shot.character_ids if item in character_refs
-                ],
-                "scene_reference_from_steps": scene_refs,
-            },
-            depends_on=[keyframe, *refs], cost=0.65, skills=[],
-        ))
-    plan = b.finish(clips, transition=0.0, require_audio=True)
-    _validate_keyframe_plan(plan)
-    return plan
 
 
-def compile_direct(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
-        "title": spec.title, "content": spec.model_dump(mode="json"),
-    })
-    clips = []
-    for shot in spec.shots:
-        logical_ids = shot.reference_asset_ids or spec.source_asset_ids
-        refs = b.image_refs_for_shot(shot)
-        video_refs = [
-            b.source_steps[item]
-            for item in logical_ids
-            if item in b.source_steps and item in b.sources
-            and b.sources[item].type in {
-                "source_video", "video", "video_clip", "video_reference",
-            }
-        ]
-        audio_refs = [
-            b.source_steps[item]
-            for item in logical_ids
-            if item in b.source_steps and item in b.sources
-            and b.sources[item].type in {
-                "source_audio", "audio", "audio_bgm", "audio_reference",
-            }
-        ]
-        clips.append(b.add(
-            f"shot-{shot.id}-video", "video_clip", "atomic.video.generate",
-            parameters={
-                "prompt": shot.visual_prompt, "duration": shot.duration_seconds,
-                "model": spec.providers.video, "resolution": spec.resolution,
-                "aspect_ratio": spec.aspect_ratio, "generate_audio": True,
-                "generation_mode": (
-                    "i2v" if refs and not (video_refs or audio_refs)
-                    else "reference_to_video" if video_refs or audio_refs
-                    else "t2v"
-                ),
-                "reference_from_steps": refs,
-                "video_reference_from_steps": video_refs,
-                "audio_reference_from_steps": audio_refs,
-            }, depends_on=list(dict.fromkeys([
-                spec_step, *refs, *video_refs, *audio_refs,
-            ])), cost=0.65, skills=[],
-        ))
-    plan = b.finish(clips, transition=0.0, require_audio=True)
-    _validate_direct_plan(plan)
-    return plan
 
 
 def compile_seedance2(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
@@ -962,47 +760,6 @@ def compile_short_drama_workflow(
     return plan
 
 
-def compile_system_short_drama(
-    workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec,
-) -> RebuildPlan:
-    """System short drama: Cuti stage chain, reference T2V, no keyframes."""
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
-        "title": spec.title, "content": spec.model_dump(mode="json"),
-    })
-    outline = b.add("outline", "outline", "runtime.artifact.persist", parameters={
-        "title": f"{spec.title} outline",
-        "content": [shot.model_dump(mode="json") for shot in spec.shots],
-    }, depends_on=[spec_step])
-    characters = b.add("characters", "characters", "runtime.artifact.persist", parameters={
-        "title": "Characters", "content": [item.model_dump(mode="json") for item in spec.characters],
-    }, depends_on=[outline])
-    scenes = b.add("scenes", "scenes", "runtime.artifact.persist", parameters={
-        "title": "Scenes", "content": spec.workflow_parameters.get("scenes", []),
-    }, depends_on=[outline, characters])
-    shots = b.add("shots", "shots", "runtime.artifact.persist", parameters={
-        "title": "Shots", "content": [shot.model_dump(mode="json") for shot in spec.shots],
-    }, depends_on=[scenes])
-    character_refs = b.character_references(characters, skills=[])
-    scene_refs = b.scene_references(scenes)
-    clips: list[str] = []
-    for shot in spec.shots:
-        refs = [character_refs[item] for item in shot.character_ids if item in character_refs]
-        refs = list(dict.fromkeys([*refs, *scene_refs, *b.image_refs_for_shot(shot)]))
-        clips.append(b.add(
-            f"shot-{shot.id}-video", "video_clip", "atomic.video.generate",
-            parameters={
-                "prompt": shot.visual_prompt, "duration": shot.duration_seconds,
-                "model": spec.providers.video, "resolution": spec.resolution,
-                "aspect_ratio": spec.aspect_ratio, "generate_audio": True,
-                "generation_mode": "t2v", "reference_from_steps": refs,
-                "native_dialogue": True,
-            }, depends_on=[shots, *refs], cost=0.65, skills=[],
-        ))
-    plan = b.finish(clips, transition=0.0, require_audio=True)
-    _validate_system_short_drama_plan(plan)
-    return plan
 
 
 def compile_cuti_product(
@@ -2178,11 +1935,8 @@ def compile_skill_workflow(
 # This prevents a misspelled/copied frontmatter mode from becoming an implicit
 # default compiler.
 WORKFLOW_ID_COMPILERS = {
-    "workflow-keyframe-pipeline": ("keyframe_pipeline", compile_keyframe),
-    "workflow-direct-video": ("direct_video", compile_direct),
     "seedance2": ("seedance2", compile_seedance2),
     "mv": ("mv", compile_mv_compat),
-    "workflow-short-drama": ("short_drama", compile_system_short_drama),
     "short-drama-workflow": ("short_drama_workflow", compile_short_drama_workflow),
     "product-ad-video": ("product_ad_video", compile_product_ad),
     "cuti-product-workflow": ("cuti_product_workflow", compile_cuti_product),

@@ -1,5 +1,5 @@
 """Expand failed-task replacement into append-only tasks and pending cancellations."""
-from .initial_build import topological_steps
+from .plan_utils import topological_steps
 from .models import CheckpointResolution, RebuildPlan, BuildStep
 
 

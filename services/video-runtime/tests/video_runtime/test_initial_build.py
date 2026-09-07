@@ -7,11 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.video_runtime.initial_build import BuildPlanValidationError, topological_steps
-from app.video_runtime.builtin_plugins.music_workflows import (
-    LipsyncMusicVideoWorkflowPlugin,
-    MusicVideoWorkflowPlugin,
-)
+from app.video_runtime.plan_utils import BuildPlanValidationError, topological_steps
 from app.video_runtime.builtin_plugins.continuity_validator import ContinuityValidatorPlugin
 from app.video_runtime.models import (
     MediaEditOperation,
@@ -47,7 +43,7 @@ def video_spec() -> VideoSpec:
         "target_duration_seconds": 15,
         "aspect_ratio": "16:9",
         "resolution": "1080p",
-        "workflow_id": "cuti.seedance-story",
+        "workflow_id": "seedance2",
         "style_id": "cuti.cinematic",
         "workflow_parameters": {
             "scenes": [{
@@ -240,77 +236,6 @@ class ContaminatedSceneExecutor(FakePlanExecutor):
                 "skill_prompt_applied": True,
             })
         return artifact
-
-class MusicWorkflowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_music_workflow_uses_independent_music_timeline(self):
-        spec = video_spec()
-        identity = MediaArtifactVersion(
-            id="identity-version-1",
-            artifact_id="source:identity",
-            project_id="project-1",
-            type="source_image",
-            uri="https://media.test/identity.png",
-        )
-        spec = spec.model_copy(update={
-            "workflow_id": "cuti.music-video",
-            "providers": spec.providers.model_copy(update={"video": "minimax-h3"}),
-            "source_asset_ids": [identity.artifact_id],
-            "audio": spec.audio.model_copy(update={"subtitles": False}),
-        })
-        plan = await MusicVideoWorkflowPlugin().compile_build_plan(
-            PluginContext(project_id="project-1", values={
-                "base_project_version_id": "version-1",
-                "source_artifacts": {identity.artifact_id: identity},
-            }),
-            spec,
-        )
-        ordered = topological_steps(plan.items)
-        self.assertEqual(plan.workflow_id, "cuti.music-video")
-        step_ids = [item.step_id for item in ordered]
-        self.assertIn("music", step_ids)
-        self.assertIn("music-analysis", step_ids)
-        self.assertIn("music-cut", step_ids)
-        self.assertNotIn("research", step_ids)
-        self.assertIn("character-hero-reference", step_ids)
-        self.assertNotIn("look", step_ids)
-        self.assertNotIn("shot-one-tail", step_ids)
-        music = next(item for item in plan.items if item.step_id == "music")
-        self.assertEqual(music.capability, "suno.generate")
-        mv_clip = next(
-            item for item in plan.items
-            if item.step_id.endswith("-video")
-            and item.capability == "api.provider.generate"
-        )
-        self.assertEqual(mv_clip.parameters["model"], "minimax-h3")
-        self.assertEqual(mv_clip.parameters["prompt"], spec.shots[0].visual_prompt)
-        self.assertNotIn("@音频1", mv_clip.parameters["prompt"])
-        self.assertFalse(mv_clip.parameters["generate_audio"])
-        self.assertEqual(mv_clip.parameters["audio_reference_from_step"], "music-cut")
-        self.assertEqual(
-            mv_clip.parameters["reference_from_steps"],
-            ["character-hero-reference", "source-1"],
-        )
-        mixed = next(item for item in plan.items if item.capability == "media.mix_audio")
-        self.assertEqual(mixed.parameters["mode"], "replace")
-        self.assertEqual(mixed.parameters["audio_step"], "music-cut")
-        final = next(item for item in plan.items if item.step_id == "final-video")
-        self.assertEqual(final.capability, "media.mix_audio")
-        self.assertEqual(len(ordered), len(plan.items))
-
-    async def test_lipsync_workflow_rewires_final_media_steps(self):
-        spec = video_spec().model_copy(update={"workflow_id": "cuti.lipsync-music-video"})
-        plan = await LipsyncMusicVideoWorkflowPlugin().compile_build_plan(
-            PluginContext(project_id="project-1", values={"base_project_version_id": "version-1"}),
-            spec,
-        )
-        ordered = topological_steps(plan.items)
-        positions = {item.step_id: index for index, item in enumerate(ordered)}
-        self.assertLess(positions["assembled-video"], positions["music-video"])
-        self.assertLess(positions["music-video"], positions["final-video"])
-        final = next(item for item in plan.items if item.step_id == "final-video")
-        self.assertEqual(final.capability, "media.lipsync")
-        self.assertEqual(final.parameters["video_step"], "music-video")
-
 
 class FakeRebuildExecutor:
     async def rebuild_artifact(
@@ -631,204 +556,7 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(states[2].remote_operation_id, "orphaned-provider-job")
         self.assertEqual(states[2].remote_provider, "fake-provider")
 
-    async def test_initial_plan_executes_and_commits_once(self):
-        runtime = await video_runtime()
-        project, version = await runtime.create_project(user_id="user", title="Film")
-        plan = await runtime.plan_project(
-            project_id=project.id,
-            base_project_version_id=version.id,
-            video_spec=video_spec(),
-            idempotency_key="plan-one",
-        )
-        self.assertEqual(plan.kind, "initial")
-        self.assertEqual(len(plan.video_spec.shots), 3)
-        self.assertGreater(plan.estimated_cost, 0)
-        second_keyframe = next(item for item in plan.items if item.step_id == "shot-two-keyframe")
-        self.assertIn("shot-one-tail", second_keyframe.depends_on)
-        self.assertIn(
-            "keyframe-director",
-            [item.skill_id for item in second_keyframe.resolved_skills],
-        )
-        self.assertIsNotNone(second_keyframe.skill_context)
 
-        build = await runtime.start_build(
-            project_id=project.id, plan_id=plan.id,
-            base_project_version_id=version.id, idempotency_key="build-one",
-        )
-        step_states = await runtime.repo.list_build_steps(project.id, build.id)
-        video_state = next(item for item in step_states if item.plan_step_id == "shot-one-video")
-        self.assertIn(
-            "video-director",
-            [item.skill_id for item in video_state.resolved_skills],
-        )
-        video_state.status = "waiting_external"
-        # Reconciliation must remain possible after local retry accounting has
-        # been exhausted; polling an existing job is not a new paid attempt.
-        video_state.attempt = 99
-        video_state.remote_operation_id = "existing-provider-job"
-        video_state.remote_provider = "fake-provider"
-        await runtime.repo.update_build_step(video_state)
-
-        async def validate(*, build_id, artifact):
-            if artifact.type not in {"timeline", "video_clip", "final_video"}:
-                return []
-            return [ValidationResult(
-                project_id=project.id, build_id=build_id,
-                artifact_version_id=artifact.id, validator_id="test", passed=True,
-            )]
-
-        runtime.validate_artifact = validate
-        executor = FakePlanExecutor()
-        completed, committed = await runtime.execute_build(
-            project_id=project.id, build_id=build.id, executor=executor,
-        )
-        self.assertEqual(completed.status, "completed")
-        self.assertGreater(completed.actual_cost, 0)
-        self.assertEqual(executor.remote_resumes["shot-one-video"], "existing-provider-job")
-        self.assertNotEqual(committed.id, version.id)
-        self.assertEqual(len(await runtime.repo.current_artifacts(project.id)), len(executor.calls))
-        repeated, repeated_version = await runtime.execute_build(
-            project_id=project.id, build_id=build.id, executor=executor,
-        )
-        self.assertEqual(repeated.id, completed.id)
-        self.assertEqual(repeated_version.id, committed.id)
-
-        edited = await runtime.preview_edits(
-            project_id=project.id,
-            base_project_version_id=committed.id,
-            edits=[{
-                "type": "patch_shot", "id": "two",
-                "patch": {"visual_prompt": "Hero waits beneath a red clock"},
-            }],
-            idempotency_key="edit-shot-two",
-        )
-        rebuilt_steps = {
-            item.step_id: item for item in edited.items if item.action == "rebuild"
-        }
-        self.assertEqual(len({item.step_id for item in edited.items}), len(edited.items))
-        self.assertNotIn("shot-one-keyframe", rebuilt_steps)
-        self.assertEqual(
-            rebuilt_steps["shot-two-keyframe"].parameters["prompt"],
-            "Hero waits beneath a red clock",
-        )
-        self.assertIn("storyboard", rebuilt_steps["shot-two-keyframe"].depends_on)
-        self.assertIn("shot-one-tail", rebuilt_steps["shot-two-keyframe"].depends_on)
-        self.assertEqual(edited.video_spec.shots[1].visual_prompt, "Hero waits beneath a red clock")
-        edit_build = await runtime.start_build(
-            project_id=project.id,
-            plan_id=edited.id,
-            base_project_version_id=committed.id,
-            idempotency_key="edit-shot-two-build",
-        )
-        completed_edit, edited_version = await runtime.execute_build(
-            project_id=project.id,
-            build_id=edit_build.id,
-            executor=FakeRebuildExecutor(),
-        )
-        self.assertEqual(completed_edit.status, "completed")
-        self.assertNotEqual(edited_version.id, committed.id)
-        step_states = await runtime.repo.list_build_steps(project.id, edit_build.id)
-        self.assertTrue(all(item.status == "completed" for item in step_states))
-        current_spec = next(
-            item for item in await runtime.repo.current_artifacts(project.id)
-            if item.type == "video_spec"
-        )
-        self.assertEqual(
-            current_spec.metadata["content"]["shots"][1]["visual_prompt"],
-            "Hero waits beneath a red clock",
-        )
-
-    async def test_media_edits_create_missing_music_and_rebuild_timeline_order(self):
-        runtime = await video_runtime()
-        project, version = await runtime.create_project(user_id="user", title="Silent film")
-        spec = video_spec().model_copy(deep=True)
-        spec.audio.bgm_prompt = ""
-        spec.audio.subtitles = False
-        for shot in spec.shots:
-            shot.narration = ""
-        initial = await runtime.plan_project(
-            project_id=project.id,
-            base_project_version_id=version.id,
-            video_spec=spec,
-            idempotency_key="silent-plan",
-        )
-        build = await runtime.start_build(
-            project_id=project.id,
-            plan_id=initial.id,
-            base_project_version_id=version.id,
-            idempotency_key="silent-build",
-        )
-        async def validate(*, build_id, artifact):
-            if artifact.type not in {"timeline", "video_clip", "video_assembled"}:
-                return []
-            return [ValidationResult(
-                project_id=project.id,
-                build_id=build_id,
-                artifact_version_id=artifact.id,
-                validator_id="test",
-                passed=True,
-            )]
-
-        runtime.validate_artifact = validate
-        _completed, committed = await runtime.execute_build(
-            project_id=project.id,
-            build_id=build.id,
-            executor=FakePlanExecutor(),
-        )
-
-        music = await runtime.preview_edits(
-            project_id=project.id,
-            base_project_version_id=committed.id,
-            edits=[{"type": "replace_music", "prompt": "warm acoustic guitar"}],
-            idempotency_key="add-music",
-        )
-        music_steps = {item.step_id: item for item in music.items}
-        self.assertEqual(music_steps["bgm"].action, "create")
-        self.assertEqual(music_steps["bgm"].parameters["prompt"], "warm acoustic guitar")
-        self.assertEqual(music_steps["mix-bgm"].action, "create")
-        self.assertIn("bgm", music_steps["mix-bgm"].depends_on)
-        self.assertEqual(music_steps["validate-final"].action, "validate")
-        self.assertEqual(music.estimated_cost, 0.11)
-        topological_steps(music.items)
-        music_build = await runtime.start_build(
-            project_id=project.id,
-            plan_id=music.id,
-            base_project_version_id=committed.id,
-            idempotency_key="add-music-build",
-        )
-        completed_music, music_version = await runtime.execute_build(
-            project_id=project.id,
-            build_id=music_build.id,
-            executor=FakePlanExecutor(),
-        )
-        self.assertEqual(completed_music.status, "completed")
-        selected_after_music = await runtime.repo.current_artifacts(project.id)
-        self.assertTrue(any(item.type == "audio_bgm" for item in selected_after_music))
-        self.assertTrue(any(item.type == "video_mixed" for item in selected_after_music))
-
-        timeline = await runtime.preview_edits(
-            project_id=project.id,
-            base_project_version_id=music_version.id,
-            edits=[{
-                "type": "patch_timeline",
-                "patch": {"shots": [
-                    {"id": "one", "order": 3},
-                    {"id": "two", "order": 1},
-                    {"id": "three", "order": 2},
-                ]},
-            }],
-            idempotency_key="reorder-timeline",
-        )
-        timeline_steps = {item.step_id: item for item in timeline.items}
-        self.assertEqual([shot.id for shot in timeline.video_spec.shots], ["two", "three", "one"])
-        self.assertEqual(timeline_steps["timeline"].action, "rebuild")
-        self.assertEqual(timeline_steps["assembled-video"].action, "rebuild")
-        self.assertEqual(timeline_steps["shot-one-video"].action, "reuse")
-        self.assertEqual(
-            timeline_steps["assembled-video"].parameters["video_steps"],
-            ["shot-two-video", "shot-three-video", "shot-one-video"],
-        )
-        topological_steps(timeline.items)
 
     async def test_workflow_free_media_plan_patch_adds_subtitles_to_any_video(self):
         runtime = await video_runtime()

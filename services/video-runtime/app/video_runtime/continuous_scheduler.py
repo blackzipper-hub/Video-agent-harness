@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING
 
-from .initial_build import topological_steps
+from .plan_utils import topological_steps
 from .models import Build, BuildStep, MediaArtifactVersion, PlanCheckpoint, ProjectVersion, RebuildPlan, RebuildPlanItem, now
 from .repository import PlanRevisionConflict
 

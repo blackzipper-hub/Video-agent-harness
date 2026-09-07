@@ -8,7 +8,7 @@ from app.orchestration.workflow_compiler.registry import (
     WorkflowSpec,
 )
 
-from .initial_build import BuildPlanValidationError
+from .plan_utils import BuildPlanValidationError
 from .models import CheckpointResolution, PlanCheckpoint, ProjectIntent, RebuildPlan, VideoSpec
 from .plugins import BaseVideoPlugin, PluginContext, VideoPluginRegistry
 from .plugins.models import (

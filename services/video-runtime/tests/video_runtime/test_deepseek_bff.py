@@ -276,8 +276,6 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         names = {item["name"] for item in catalog.json()["data"]}
         self.assertIn("character-director", names)
         self.assertNotIn("cuti.atomic-providers", names)
-        from app.video_runtime.retired import RETIRED_PUBLIC_SKILLS
-        self.assertTrue(RETIRED_PUBLIC_SKILLS.isdisjoint(names))
 
         created = self.client.post(
             "/chat-v1/service/v2/runs",
@@ -341,7 +339,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         ).json()["data"]
         self.assertEqual(snapshot["run"]["workflow_id"], "seedance2")
 
-    def test_workflow_selection_priority_and_unavailable_rejection(self) -> None:
+    def test_workflow_selection_priority_and_unknown_rejection(self) -> None:
         explicit = self.client.post(
             "/chat-v1/service/v2/runs",
             json={
@@ -361,19 +359,8 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                 "workflow_id": "ink-press-product-workflow",
             },
         )
-        self.assertEqual(unavailable.status_code, 409, unavailable.text)
-        self.assertIn("unavailable", unavailable.json()["detail"].lower())
-
-        hidden_legacy = self.client.post(
-            "/chat-v1/service/v2/runs",
-            json={
-                "objective": "Use the old generic compiler",
-                "idempotency_key": "workflow-hidden-legacy-1",
-                "workflow_id": "cuti.seedance-story",
-            },
-        )
-        self.assertEqual(hidden_legacy.status_code, 409, hidden_legacy.text)
-        self.assertIn("retired", hidden_legacy.json()["detail"].lower())
+        self.assertEqual(unavailable.status_code, 422, unavailable.text)
+        self.assertIn("not installed", unavailable.json()["detail"].lower())
 
         ambiguous = self.client.post(
             "/chat-v1/service/v2/runs",
@@ -383,31 +370,6 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             },
         )
         self.assertEqual(ambiguous.status_code, 422, ambiguous.text)
-
-        retired_mention = self.client.post(
-            "/chat-v1/service/v2/runs",
-            json={
-                "objective": "$workflow-direct-video make a clip",
-                "idempotency_key": "workflow-retired-mention-1",
-            },
-        )
-        self.assertEqual(retired_mention.status_code, 409, retired_mention.text)
-        self.assertIn("retired", retired_mention.json()["detail"].lower())
-
-    def test_dedicated_plugin_workflow_can_be_selected_without_a_synthetic_skill(self) -> None:
-        asyncio.run(self.runtime.plugins.load_directories([
-            Path(__file__).resolve().parents[2] / "plugins",
-        ]))
-        selected = self.client.post(
-            "/chat-v1/service/v2/runs",
-            json={
-                "objective": "Create a music video",
-                "idempotency_key": "plugin-workflow-selection-1",
-                "workflow_id": "cuti.music-video",
-            },
-        )
-        self.assertEqual(selected.status_code, 409, selected.text)
-        self.assertIn("retired", selected.json()["detail"].lower())
 
     def test_empty_project_follow_up_reapplies_create_contract(self) -> None:
         created = self.client.post(

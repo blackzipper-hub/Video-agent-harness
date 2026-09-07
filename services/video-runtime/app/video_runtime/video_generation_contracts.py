@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .initial_build import BuildPlanValidationError
+from .plan_utils import BuildPlanValidationError
 from .models import RebuildPlanItem
 
 

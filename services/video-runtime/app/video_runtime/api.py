@@ -546,7 +546,6 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
             "executionKind": "unavailable",
             "compiler": None,
         } for workflow_id in loaded.manifest.contributions.workflows)
-    from .retired import is_retired_public_workflow
     for item in workflows:
         if build_runtime.skills.catalog.has(item["id"]):
             try:
@@ -560,10 +559,7 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
                 item.setdefault("description", item["title"])
         else:
             item.setdefault("description", item["title"])
-    return sorted(
-        (item for item in workflows if not is_retired_public_workflow(item["id"])),
-        key=lambda item: item["id"],
-    )
+    return sorted(workflows, key=lambda item: item["id"])
 
 
 def _canonical_skill_resource_path(path: str) -> str:
@@ -691,8 +687,7 @@ async def get_skill(
     _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    from .retired import is_retired_public_skill
-    if not build_runtime.skills.catalog.has(skill_id) or is_retired_public_skill(skill_id):
+    if not build_runtime.skills.catalog.has(skill_id):
         raise HTTPException(status_code=404, detail="skill not found")
     loaded = build_runtime.skills.catalog.load(skill_id)
     raw = dict(loaded.metadata.metadata or {})

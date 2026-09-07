@@ -23,11 +23,6 @@ from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
 from .upload_security import sign_uploaded_file as _sign_uploaded_file
-from .retired import (
-    RETIRED_UNAVAILABLE_REASON,
-    is_retired_public_skill,
-    is_retired_public_workflow,
-)
 from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
 from app.chat.utils.file_utils import process_uploaded_files
 from app.chat.v2.language import (
@@ -297,12 +292,6 @@ def _requested_skill_selection(
         match.group(1) for match in _EXPLICIT_SKILL.finditer(text)
         if runtime.skills.catalog.has(match.group(1))
     ]
-    for skill_id in explicit:
-        if is_retired_public_skill(skill_id) or is_retired_public_workflow(skill_id):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Workflow is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}",
-            )
     explicit_workflows = []
     helpers = list(requested_activated)
     for skill_id in explicit:
@@ -325,14 +314,9 @@ def _validate_workflow_selection(
 ) -> None:
     if not workflow:
         return
-    if is_retired_public_workflow(workflow):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Workflow is unavailable: {workflow}: {RETIRED_UNAVAILABLE_REASON}",
-        )
     if not runtime.skills.catalog.has(workflow):
         # Dedicated Video Plugins may expose a Workflow alias without adding a
-        # synthetic SKILL.md (for example cuti.music-video).  Accept it only
+        # synthetic SKILL.md. Accept it only
         # when the loaded plugin publishes an explicit, selectable compiler
         # contract; a bare contributions.workflows entry still fails closed.
         views = []
@@ -529,8 +513,6 @@ async def _effective_skill_selection(
     for lock in await runtime.list_project_skill_locks(project_id):
         if not lock.enabled:
             continue
-        if is_retired_public_skill(lock.skill_id) or is_retired_public_workflow(lock.skill_id):
-            continue
         if not runtime.skills.catalog.has(lock.skill_id):
             raise HTTPException(status_code=409, detail=f"Locked Skill is no longer installed: {lock.skill_id}")
         metadata = runtime.skills.catalog.load(lock.skill_id).metadata
@@ -542,11 +524,6 @@ async def _effective_skill_selection(
     workflow = requested_workflow or locked_workflow
     _validate_workflow_selection(runtime, workflow)
     for skill_id in requested_activated:
-        if is_retired_public_skill(skill_id) or is_retired_public_workflow(skill_id):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Workflow is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}",
-            )
         if not runtime.skills.catalog.has(skill_id):
             raise HTTPException(status_code=422, detail=f"Skill is not installed: {skill_id}")
         metadata = runtime.skills.catalog.load(skill_id).metadata

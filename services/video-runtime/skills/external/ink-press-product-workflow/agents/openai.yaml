@@ -1,4 +1,0 @@
-interface:
-  display_name: "Ink Press Product Workflow"
-  short_description: "使用 Ink Press 模板制作纸张油墨风产品宣传片"
-  default_prompt: "使用 $ink-press-product-workflow 将真实产品素材适配到 Ink Press 模板，完成镜头映射、最小模板替换、渲染和质量检查。"

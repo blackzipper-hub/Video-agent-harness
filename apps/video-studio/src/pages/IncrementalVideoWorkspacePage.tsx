@@ -18,7 +18,7 @@ import {
 
 const createStarterSpec = (language: 'en' | 'zh') => JSON.stringify({
   title: language === 'zh' ? '15 秒电影短片' : '15-second cinematic short', language: language === 'zh' ? 'zh-CN' : 'en-US', target_duration_seconds: 15,
-  aspect_ratio: '16:9', resolution: '1080p', workflow_id: 'cuti.seedance-story',
+  aspect_ratio: '16:9', resolution: '1080p', workflow_id: 'seedance2',
   style_id: 'cuti.cinematic',
   characters: [{ id: 'hero', name: language === 'zh' ? '主角' : 'Traveler', appearance: language === 'zh' ? '黑色短发的年轻旅行者' : 'young traveler with short black hair', clothing: language === 'zh' ? '蓝色风衣' : 'blue trench coat', personality: language === 'zh' ? '沉静' : 'quiet', voice: 'Wise_Woman' }],
   shots: [

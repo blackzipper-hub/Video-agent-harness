@@ -346,11 +346,10 @@ class SkillCatalog:
         }
 
     def prompt_view(self) -> list[dict[str, Any]]:
-        from app.video_runtime.retired import is_retired_public_skill
         return [
             item.prompt_view()
             for item in self.list_metadata()
-            if item.enabled and not is_retired_public_skill(item.name)
+            if item.enabled
         ]
 
     def list_resources(self, name: str) -> list[str]:

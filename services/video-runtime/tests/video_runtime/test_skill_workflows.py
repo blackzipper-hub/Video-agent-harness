@@ -78,94 +78,24 @@ class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
         await load_workflow_skills(plugins, skills)
         workflow_plugin = plugins.get("cuti.skill-workflows")
         workflows = workflow_plugin.implementation._workflows
-        self.assertGreaterEqual(len(workflows), 10)
+        self.assertEqual(
+            set(workflows),
+            {
+                "cuti-product-workflow",
+                "cuti-scenario-product-workflow",
+                "libtv-product-workflow",
+                "mv",
+                "product-ad-video",
+                "seedance2",
+                "short-drama-workflow",
+            },
+        )
         self.assertTrue(all(
             workflow.planning.mode in {"staged", "agentic"}
             for workflow in workflows.values()
         ))
         self.assertEqual(workflows["seedance2"].planning.mode, "agentic")
 
-    async def test_imported_cuti_workflows_compile_with_declared_modes(self):
-        plugins = VideoPluginRegistry()
-        skills = VideoSkillRuntime()
-        count = await load_workflow_skills(plugins, skills)
-        self.assertGreaterEqual(count, 3)
-        loaded = plugins.get("cuti.skill-workflows")
-        self.assertIn(
-            "workflow-keyframe-pipeline",
-            loaded.manifest.contributions.workflows,
-        )
-
-        keyframe = await loaded.implementation.compile_build_plan(
-            PluginContext(
-                project_id="project-1",
-                values={"base_project_version_id": "version-1"},
-            ),
-            _video_spec("workflow-keyframe-pipeline"),
-        )
-        self.assertTrue(any(
-            item.output_artifact_type == "keyframe" for item in keyframe.items
-        ))
-        self.assertEqual(
-            next(item for item in keyframe.items if item.capability == "atomic.video.generate")
-            .parameters["workflow_mode"],
-            "keyframe_pipeline",
-        )
-
-        short_drama = await loaded.implementation.compile_build_plan(
-            PluginContext(
-                project_id="project-1",
-                values={"base_project_version_id": "version-1"},
-            ),
-            _video_spec("workflow-short-drama"),
-        )
-        self.assertFalse(any(
-            item.output_artifact_type == "keyframe" for item in short_drama.items
-        ))
-        second_clip = next(
-            item for item in short_drama.items if item.step_id == "shot-2-video"
-        )
-        self.assertNotIn("start_image_from_step", second_clip.parameters)
-        self.assertEqual(second_clip.parameters["generation_mode"], "t2v")
-        self.assertFalse(any(
-            item.capability == "media.extract_frame" for item in short_drama.items
-        ))
-        self.assertEqual(second_clip.parameters["workflow_mode"], "short_drama")
-
-        if "seedance2" in loaded.implementation._workflows:
-            seedance2 = await loaded.implementation.compile_build_plan(
-                PluginContext(
-                    project_id="project-1",
-                    values={"base_project_version_id": "version-1"},
-                ),
-                _video_spec("seedance2"),
-            )
-            capabilities = {item.capability for item in seedance2.items}
-            self.assertNotIn("media.tts", capabilities)
-            self.assertNotIn("atomic.music.generate", capabilities)
-            self.assertNotIn("atomic.image.generate", capabilities)
-            self.assertNotIn("media.subtitle.compose", capabilities)
-            self.assertNotIn("media.subtitle.burn", capabilities)
-            self.assertFalse(any(
-                item.output_artifact_type == "keyframe" for item in seedance2.items
-            ))
-            clips = [
-                item for item in seedance2.items
-                if item.capability == "atomic.video.generate"
-            ]
-            self.assertEqual(len(clips), 2)
-            self.assertTrue(all(item.parameters["generate_audio"] for item in clips))
-            self.assertTrue(all(not item.skill_ids for item in clips))
-            self.assertNotIn("character_reference_from_steps", clips[0].parameters)
-            self.assertEqual(clips[0].depends_on, ["seedance-prompts"])
-            self.assertEqual(clips[1].depends_on, ["seedance-prompts"])
-            self.assertNotIn("start_image_from_step", clips[1].parameters)
-            self.assertFalse(any(
-                item.capability == "media.extract_frame" for item in seedance2.items
-            ))
-            final = next(item for item in seedance2.items if item.step_id == "final-video")
-            self.assertEqual(final.output_artifact_type, "final_video")
-            self.assertEqual(final.parameters["transition_duration"], 0.0)
 
     async def test_seedance2_does_not_inherit_generic_cuti_director_skills(self):
         skills = VideoSkillRuntime()
@@ -311,16 +241,6 @@ instructions
         resolved = {item.skill_id: item for item in brief_step.resolved_skills}
         self.assertEqual(resolved["character-director"].source, "project_lock")
 
-        continued = await runtime.plan_project(
-            project_id=project.id,
-            base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
-            video_spec=_video_spec("cuti.seedance-story").model_copy(
-                update={"source_asset_ids": [source.artifact_id]},
-            ),
-            idempotency_key="locked-workflow-continued",
-        )
-        self.assertEqual(continued.workflow_id, "product-ad-video")
-
         switched = await runtime.plan_project(
             project_id=project.id,
             base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
@@ -348,8 +268,6 @@ class SkillWorkflowApiTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200, response.text)
         workflows = {item["id"]: item for item in response.json()["data"]}
-        from app.video_runtime.retired import RETIRED_PUBLIC_WORKFLOWS
-        self.assertTrue(RETIRED_PUBLIC_WORKFLOWS.isdisjoint(workflows))
         self.assertIn("mv", workflows)
         self.assertEqual(workflows["mv"]["mode"], "mv")
         self.assertTrue(workflows["mv"]["available"])
@@ -383,8 +301,6 @@ class SkillWorkflowApiTest(unittest.TestCase):
         catalog = {item["name"]: item for item in skills.prompt_view()}
         self.assertEqual(catalog["seedance2"]["kind"], "workflow")
         self.assertEqual(catalog["seedance-20"]["kind"], "helper")
-        from app.video_runtime.retired import RETIRED_PUBLIC_SKILLS
-        self.assertTrue(RETIRED_PUBLIC_SKILLS.isdisjoint(catalog))
         with TestClient(app) as client:
             shotcraft = client.get(
                 "/api/video/skills/video-shotcraft",
@@ -428,8 +344,6 @@ class SkillWorkflowApiTest(unittest.TestCase):
         self.assertEqual(lipsync_detail.status_code, 404, lipsync_detail.text)
         self.assertEqual(seedance_story.status_code, 404, seedance_story.text)
         workflows = {item["id"]: item for item in response.json()["data"]}
-        from app.video_runtime.retired import RETIRED_PUBLIC_WORKFLOWS
-        self.assertTrue(RETIRED_PUBLIC_WORKFLOWS.isdisjoint(workflows))
         self.assertFalse([
             item["id"] for item in workflows.values()
             if item["executionKind"] == "plugin"

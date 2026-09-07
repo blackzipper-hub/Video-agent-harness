@@ -35,7 +35,7 @@ from .models import (
     VideoSpecRevision,
     now,
 )
-from .initial_build import topological_steps
+from .plan_utils import topological_steps
 from .video_generation_contracts import validate_video_generation_steps
 from .repository import InMemoryVideoProjectRepository
 from .plugins import PluginContext, VideoPluginRegistry
@@ -366,14 +366,11 @@ class VideoBuildRuntime:
         skill_id: str,
         enabled: bool,
     ) -> ProjectSkillLock:
-        from .retired import RETIRED_UNAVAILABLE_REASON, is_retired_public_skill
         if not self.skills.catalog.has(skill_id):
             raise LookupError(f"unknown Skill: {skill_id}")
         metadata = self.skills.catalog.load(skill_id).metadata
         if enabled and not metadata.enabled:
             raise ValueError(f"Skill is disabled: {skill_id}")
-        if enabled and is_retired_public_skill(skill_id):
-            raise ValueError(f"Skill is unavailable: {skill_id}: {RETIRED_UNAVAILABLE_REASON}")
         raw = dict(metadata.metadata or {})
         if enabled and raw.get("kind") == "workflow":
             for existing in await self.repo.list_project_skill_locks(project_id):
@@ -409,19 +406,12 @@ class VideoBuildRuntime:
         ]
         workflow_id = video_spec.workflow_id
         activated = list(video_spec.activated_skill_ids)
-        from .retired import is_retired_public_skill, is_retired_public_workflow
         for lock in enabled:
-            if is_retired_public_skill(lock.skill_id) or is_retired_public_workflow(lock.skill_id):
-                continue
             if not self.skills.catalog.has(lock.skill_id):
                 raise LookupError(f"project Skill is no longer installed: {lock.skill_id}")
             metadata = self.skills.catalog.load(lock.skill_id).metadata
             kind = (metadata.metadata or {}).get("kind")
-            if kind == "workflow":
-                # An explicit non-default workflow is a one-build override.
-                if workflow_id == "cuti.seedance-story":
-                    workflow_id = lock.skill_id
-            elif lock.skill_id not in activated:
+            if kind != "workflow" and lock.skill_id not in activated:
                 activated.append(lock.skill_id)
         return video_spec.model_copy(update={
             "workflow_id": workflow_id,
@@ -1268,11 +1258,9 @@ class VideoBuildRuntime:
         else:
             saved = await self.repo.save_plan(plan, idempotency_key)
         if self.skills.catalog.has(saved.workflow_id):
-            from .retired import is_retired_public_workflow
             metadata = self.skills.catalog.load(saved.workflow_id).metadata
             if (
                 (metadata.metadata or {}).get("kind") == "workflow"
-                and not is_retired_public_workflow(saved.workflow_id)
             ):
                 await self.set_project_skill_enabled(
                     project_id=project_id,
@@ -1283,11 +1271,7 @@ class VideoBuildRuntime:
 
     def _workflow_policy_spec(self, workflow_id: str):
         """Return the original Cuti Workflow contract used to police PlanPatches."""
-        aliases = {
-            "cuti.music-video": "mv",
-            "cuti.lipsync-music-video": "mv",
-        }
-        return self.skills.workflows.get(aliases.get(workflow_id, workflow_id))
+        return self.skills.workflows.get(workflow_id)
 
     @staticmethod
     def _is_continuous_plan(plan: RebuildPlan) -> bool:
@@ -1793,8 +1777,6 @@ class VideoBuildRuntime:
                 )
                 if allowed is not None:
                     allowed = frozenset({*allowed, *dynamic_capabilities})
-                if plan.workflow_id == "cuti.lipsync-music-video" and allowed is not None:
-                    allowed = frozenset({*allowed, "media.lipsync"})
                 updated_plan, added_ids = append_continuous_plan_patch(
                     existing_plan=base_plan,
                     proposed_steps=normalized_steps,

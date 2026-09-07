@@ -7,7 +7,7 @@ from typing import Iterable
 
 from app.orchestration.workflow_compiler.registry import WorkflowSpec
 
-from .initial_build import BuildPlanValidationError, topological_steps
+from .plan_utils import BuildPlanValidationError, topological_steps
 from .models import (
     PlanCheckpoint,
     PlanCheckpointDefinition,
@@ -25,9 +25,6 @@ from .plugins import PluginContext
 # inherit Cuti's source-analysis phase merely by declaring ``mode: mv`` (or any
 # other known mode).
 WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
-    "workflow-keyframe-pipeline": ("keyframe_pipeline", "story"),
-    "workflow-direct-video": ("direct_video", "direct"),
-    "workflow-short-drama": ("short_drama", "story"),
     "seedance2": ("seedance2", "direct"),
     "mv": ("mv", "music_suno"),
     "short-drama-workflow": ("short_drama_workflow", "story"),
@@ -37,12 +34,6 @@ WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
         "cuti_scenario_product_workflow", "product_scenario",
     ),
     "libtv-product-workflow": ("libtv_product_workflow", "product_libtv"),
-    # Dedicated plugin aliases.  They deliberately reuse the original Cuti
-    # $mv planning contract but keep their own final plugin compilers.
-    "cuti.music-video": ("mv", "music_suno"),
-    "cuti.lipsync-music-video": ("mv", "music_suno"),
-    # Hidden compatibility Workflow for projects created before migration.
-    "cuti.seedance-story": ("keyframe_pipeline", "story"),
 }
 
 
@@ -83,10 +74,6 @@ def effective_planning_mode(workflow: WorkflowSpec | None, workflow_id: str) -> 
     """Return explicit Skill policy, with staged defaults for built-in workflows."""
     if workflow is not None and workflow.planning.mode != "full":
         return workflow.planning.mode
-    if workflow_id == "cuti.seedance-story":
-        return "staged"
-    if workflow_id in {"cuti.music-video", "cuti.lipsync-music-video"}:
-        return "staged"
     return workflow.planning.mode if workflow is not None else "full"
 
 

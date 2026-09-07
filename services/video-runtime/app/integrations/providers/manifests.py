@@ -39,4 +39,3 @@ def provider_capabilities() -> list[CapabilityManifest]:
             parameters_schema={"type": "object", "required": ["tool"], "properties": {"tool": {"type": "string"}, "inputs": {"type": "object"}, "run_id": {"type": "string"}}, "additionalProperties": False},
         ),
     ]
-

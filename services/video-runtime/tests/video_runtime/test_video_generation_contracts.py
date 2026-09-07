@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.video_runtime.initial_build import BuildPlanValidationError
+from app.video_runtime.plan_utils import BuildPlanValidationError
 from app.video_runtime.models import RebuildPlanItem
 from app.video_runtime.video_generation_contracts import (
     contract_for_model,
