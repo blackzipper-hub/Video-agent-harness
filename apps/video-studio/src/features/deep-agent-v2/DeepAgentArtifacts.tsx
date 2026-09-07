@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { ArtifactDocument } from './ArtifactDocument'
 import {
   AlertTriangle, BookOpen, Check, CheckCircle2, Circle, FileText, Film, Image, Loader2, Music, RefreshCw, Scissors,
