@@ -32,6 +32,25 @@ next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied
 
 ## Run
 
+### Local npm CLI (no Docker)
+
+Node.js `22.19+` (or `24+`) is the only system runtime requirement. Put `OPENAI_API_KEY` and the media Provider keys used by your Workflow in `.env`, then run:
+
+```sh
+npx @cuti-ai/video-agent-harness web
+```
+
+The CLI supervises Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. On first use it installs a checksum-verified portable Python runtime and separately licensed FFmpeg/FFprobe tools in the OS user-data directory. Project state and generated media persist there; PostgreSQL is not required.
+
+From a source checkout, use:
+
+```sh
+corepack enable && pnpm install --frozen-lockfile && pnpm run build
+pnpm video:local
+```
+
+Run `pnpm video:doctor` to inspect the components. Local npm mode is intended for a trusted single-user machine: its subprocess worker is not a security isolation boundary. Keep Docker Compose for production, PostgreSQL, multi-user deployment, or untrusted executable plugins.
+
 ### Run from source
 
 #### Prerequisites

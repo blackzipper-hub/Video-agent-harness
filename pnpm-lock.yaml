@@ -356,6 +356,18 @@ importers:
         specifier: ^10.0.0
         version: 10.0.0
 
+  apps/video-cli:
+    dependencies:
+      '@cuti-ai/video-agent-bundle':
+        specifier: workspace:^
+        version: link:../../packages/bundle/video-agent
+      '@deepseek-ai/dsh':
+        specifier: workspace:^
+        version: link:../cli
+      tar:
+        specifier: 7.5.22
+        version: 7.5.22
+
   apps/video-studio:
     dependencies:
       '@ant-design/x':

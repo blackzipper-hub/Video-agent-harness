@@ -198,3 +198,13 @@ def test_unsafe_dev_mode_runs_local_process_without_docker(tmp_path: Path) -> No
     assert client.containers.create.call_count == 0
     runner.close()
 
+
+def test_unsafe_dev_mode_does_not_connect_to_docker(tmp_path: Path, monkeypatch) -> None:
+    from_env = Mock(side_effect=AssertionError("Docker must not be contacted"))
+    monkeypatch.setattr("app.runner.docker.from_env", from_env)
+
+    runner = SandboxRunner(Settings(staging_root=tmp_path, unsafe_dev_mode=True))
+
+    assert runner.client is None
+    from_env.assert_not_called()
+    runner.close()

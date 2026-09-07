@@ -77,6 +77,11 @@ tmp-*.png
 deploy/.env.__probe__
 deploy/harness-test/
 services/video-runtime/.mv*_plan.json
+apps/video-cli/runtime/video-runtime/
+apps/video-cli/runtime/media-service/
+apps/video-cli/runtime/sandbox-worker/
+apps/video-cli/runtime/studio/
+apps/video-cli/*.tgz
 
 # Workspace lock is the root pnpm-lock.yaml. Nested locks appear from local package installs.
 packages/**/pnpm-lock.yaml

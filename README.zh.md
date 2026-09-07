@@ -31,6 +31,25 @@ Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Sessi
 
 ## Run
 
+### npm CLI 本地模式（无需 Docker）
+
+系统只需安装 Node.js `22.19+`（或 `24+`）。在 `.env` 中填写 `OPENAI_API_KEY` 以及 Workflow 使用的媒体 Provider Key，然后运行：
+
+```sh
+npx @cuti-ai/video-agent-harness web
+```
+
+CLI 会统一管理 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker。首次使用时会在操作系统用户数据目录中安装经过校验和验证的便携 Python，以及采用各自许可证的 FFmpeg/FFprobe 工具；这些二进制文件不会重新打包进本项目。项目状态和生成媒体也保存在该目录中，无需 PostgreSQL。
+
+从源码检出运行：
+
+```sh
+corepack enable && pnpm install --frozen-lockfile && pnpm run build
+pnpm video:local
+```
+
+运行 `pnpm video:doctor` 可以检查各组件。npm 本地模式面向可信的单用户机器，子进程 Worker 不构成安全隔离边界。生产、PostgreSQL、多用户部署或不受信任的可执行插件继续使用 Docker Compose。
+
 ### Run from source
 
 #### 前置条件

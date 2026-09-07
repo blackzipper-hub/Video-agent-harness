@@ -58,7 +58,11 @@ class RunRecord:
 class SandboxRunner:
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self.settings = settings
-        self.client = client or docker.from_env()
+        self.client = (
+            client
+            if client is not None
+            else None if settings.unsafe_dev_mode else docker.from_env()
+        )
         self.settings.staging_root.mkdir(parents=True, exist_ok=True)
         self._records: dict[str, RunRecord] = {}
         self._records_lock = threading.RLock()
@@ -119,7 +123,8 @@ class SandboxRunner:
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
-        self.client.close()
+        if self.client is not None:
+            self.client.close()
 
     def _execute(self, record: RunRecord, request: RunRequest) -> None:
         workspace = self.settings.staging_root / record.run_id
@@ -136,6 +141,9 @@ class SandboxRunner:
             if self.settings.unsafe_dev_mode:
                 self._execute_unsafe_subprocess(record, request, workspace)
                 return
+
+            if self.client is None:
+                raise RuntimeError("Docker client is unavailable for isolated sandbox execution")
 
             volume = self.client.volumes.create(
                 name=f"cuti-sandbox-{record.run_id}",
@@ -467,4 +475,3 @@ class SandboxRunner:
         if len(data) > self.settings.max_log_bytes:
             data = data[: self.settings.max_log_bytes] + b"\n[truncated]"
         return data.decode("utf-8", errors="replace")
-
