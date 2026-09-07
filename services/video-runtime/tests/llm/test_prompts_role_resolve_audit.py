@@ -118,7 +118,7 @@ def test_analyze_video_resolves_role_before_gemini_guard(monkeypatch):
     from prompts.prompt_config import PROMPTS_CONFIG, PromptName
 
     mc = resolve_model_config(
-        PROMPTS_CONFIG[PromptName.VISION_ANALYZE].get("model_config", {}) or {}
+        PROMPTS_CONFIG[PromptName.VIDEO_AUDIO_TRANSCRIPTION].get("model_config", {}) or {}
     )
     assert "gemini" in mc["model"].lower()
     assert mc["model"] == resolve_role_model("multimodal")

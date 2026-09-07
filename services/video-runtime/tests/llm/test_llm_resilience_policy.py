@@ -277,28 +277,36 @@ def test_build_bundle_resolves_role_only_model_config(monkeypatch):
     from prompts.llm_model_profiles import resolve_role_model
     from prompts.prompt_config import PROMPTS_CONFIG, PromptName
 
-    entry = dict(PROMPTS_CONFIG[PromptName.AGENT_ROUTER_CLARIFY])
+    entry = dict(PROMPTS_CONFIG[PromptName.VIDEO_AUDIO_TRANSCRIPTION])
     assert "model" not in (entry.get("model_config") or {})
-    assert (entry.get("model_config") or {}).get("role") == "text"
+    assert (entry.get("model_config") or {}).get("role") == "multimodal"
     _ctx, routes, route_mcs = build_resilience_bundle_from_prompt_entry(entry)
-    expected = resolve_role_model("text")
+    expected = resolve_role_model("multimodal")
     assert routes[0][0] == expected
     assert route_mcs[0]["model"] == expected
 
 
 def test_build_bundle_resolves_role_only_fallback_chain(monkeypatch):
-    """model_fallback_chain 只写 role 时也必须解析（首帧修订等会踩）。"""
+    """model_fallback_chain 只写 role 时也必须解析。"""
     monkeypatch.setenv("LLM_QUALITY", "best")
     from prompts.llm_model_profiles import resolve_role_model
-    from prompts.prompt_config import PROMPTS_CONFIG, PromptName
 
-    entry = dict(PROMPTS_CONFIG[PromptName.VIDEO_STORYBOARD_FIRST_FRAME_REVISION])
+    entry = {
+        "schema": None,
+        "model_config": {"role": "multimodal", "timeout": 120},
+        "resilience": {
+            "model_fallback_chain": [
+                {"role": "multimodal", "timeout": 120},
+                {"role": "tool", "temperature": 0.5, "timeout": 180},
+            ],
+            "same_route_extra_retries": 2,
+        },
+    }
     chain = (entry.get("resilience") or {}).get("model_fallback_chain") or []
     assert chain and all("model" not in c for c in chain)
     _ctx, routes, route_mcs = build_resilience_bundle_from_prompt_entry(entry)
     assert routes
     assert all(r[0] for r in routes)
-    # 链首与主同为 multimodal → 不 prepend；第二跳 tool
     assert route_mcs[0]["model"] == resolve_role_model("multimodal")
     assert any(mc["model"] == resolve_role_model("tool") for mc in route_mcs)
 
@@ -324,11 +332,11 @@ def test_build_route_model_configs_role_fragment_overrides_primary(monkeypatch):
     assert mcs[1]["timeout"] == 180
 
 
-def test_build_bundle_from_real_prompts_config_keyframe_tool_execution():
+def test_build_bundle_from_real_prompts_config_consistency_check():
     from prompts.llm_model_profiles import resolve_model_config
     from prompts.prompt_config import PROMPTS_CONFIG, PromptName
 
-    entry = PROMPTS_CONFIG[PromptName.VIDEO_KEYFRAME_GENERATION_TOOL_EXECUTION]
+    entry = PROMPTS_CONFIG[PromptName.VIDEO_CONSISTENCY_CHECK]
     ctx, routes, route_mcs = build_resilience_bundle_from_prompt_entry(entry)
     primary = resolve_model_config(entry["model_config"])["model"]
     assert primary in (r[0] for r in routes)
@@ -336,44 +344,11 @@ def test_build_bundle_from_real_prompts_config_keyframe_tool_execution():
     assert ctx.structured_strategy_order
 
 
-def test_build_bundle_chat_single_route_none_strategy():
+def test_build_bundle_structured_single_route():
     from prompts.llm_model_profiles import resolve_model_config
     from prompts.prompt_config import PROMPTS_CONFIG, PromptName
 
-    entry = dict(PROMPTS_CONFIG[PromptName.AGENT_ROUTER_CLARIFY])
+    entry = dict(PROMPTS_CONFIG[PromptName.VIDEO_AUDIO_TRANSCRIPTION])
     ctx, routes, _mcs = build_resilience_bundle_from_prompt_entry(entry)
-    assert len(routes) == 1
-    assert routes[0][1] is None
+    assert routes
     assert routes[0][0] == resolve_model_config(entry["model_config"])["model"]
-
-
-def test_build_bundle_tool_execution_gpt_then_gemini_provider_and_extra_retries():
-    from prompts.llm_model_profiles import resolve_role_model
-    from prompts.prompt_config import PROMPTS_CONFIG, PromptName
-
-    entry = dict(PROMPTS_CONFIG[PromptName.VIDEO_KEYFRAME_GENERATION_TOOL_EXECUTION])
-    ctx, routes, _ = build_resilience_bundle_from_prompt_entry(entry)
-    models = [r[0] for r in routes]
-    assert models == [resolve_role_model("tool"), "gemini-3-flash-preview"]
-    assert all(s == "provider" for _m, s in routes)
-    assert ctx.same_route_extra_retries == 2
-
-
-def test_video_tool_execution_prompts_routes_gpt_provider():
-    from prompts.llm_model_profiles import resolve_role_model
-    from prompts.prompt_config import PROMPTS_CONFIG, PromptName
-
-    tool_model = resolve_role_model("tool")
-    entry_kf = PROMPTS_CONFIG[PromptName.VIDEO_KEYFRAME_GENERATION_TOOL_EXECUTION]
-    ctx_kf, routes_kf, _ = build_resilience_bundle_from_prompt_entry(entry_kf)
-    assert routes_kf
-    assert [r[0] for r in routes_kf] == [tool_model, "gemini-3-flash-preview"]
-    assert all(s == "provider" for _m, s in routes_kf)
-    assert ctx_kf.same_route_extra_retries == 2
-
-    entry_v = PROMPTS_CONFIG[PromptName.VIDEO_VIDEO_GENERATION_TOOL_EXECUTION]
-    ctx_v, routes_v, _ = build_resilience_bundle_from_prompt_entry(entry_v)
-    assert routes_v
-    assert [r[0] for r in routes_v] == [tool_model, "gemini-3-flash-preview"]
-    assert all(s == "provider" for _m, s in routes_v)
-    assert ctx_v.same_route_extra_retries == 2

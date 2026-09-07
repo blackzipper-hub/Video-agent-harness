@@ -10,34 +10,76 @@ data:
       root /usr/share/nginx/html;
       index index.html;
 
+      # Default nginx gzip_types is HTML only. JS/CSS stay uncompressed
+      # unless listed. gzip_proxied stays off so /chat-v1 and /api are not packed.
+      client_max_body_size 1g;
+      gzip on;
+      gzip_vary on;
+      gzip_min_length 1024;
+      gzip_comp_level 6;
+      gzip_types text/plain text/css text/xml text/javascript application/javascript application/json image/svg+xml;
+
+      location /assets/ {
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800, immutable";
+      }
+
       location /api/video/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
         proxy_buffering off;
+        proxy_read_timeout 1200s;
+        proxy_send_timeout 1200s;
         proxy_pass {{ .Values.backends.videoRuntime }};
       }
 
       location /chat-v1/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_upgrade;
         proxy_buffering off;
-        proxy_read_timeout 3600s;
+        proxy_read_timeout 1200s;
+        proxy_send_timeout 1200s;
         proxy_pass {{ .Values.backends.videoRuntime }};
       }
 
       location /files/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
         proxy_buffering off;
         proxy_pass {{ .Values.backends.videoRuntime }};
       }
 
       location /api/v1/ {
+        proxy_http_version 1.1;
         proxy_pass {{ .Values.backends.cutiApiGo }};
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
       }
 
       location /api/ {
+        proxy_http_version 1.1;
         proxy_pass {{ .Values.backends.cutiApiGo }}/api/v1/;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
       }
 
       location / {
