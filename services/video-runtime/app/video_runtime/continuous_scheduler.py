@@ -39,7 +39,7 @@ async def _notify_agent(
         phase = f"{'repair' if repairing else 'live'}:{plan.current_revision}"
     if any(item.phase == phase for item in checkpoints):
         return next(item for item in checkpoints if item.phase == phase) if repairing else None
-    from .runtime import _checkpoint_artifact_summary
+    from .runtime import _checkpoint_artifact_summary, _checkpoint_task_parameters
 
     spec = await runtime.repo.get_video_spec_revision(plan.video_spec_revision_id)
     session_id, user_id = build.session_id, build.user_id
@@ -53,6 +53,7 @@ async def _notify_agent(
             "objective": item.objective,
             "capability": item.capability,
             "depends_on": item.depends_on,
+            "parameters": _checkpoint_task_parameters(item.parameters),
             "status": states[item.step_id].status,
             "error": states[item.step_id].error,
             "artifact_version_id": states[item.step_id].result_artifact_version_id,

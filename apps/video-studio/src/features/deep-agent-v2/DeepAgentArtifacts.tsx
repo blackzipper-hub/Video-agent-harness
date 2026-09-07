@@ -605,7 +605,7 @@ const readableTextTitle = (artifact: DeepAgentArtifact, body: string, t: Transla
 const promptFromRecord = (value: unknown): string | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const row = value as Record<string, unknown>
-  for (const key of ['generated_prompt', 'generation_prompt', 'final_prompt']) {
+  for (const key of ['prompt', 'generated_prompt', 'generation_prompt', 'final_prompt']) {
     const prompt = row[key]
     if (typeof prompt === 'string' && prompt.trim()) return prompt.trim()
   }
@@ -618,13 +618,16 @@ const promptFromRecord = (value: unknown): string | undefined => {
  */
 const artifactGenerationPrompt = (artifact: DeepAgentArtifact): string | undefined => {
   const metadata = artifact.metadata || {}
-  return promptFromRecord(metadata) || promptFromRecord(metadata.raw)
+  return promptFromRecord(metadata.resolved_generation_parameters)
+    || promptFromRecord(metadata.generation_parameters)
+    || promptFromRecord(metadata)
+    || promptFromRecord(metadata.raw)
 }
 
 function GenerationPrompt({ artifact }: { artifact: DeepAgentArtifact }) {
   const { t } = useLanguage()
   const prompt = artifactGenerationPrompt(artifact)
-  if (!prompt) return null
+  if (!prompt || artifact.summary?.trim() === prompt) return null
   return (
     <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -701,6 +704,8 @@ export function DeepAgentArtifacts({
   onRuntimeProgress?: (progress: RuntimeProductionProgress | null) => void
 }) {
   const { t } = useLanguage()
+  const tRef = useRef(t)
+  tRef.current = t
   const [runtimeWorkspace, setRuntimeWorkspace] = useState<RuntimeWorkspace | null>(null)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
@@ -754,7 +759,7 @@ export function DeepAgentArtifacts({
         }
       } catch {
         if (active) {
-          setWorkspaceError(t('da.runtime.requestFailed'))
+          setWorkspaceError(tRef.current('da.runtime.requestFailed'))
         }
       } finally {
         if (active) setWorkspaceLoading(false)
@@ -778,7 +783,7 @@ export function DeepAgentArtifacts({
       eventNames.forEach(name => events.removeEventListener(name, refreshFromEvent))
       events.close()
     }
-  }, [projectId, t])
+  }, [projectId])
 
   const latestRuntimeBuild = runtimeWorkspace?.builds[0]
   const stepEntityNames = useMemo(

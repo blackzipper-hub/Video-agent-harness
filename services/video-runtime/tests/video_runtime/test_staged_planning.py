@@ -16,6 +16,7 @@ from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator, chec
 from app.video_runtime.models import PlanCheckpoint
 from app.video_runtime.runtime import _checkpoint_artifact_summary, _implicit_artifact_inputs
 from app.video_runtime.staged_planning import (
+    append_continuous_plan_patch,
     append_phase,
     compile_continuous_plan_initial,
     failed_checkpoint_step_ids,
@@ -127,6 +128,33 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(summary["metadata"]["content"]["truncated"])
         self.assertNotIn("generation_parameters", summary["metadata"])
 
+    async def test_checkpoint_summary_exposes_only_safe_generation_context(self) -> None:
+        artifact = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="shot:2:clip",
+            type="video_clip",
+            metadata={
+                "generation_parameters": {
+                    "prompt": "A complete duration-aware provider prompt",
+                    "duration_seconds": 15,
+                    "api_key": "must-not-leak",
+                },
+                "resolved_generation_parameters": {
+                    "prompt": "The exact resolved provider prompt",
+                    "model": "seedance-2.5",
+                    "authorization": "must-not-leak-either",
+                },
+            },
+        )
+        summary = _checkpoint_artifact_summary(artifact)
+        context = summary["metadata"]["generation_context"]
+        self.assertEqual(context["prompt"], "The exact resolved provider prompt")
+        self.assertEqual(context["duration_seconds"], 15)
+        self.assertEqual(context["model"], "seedance-2.5")
+        self.assertNotIn("api_key", context)
+        self.assertNotIn("authorization", context)
+        self.assertNotIn("generation_parameters", summary["metadata"])
+
     async def test_delivers_auditable_prompt_to_same_session(self) -> None:
         checkpoint = PlanCheckpoint(
             project_id="project-1", build_id="build-1", plan_id="plan-1",
@@ -152,6 +180,57 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("video_skill_load", prompt)
         self.assertIn('"duration": 58', prompt)
         self.assertNotIn("chain-of-thought", checkpoint_prompt(checkpoint).lower())
+
+    def test_continuous_patch_rejects_accidental_prompt_detail_regression(self) -> None:
+        detailed = "Detailed cinematic direction with subject identity, wardrobe, setting, " * 5
+        plan = RebuildPlan(
+            project_id="project-1", base_project_version_id="version-1",
+            workflow_id="seedance2", schema_version=2,
+            items=[RebuildPlanItem(
+                step_id="clip-1", action="create", capability="atomic.video.generate",
+                output_artifact_type="video_clip",
+                parameters={"prompt": detailed, "duration_seconds": 15},
+            )],
+        )
+        with self.assertRaisesRegex(BuildPlanValidationError, "materially less detailed"):
+            append_continuous_plan_patch(
+                existing_plan=plan,
+                proposed_steps=[RebuildPlanItem(
+                    step_id="clip-2", action="create", capability="atomic.video.generate",
+                    output_artifact_type="video_clip",
+                    parameters={"prompt": "The character walks away.", "duration_seconds": 15},
+                )],
+                allowed_capabilities=None, completed_step_ids={"clip-1"},
+                spec=None, spec_revision_id="spec-1",
+            )
+
+    def test_continuous_patch_allows_explicitly_intentional_concise_prompt(self) -> None:
+        detailed = "Detailed cinematic direction with subject identity, wardrobe, setting, " * 5
+        plan = RebuildPlan(
+            project_id="project-1", base_project_version_id="version-1",
+            workflow_id="seedance2", schema_version=2,
+            items=[RebuildPlanItem(
+                step_id="clip-1", action="create", capability="atomic.video.generate",
+                output_artifact_type="video_clip",
+                parameters={"prompt": detailed, "duration_seconds": 15},
+            )],
+        )
+        updated, added = append_continuous_plan_patch(
+            existing_plan=plan,
+            proposed_steps=[RebuildPlanItem(
+                step_id="clip-2", action="create", capability="atomic.video.generate",
+                output_artifact_type="video_clip",
+                parameters={
+                    "prompt": "A deliberately minimal locked-off shot.",
+                    "duration_seconds": 15,
+                    "allow_concise_prompt": True,
+                },
+            )],
+            allowed_capabilities=None, completed_step_ids={"clip-1"},
+            spec=None, spec_revision_id="spec-1",
+        )
+        self.assertEqual(added, ["clip-2"])
+        self.assertEqual(updated.current_revision, plan.current_revision + 1)
 
     async def test_semantic_repair_appends_one_new_media_branch(self) -> None:
         document = RebuildPlanItem(

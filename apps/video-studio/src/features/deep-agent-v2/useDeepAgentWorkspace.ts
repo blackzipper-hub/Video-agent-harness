@@ -44,6 +44,8 @@ export function useDeepAgentWorkspace({
   routeThreadId?: string | null
 } = {}) {
   const { language, t } = useLanguage()
+  const languageRef = useRef(language)
+  const tRef = useRef(t)
   const [state, dispatch] = useReducer(deepAgentReducer, initialDeepAgentState)
   const [pendingThreadId, setPendingThreadId] = useState<string | null>(
     () => (routeThreadId || '').trim() || null,
@@ -59,6 +61,8 @@ export function useDeepAgentWorkspace({
   const listControllerRef = useRef<AbortController | null>(null)
   const hydrateControllerRef = useRef<AbortController | null>(null)
   autoSelectRef.current = autoSelect
+  languageRef.current = language
+  tRef.current = t
   pendingThreadIdRef.current = pendingThreadId
   selectedRunIdRef.current = state.selectedRunId
 
@@ -106,11 +110,11 @@ export function useDeepAgentWorkspace({
         localStorage.setItem(SELECTED_RUN_KEY, selected)
         dispatch({ type: 'SELECT_RUN', runId: selected, lastSequence: readSequence(selected) })
       }
-    } catch (error) {
+    } catch (_error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailed') } })
     }
-  }, [t])
+  }, [])
 
   const hydrateRun = useCallback(async (runId: string) => {
     hydrateControllerRef.current?.abort()
@@ -134,11 +138,11 @@ export function useDeepAgentWorkspace({
       cursorRef.current = hydratedSequence
       localStorage.setItem(sequenceKey(runId), String(hydratedSequence))
       dispatch({ type: 'HYDRATE', runId, snapshot, messages, events })
-    } catch (error) {
+    } catch (_error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailed') } })
     }
-  }, [t])
+  }, [])
 
   useEffect(() => {
     void loadRuns()
@@ -203,7 +207,7 @@ export function useDeepAgentWorkspace({
         try {
           const response = await fetch(deepAgentV2Client.eventsUrl(runId, cursorRef.current), {
             credentials: 'include',
-            headers: { 'X-App-Language': localStorage.getItem('language') || 'en' },
+            headers: { 'X-App-Language': languageRef.current },
             signal: controller.signal,
           })
           if (response.ok) dispatch({ type: 'NOTICE', notice: null })
@@ -218,13 +222,13 @@ export function useDeepAgentWorkspace({
             ].includes(event.type)
           })
           if (terminal) break
-        } catch (error) {
+        } catch (_error) {
           if (controller.signal.aborted) break
           dispatch({
             type: 'NOTICE',
             notice: {
               severity: 'warning',
-              message: language === 'zh'
+              message: languageRef.current === 'zh'
                 ? '事件连接中断，正在重新连接……'
                 : 'Event stream interrupted, reconnecting…',
             },
@@ -240,7 +244,7 @@ export function useDeepAgentWorkspace({
       controller.abort()
       dispatch({ type: 'STREAMING', streaming: false })
     }
-  }, [language, state.selectedRunId, shouldStream])
+  }, [state.selectedRunId, shouldStream])
 
   const selectRun = useCallback((runId: string) => {
     if (selectedRunIdRef.current === runId) return

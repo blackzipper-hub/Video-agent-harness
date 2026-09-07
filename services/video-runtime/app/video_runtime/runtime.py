@@ -73,6 +73,15 @@ _MEDIA_REFERENCE_PARAMETER_KEYS = frozenset({
     "last_image", "audio_url", "video_url",
 })
 
+_CHECKPOINT_TASK_PARAMETER_KEYS = frozenset({
+    "prompt", "negative_prompt", "duration", "duration_seconds",
+    "segment_duration_seconds", "aspect_ratio", "resolution", "width", "height",
+    "provider", "model", "generation_mode", "video_generation_mode",
+    "workflow_mode", "shot_workflow_mode", "continuity_mode",
+    "native_audio", "generate_audio", "dialogue", "audio_cues",
+    "reference_images", "reference_videos", "start_image_url", "end_image_url",
+})
+
 
 def _implicit_artifact_inputs(
     parameters: dict[str, Any], known_artifact_version_ids: set[str],
@@ -107,11 +116,50 @@ def _bounded_checkpoint_value(value: Any, *, limit: int = 16_000) -> Any:
     }
 
 
+def _checkpoint_task_parameters(parameters: dict[str, Any] | None) -> dict[str, Any]:
+    """Expose creative execution context to the planner without leaking credentials.
+
+    Provider request dictionaries can contain keys and tokens, so checkpoints must not
+    echo them wholesale.  This allowlist preserves the final prompt and continuity/model
+    choices that a later PlanPatch needs in order to remain as detailed as earlier clips.
+    """
+    if not isinstance(parameters, dict):
+        return {}
+    return {
+        key: _bounded_checkpoint_value(value)
+        for key, value in parameters.items()
+        if key in _CHECKPOINT_TASK_PARAMETER_KEYS
+    }
+
+
+def _artifact_generation_context(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Project only safe, provider-relevant fields from an Artifact into checkpoints."""
+    context: dict[str, Any] = {}
+    for container_name in ("resolved_generation_parameters", "generation_parameters"):
+        container = metadata.get(container_name)
+        if isinstance(container, dict):
+            for key, value in _checkpoint_task_parameters(container).items():
+                context.setdefault(key, value)
+    for key in ("final_prompt", "generated_prompt", "generation_prompt"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip() and "prompt" not in context:
+            context["prompt"] = _bounded_checkpoint_value(value.strip())
+    return context
+
+
 def _checkpoint_artifact_summary(
     artifact: MediaArtifactVersion,
     *,
     issues: list[Any] | None = None,
 ) -> dict[str, Any]:
+    metadata = {
+        key: _bounded_checkpoint_value(value)
+        for key, value in artifact.metadata.items()
+        if key in _CHECKPOINT_METADATA_KEYS
+    }
+    generation_context = _artifact_generation_context(artifact.metadata)
+    if generation_context:
+        metadata["generation_context"] = generation_context
     summary: dict[str, Any] = {
         "id": artifact.id,
         "artifact_id": artifact.artifact_id,
@@ -119,11 +167,7 @@ def _checkpoint_artifact_summary(
         "title": artifact.title,
         "summary": artifact.summary,
         "uri": artifact.uri,
-        "metadata": {
-            key: _bounded_checkpoint_value(value)
-            for key, value in artifact.metadata.items()
-            if key in _CHECKPOINT_METADATA_KEYS
-        },
+        "metadata": metadata,
     }
     if issues is not None:
         summary["issues"] = issues

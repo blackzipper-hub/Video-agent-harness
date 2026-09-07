@@ -660,7 +660,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_plan_patch_submit',
-    description: 'Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. Persist planning documents whose final content is already known with runtime.artifact.persist; do not call atomic.text.generate just to repeat the Agent planning already done. Reserve atomic.text.generate for genuinely independent text generation or transformation. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.',
+    description: 'Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. For every video-generation task, parameters.prompt must be the duration-aware final provider prompt, not a synopsis; later and repaired clips must preserve the relevant specificity of prior comparable clips visible in task parameters and Artifact generation_context. Persist planning documents whose final content is already known with runtime.artifact.persist; do not call atomic.text.generate just to repeat the Agent planning already done. Reserve atomic.text.generate for genuinely independent text generation or transformation. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.',
     parameters: {
       project_id: { type: 'string', required: true },
       build_id: { type: 'string', required: true },

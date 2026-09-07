@@ -441,6 +441,15 @@ def _initial_video_build_prompt(
             "for genuinely independent text transformation or generation that is not already known."
         ),
         (
+            "For every video-generation task, parameters.prompt is the exact final provider "
+            "prompt, not a short story summary. Make it duration-aware and retain all relevant "
+            "identity/product, wardrobe, setting, lighting, camera, motion, performance, audio, "
+            "continuity, style, exclusion, and user constraints. On later clips and repairs, "
+            "inspect earlier task prompts and Artifact generation_context and preserve comparable "
+            "specificity. Adapt temporal beats to the requested duration; do not assume a fixed "
+            "number or duration of clips."
+        ),
+        (
             f"Set {'ProjectIntent' if staged else 'VideoSpec'}.activated_skill_ids exactly to "
             f"{json.dumps(activated, ensure_ascii=False)}. "
             "Always use automation.mode automatic."

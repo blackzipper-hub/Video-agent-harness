@@ -19,6 +19,77 @@ from .models import (
 from .plugins import PluginContext
 
 
+_VIDEO_GENERATION_CAPABILITIES = frozenset({
+    "atomic.video.generate",
+    "api.provider.generate",
+    "api.ark_protocol.generate",
+})
+
+
+def _is_video_generation_item(item: RebuildPlanItem) -> bool:
+    if item.capability == "atomic.video.generate":
+        return True
+    return (
+        item.capability in _VIDEO_GENERATION_CAPABILITIES
+        and "video" in (item.output_artifact_type or "").lower()
+    )
+
+
+def _prompt_information_length(value: object) -> int:
+    if not isinstance(value, str):
+        return 0
+    return len("".join(value.split()))
+
+
+def _video_duration(parameters: dict) -> float | None:
+    for key in ("duration_seconds", "duration", "segment_duration_seconds"):
+        value = parameters.get(key)
+        try:
+            if value is not None and float(value) > 0:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _validate_video_prompt_detail(
+    existing: Iterable[RebuildPlanItem], proposed: Iterable[RebuildPlanItem],
+) -> None:
+    """Reject accidental synopsis-only prompts after a detailed comparable clip.
+
+    This is a harness-level regression guard, not a Workflow recipe.  Concise prompts
+    remain valid when there is no richer baseline or the Agent explicitly records that
+    brevity is intentional.
+    """
+    history: list[tuple[int, float | None]] = []
+    candidates = [(item, False) for item in existing]
+    candidates.extend((item, True) for item in proposed)
+    for item, is_proposed in candidates:
+        if not _is_video_generation_item(item):
+            continue
+        parameters = item.parameters if isinstance(item.parameters, dict) else {}
+        length = _prompt_information_length(parameters.get("prompt"))
+        duration = _video_duration(parameters)
+        comparable = [
+            prior_length for prior_length, prior_duration in history
+            if duration is None or prior_duration is None
+            or 0.5 <= duration / prior_duration <= 2.0
+        ]
+        if is_proposed and comparable and not parameters.get("allow_concise_prompt"):
+            baseline = max(comparable)
+            minimum = max(100, int(baseline * 0.45))
+            if baseline >= 180 and length < minimum:
+                raise BuildPlanValidationError(
+                    f"PlanPatch video prompt for {item.step_id} is materially less detailed "
+                    f"than a comparable earlier clip ({length} < {minimum} information "
+                    "characters). Submit a corrected duration-aware final provider prompt. "
+                    "Set allow_concise_prompt=true only when concise wording is an explicit "
+                    "creative decision."
+                )
+        if length:
+            history.append((length, duration))
+
+
 # Staged planning is bound to the authoritative Workflow identity, just like
 # the final DAG compiler.  A mode is a compatibility/contract label, not a
 # generic implementation selector: a copied or misspelled Workflow must never
@@ -416,6 +487,7 @@ def append_continuous_plan_patch(
     overlap = sorted(existing_ids & proposed_ids)
     if overlap:
         raise BuildPlanValidationError("plan step already exists: " + ", ".join(overlap))
+    _validate_video_prompt_detail(existing_plan.items, proposed)
     for item in proposed:
         if item.action not in {"create", "validate"}:
             raise BuildPlanValidationError(

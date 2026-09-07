@@ -16,12 +16,25 @@ async def refresh_checkpoint(runtime: VideoBuildRuntime, checkpoint: PlanCheckpo
     """Project durable task results into a delivery without changing revision ownership."""
     if checkpoint.planning_mode != "agentic":
         return checkpoint
-    from .runtime import _checkpoint_artifact_summary
+    from .runtime import _checkpoint_artifact_summary, _checkpoint_task_parameters
+    plan = await runtime.repo.get_plan(checkpoint.plan_id)
+    planned_by_id = {item.step_id: item for item in plan.items}
     states = await runtime.repo.list_build_steps(checkpoint.project_id, checkpoint.build_id)
     artifacts = [await runtime.repo.get_artifact(checkpoint.project_id, item.result_artifact_version_id)
                  for item in states if item.status == "completed" and item.result_artifact_version_id]
-    snapshot = [{"step_id": item.plan_step_id, "status": item.status, "error": item.error,
-                 "artifact_version_id": item.result_artifact_version_id} for item in states]
+    snapshot = []
+    for item in states:
+        planned = planned_by_id.get(item.plan_step_id)
+        snapshot.append({
+            "step_id": item.plan_step_id,
+            "objective": planned.objective if planned else "",
+            "capability": planned.capability if planned else "",
+            "depends_on": planned.depends_on if planned else [],
+            "parameters": _checkpoint_task_parameters(planned.parameters if planned else {}),
+            "status": item.status,
+            "error": item.error,
+            "artifact_version_id": item.result_artifact_version_id,
+        })
     instruction = checkpoint.planner_instruction.split("Task snapshot at notification time:", 1)[0]
     return checkpoint.model_copy(update={
         "artifact_version_ids": [item.id for item in artifacts],
@@ -95,6 +108,14 @@ def checkpoint_prompt(
             "Only set goal_satisfied=true when the final playable deliverable exists, never "
             "merely because work was queued. Do not add tasks in the completion patch; include "
             "any VideoSpec facts learned so far as a final partial patch.",
+            "For every video-generation task, parameters.prompt is the final prompt sent to "
+            "the provider, not a short synopsis. Make it duration-aware and preserve all "
+            "relevant concrete subject identity, wardrobe/product, setting, lighting, camera, "
+            "motion, action/performance, dialogue/native audio, continuity start/end state, "
+            "visual style, exclusions, and user constraints. Inspect prior task parameters.prompt "
+            "and Artifact metadata.generation_context. Later or repaired clips must retain "
+            "comparable specificity instead of collapsing into plot-only bullets. Adapt the "
+            "detail and temporal beats to the requested duration; do not assume a fixed clip count.",
         ]
     else:
         instructions = [
