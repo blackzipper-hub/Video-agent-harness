@@ -14,8 +14,20 @@ from app.services.ffmpeg_service import get_video_info
 
 DEFAULT_CLI = "~/.local/hyperframes-runtime/node_modules/.bin/hyperframes"
 DEFAULT_NODE_BIN = "~/.local/node-v24.5.0/bin"
+
+
+def _dev_hyperframes_cli() -> str:
+    # Repo checkout: services/media-service/app/services → parents[4] is the monorepo root.
+    # Docker image copies this package to /app, which is too shallow for parents[4].
+    try:
+        root = Path(__file__).resolve().parents[4]
+    except IndexError:
+        return ""
+    return str(root / ".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs")
+
+
 CLI_CANDIDATES = (
-    str(Path(__file__).resolve().parents[4] / ".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs"),
+    _dev_hyperframes_cli(),
     "/opt/hyperframes/node_modules/.bin/hyperframes",
     DEFAULT_CLI,
 )
