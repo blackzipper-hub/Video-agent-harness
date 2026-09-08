@@ -48,6 +48,44 @@ class DeepSeekHarnessClientTest(unittest.IsolatedAsyncioTestCase):
             [item["method"] for item in seen],
             ["session.create", "session.list", "session.prompt", "session.history", "session.cancel"],
         )
+        prompt_body = next(item for item in seen if item["method"] == "session.prompt")
+        self.assertEqual(
+            prompt_body["payload"]["content"],
+            [{"type": "text", "text": "change shot three"}],
+        )
+        await http.aclose()
+
+    async def test_prompt_sends_source_images_as_dsh_content_parts(self):
+        seen: list[dict] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = __import__("json").loads(request.content)
+            seen.append(body)
+            return httpx.Response(200, json={
+                "type": "server-response",
+                "rpcId": body["rpcId"],
+                "result": {"ok": True, "value": {"accepted": True}},
+            })
+
+        http = httpx.AsyncClient(
+            base_url="http://deepseek.test",
+            transport=httpx.MockTransport(handler),
+        )
+        client = DeepSeekHarnessClient("http://deepseek.test", client=http)
+        await client.prompt(
+            "session-1",
+            "生成mv",
+            images=[{
+                "type": "image",
+                "mediaType": "image/jpeg",
+                "data": "abc",
+                "name": "source.jpg",
+            }],
+        )
+        self.assertEqual(seen[0]["payload"]["content"], [
+            {"type": "text", "text": "生成mv"},
+            {"type": "image", "mediaType": "image/jpeg", "data": "abc", "name": "source.jpg"},
+        ])
         await http.aclose()
 
     async def test_rpc_error_is_not_treated_as_success(self):

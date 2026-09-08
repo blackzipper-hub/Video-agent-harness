@@ -74,11 +74,23 @@ class DeepSeekHarnessClient:
         *,
         mode: str = "queue",
         client_time_zone: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> None:
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for image in images or []:
+            media_type = str(image.get("mediaType") or "")
+            data = str(image.get("data") or "")
+            if media_type not in {"image/png", "image/jpeg", "image/webp", "image/gif"} or not data:
+                continue
+            part: dict[str, Any] = {"type": "image", "mediaType": media_type, "data": data}
+            name = str(image.get("name") or "").strip()
+            if name:
+                part["name"] = name
+            content.append(part)
         payload: dict[str, Any] = {
             "sessionId": session_id,
             "mode": mode,
-            "content": [{"type": "text", "text": text}],
+            "content": content,
         }
         if client_time_zone:
             payload["clientTimeZone"] = client_time_zone

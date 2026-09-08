@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import tempfile
@@ -12,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
+
+import httpx
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -37,6 +41,12 @@ from app.chat.v2.language import (
 router = APIRouter(prefix="/v2", tags=["deepseek-compatibility-bff"])
 studio_router = APIRouter(prefix="/studio", tags=["deepseek-studio-compatibility-bff"])
 client: DeepSeekHarnessClient | None = None
+logger = logging.getLogger(__name__)
+_DSH_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+_SOURCE_IMAGE_ATTACH_NOTE = (
+    "Source images attached to this message correspond to those Source Artifacts, "
+    "in the same order."
+)
 
 
 def set_deepseek_client(value: DeepSeekHarnessClient | None) -> None:
@@ -133,6 +143,100 @@ def _prompt_input_files(input_files: list[dict[str, Any]]) -> list[dict[str, Any
         "type": item.get("type"),
         "filename": item.get("filename"),
     } for item in input_files]
+
+
+def _sniff_image_media_type(raw: bytes, filename: str | None = None) -> str | None:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw[:6] in {b"GIF87a", b"GIF89a"}:
+        return "image/gif"
+    ext = Path(str(filename or "")).suffix.lower().lstrip(".")
+    return {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
+    }.get(ext)
+
+
+async def _load_source_image_bytes(url: str) -> bytes | None:
+    """Read source pixels for session.prompt without putting the URL in the text prompt."""
+    value = str(url or "").strip()
+    if not value:
+        return None
+    if value.startswith("data:") and ";base64," in value:
+        try:
+            return base64.b64decode(value.split(";base64,", 1)[1])
+        except Exception:
+            return None
+    path = Path(value)
+    if path.is_file():
+        return await asyncio.to_thread(path.read_bytes)
+    try:
+        from app.utils.file_utils import inline_local_image_url_for_llm
+
+        inlined = await inline_local_image_url_for_llm(value)
+        if inlined.startswith("data:") and ";base64," in inlined:
+            return base64.b64decode(inlined.split(";base64,", 1)[1])
+    except Exception as exc:
+        logger.warning("source image local inline failed url=%s err=%s", value[:120], exc)
+    if value.startswith(("http://", "https://")):
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http:
+                response = await http.get(value)
+                response.raise_for_status()
+                return response.content
+        except Exception as exc:
+            logger.warning("source image fetch failed url=%s err=%s", value[:120], exc)
+            return None
+    return None
+
+
+async def _source_image_parts(input_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """DSH prompt image blocks for uploaded source stills. Audio/video stay text-only."""
+    parts: list[dict[str, Any]] = []
+    for item in input_files:
+        kind = str(item.get("type") or "").strip().lower()
+        if kind != "image":
+            continue
+        url = str(item.get("url") or item.get("uri") or "").strip()
+        raw = await _load_source_image_bytes(url)
+        if not raw:
+            logger.warning("skipping unread source image artifact_id=%s", item.get("artifact_id"))
+            continue
+        media_type = _sniff_image_media_type(raw, str(item.get("filename") or url))
+        if media_type not in _DSH_IMAGE_MEDIA_TYPES:
+            logger.warning(
+                "skipping unsupported source image media artifact_id=%s", item.get("artifact_id"),
+            )
+            continue
+        part: dict[str, Any] = {
+            "type": "image",
+            "mediaType": media_type,
+            "data": base64.b64encode(raw).decode("ascii"),
+        }
+        name = str(item.get("filename") or item.get("artifact_id") or "").strip()
+        if name:
+            part["name"] = name
+        parts.append(part)
+    return parts
+
+
+async def _prompt_with_source_images(
+    dsh: DeepSeekHarnessClient,
+    session_id: str,
+    text: str,
+    input_files: list[dict[str, Any]] | None = None,
+) -> None:
+    images = await _source_image_parts(input_files or [])
+    if images:
+        text = f"{text}\n{_SOURCE_IMAGE_ATTACH_NOTE}"
+    await dsh.prompt(session_id, text, images=images)
 
 
 async def _import_input_files(
@@ -431,8 +535,9 @@ def _initial_video_build_prompt(
             "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
         ),
         (
-            "Create a ProjectIntent containing only known goals and constraints. "
-            "Shots, captions, and timing wait for media that does not exist yet."
+            "Write ProjectIntent.brief as the working plan: the user request, plus what you can "
+            "see in any attached source media. Shots, captions, and timing wait for media that "
+            "does not exist yet."
             if staged else
             "Turn the visible user request and creation controls into one complete, valid VideoSpec."
         ),
@@ -1001,7 +1106,8 @@ async def create_run(
             _RUN_CONTEXT_KEY,
             json.dumps(run_context, ensure_ascii=False, sort_keys=True),
         )
-        await dsh.prompt(
+        await _prompt_with_source_images(
+            dsh,
             session_id,
             _initial_video_build_prompt(
                 objective=body.objective,
@@ -1014,6 +1120,7 @@ async def create_run(
                 activated_skill_ids=activated_skill_ids,
                 language_contract=language_values,
             ),
+            imported_input_files,
         )
         return success(_run(project, session_id, [], run_context))
     except DeepSeekHarnessError as exc:
@@ -1143,7 +1250,9 @@ async def add_message(
                     "artifacts and resume the pending checkpoint using the user's message. "
                     f"Active checkpoints: {json.dumps(active)}."
                 )
-        await dsh.prompt(binding.session_id, prompt)
+        await _prompt_with_source_images(
+            dsh, binding.session_id, prompt, imported_input_files,
+        )
         run_context.update({
             "workflow_id": workflow_id,
             "activated_skill_ids": activated_skill_ids,
@@ -1590,10 +1699,12 @@ async def studio_add_command(
                     sort_keys=True,
                 )
             )
-        await dsh.prompt(
+        await _prompt_with_source_images(
+            dsh,
             binding.session_id,
             prompt + _selection_context(workflow_id, activated_skill_ids)
             + "\n\n" + video_language_instruction(language_values),
+            imported_input_files,
         )
         run_context.update({
             "workflow_id": workflow_id,

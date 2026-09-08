@@ -10,7 +10,7 @@ description: >-
   短剧对白片用 short-drama-workflow；产品广告用 product-ad-video。
 metadata:
   kind: workflow
-  version: "2.7.3"
+  version: "2.7.4"
   workflow:
     title: Music Video
     mode: mv
@@ -76,7 +76,7 @@ metadata:
 
 ## 能力与工具
 
-- **看源**：直接看用户文本和源媒体。把读到的写进 `ProjectIntent.brief`。后面搜索、设定图、出画用这份 brief。`research.generate` 的 `user_input` 从 brief 取已经写成字的主语。
+- **看源**：看用户文本和这次请求附上的源媒体。把看见的写进 `ProjectIntent.brief`：用户要什么，源里是什么。后面搜索、设定图、出画用这份 brief。`research.generate` 的 `user_input` 从 brief 取已经写成字的主语。
 - **创意构思**：从 brief 或一首歌发散多个创意方向，挑最有记忆点的展开
 - **文案扩写**：把模糊需求扩成完整中文提示词，融入运镜/光影/节奏/风格
 - **web_search**：搜当下流行 prompt 写法，借鉴句式融入文案

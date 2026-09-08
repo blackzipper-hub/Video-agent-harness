@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import sys
 import io
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -33,6 +35,7 @@ class FakeDeepSeekClient:
     def __init__(self) -> None:
         self.events: dict[str, list[dict]] = {}
         self.prompts: list[tuple[str, str]] = []
+        self.prompt_images: list[list[dict]] = []
         self.missing_sessions: set[str] = set()
         self.session_count = 0
         self.history_calls = 0
@@ -46,8 +49,9 @@ class FakeDeepSeekClient:
         self.events.setdefault(session_id, [])
         return session_id
 
-    async def prompt(self, session_id: str, text: str, **_options) -> None:
+    async def prompt(self, session_id: str, text: str, **options) -> None:
         self.prompts.append((session_id, text))
+        self.prompt_images.append(list(options.get("images") or []))
         self.events[session_id] = [
             {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
             {"type": "user/message", "seq": 1, "time": 1001, "data": {
@@ -94,7 +98,20 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         app.mount("/chat-v1/service", subapp)
         self.client = TestClient(app)
 
+        async def local_source_bytes(url: str) -> bytes | None:
+            path = Path(str(url or "").strip())
+            if path.is_file():
+                return path.read_bytes()
+            return None
+
+        self._source_bytes_patch = patch(
+            "app.video_runtime.deepseek_bff._load_source_image_bytes",
+            side_effect=local_source_bytes,
+        )
+        self._source_bytes_patch.start()
+
     def tearDown(self) -> None:
+        self._source_bytes_patch.stop()
         self.client.close()
         set_deepseek_client(None)
 
@@ -191,6 +208,54 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertEqual(repeated["id"], run["id"])
         self.assertEqual(repeated["user_option"]["duration"], 15)
         self.assertEqual(len(self.deepseek.prompts), 1)
+
+    def test_create_attaches_source_images_without_copying_urls(self) -> None:
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+            handle.write(png)
+            uploaded_path = handle.name
+        try:
+            with patch.dict("os.environ", {
+                "VIDEO_STAGED_PLANNING_ENABLED": "true",
+                "VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED": "true",
+            }):
+                created = self.client.post(
+                    "/chat-v1/service/v2/runs",
+                    json={
+                        "objective": "生成mv",
+                        "idempotency_key": "attach-image-1",
+                        "input_files": [{
+                            "type": "image",
+                            "url": uploaded_path,
+                            "filename": "source.png",
+                            "metadata": {
+                                "upload_receipt": _sign_uploaded_file(
+                                    "local-user", "image", uploaded_path,
+                                ),
+                            },
+                        }],
+                    },
+                )
+        finally:
+            Path(uploaded_path).unlink(missing_ok=True)
+        self.assertEqual(created.status_code, 200, created.text)
+        prompt = self.deepseek.prompts[0][1]
+        self.assertNotIn(uploaded_path, prompt)
+        self.assertIn("source:", prompt)
+        self.assertIn("Source images attached to this message", prompt)
+        self.assertIn(
+            "Write ProjectIntent.brief as the working plan: the user request, plus what you can "
+            "see in any attached source media",
+            prompt,
+        )
+        images = self.deepseek.prompt_images[0]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["type"], "image")
+        self.assertEqual(images[0]["mediaType"], "image/png")
+        self.assertEqual(images[0]["name"], "source.png")
+        self.assertEqual(base64.b64decode(images[0]["data"]), png)
 
     def test_list_runs_keeps_project_when_deepseek_session_was_removed(self) -> None:
         created = self.client.post(
@@ -643,8 +708,13 @@ Keep the requested visual tone consistent.
                 workflow_id="mv",
                 activated_skill_ids=[],
             )
-        self.assertIn("containing only known goals and constraints", prompt)
+        self.assertIn(
+            "Write ProjectIntent.brief as the working plan: the user request, plus what you can "
+            "see in any attached source media",
+            prompt,
+        )
         self.assertIn("Shots, captions, and timing wait for media that does not exist yet", prompt)
+        self.assertNotIn("containing only known goals and constraints", prompt)
         self.assertNotIn("or other details that depend on media not generated yet", prompt)
         self.assertNotIn("brief is the requested film", prompt)
         self.assertNotIn("Example: user asked", prompt)
