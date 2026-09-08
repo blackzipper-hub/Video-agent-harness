@@ -10,7 +10,7 @@ description: >-
   短剧对白片用 short-drama-workflow；产品广告用 product-ad-video。
 metadata:
   kind: workflow
-  version: "2.7.2"
+  version: "2.7.3"
   workflow:
     title: Music Video
     mode: mv
@@ -62,25 +62,25 @@ metadata:
 
 ## 班子
 
-开写之前先锁源，后面只继承，不重开。
+开写之前先看源，把读到的写进 `ProjectIntent.brief`，后面只继承这份 brief。
 
 | 栏 | 写什么 |
 |---|---|
 | 锚 | 用户已经给的文本和源媒体 |
 | 身份 | 源里要连续认出的主体 |
 | 场 / 物 | 需要锁的空间或物件；不需要就不出 |
-| 唱 | 看源时有人在唱才填；没有就空着。导演后来定了表演者再写入 |
-| 约束 | 看源事实、research、听分析、设定图、出画都站在这一边 |
+| 唱 | 唱的人 |
+| 约束 | brief、research、听分析、设定图、出画都站在这一边 |
 
-用户给了源，就是它。没给，导演定一次，定完也是锁。下游给办法和气质，不改已经锁住的。
+用户给了源，就是它。没给，导演定一次，定完也是锁。
 
 ## 能力与工具
 
-- **看源**：读用户文本和源媒体，写下可见事实（主体种类和数量、颜色/外形、场、道具）。没看见的不要编。`research.generate` 只吃这段文本，看不见图。搜索、设定图、出画都用这份字。
-- **创意构思**：从源事实或一首歌发散多个创意方向，挑最有记忆点的展开
+- **看源**：直接看用户文本和源媒体。把读到的写进 `ProjectIntent.brief`。后面搜索、设定图、出画用这份 brief。`research.generate` 的 `user_input` 从 brief 取已经写成字的主语。
+- **创意构思**：从 brief 或一首歌发散多个创意方向，挑最有记忆点的展开
 - **文案扩写**：把模糊需求扩成完整中文提示词，融入运镜/光影/节奏/风格
 - **web_search**：搜当下流行 prompt 写法，借鉴句式融入文案
-- **参考调研**：看源之后才用 `research.generate` 搜外部参考（方法见 `video_skill_load("video-research")`）。brief 用看源事实当主语。三条里走质量和效果更好的那条。用户明确不要搜，就跳过。
+- **参考调研**：看源之后才用 `research.generate` 搜外部参考（方法见 `video_skill_load("video-research")`）。`user_input` 从 brief 取。三条里走质量和效果更好的那条。用户明确不要搜，就跳过。
 - **词库选词**：从 [reference.md](reference.md) 的镜头语言/风格/导演/作画词库中取词，不自编
 - **图片诊断**：检查分辨率(300–6000px)、宽高比(0.4–2.5)、构图问题；发现运镜风险时主动提示
 - **搭配验证**：判断「图 + prompt + 运镜 + 这段音乐（情绪、人声）」是否协调，不搭就局部修改。有搜过参考，也看看跟那条路搭不搭，不搭就改。
@@ -125,7 +125,7 @@ metadata:
 用户只丢了源（或歌 + 源）？这是发挥创意的空间：先看源，再发散。
 
 1. **听歌定调**：有音频时，先听歌，用段落**情绪**决定哪条创意路线，再按〈词和画〉给每段定档；整张歌词纸不是分镜大纲
-2. **发散创意方向**：从已经写下的源事实出发，构思 2–3 个完全不同的角度，再挑最有意思的展开。方向改气质和结构。已经锁住的不换；源里没锁的由你定一次，定完再锁。
+2. **发散创意方向**：从 brief 出发，构思 2–3 个完全不同的角度，再挑最有意思的展开。方向改气质和结构。
 3. 展开时依然要过**创意审核**——不是"能跑"就行，要"有意思"
 
 ## 工作方式
@@ -160,7 +160,7 @@ metadata:
 
 ## 搜索建议
 
-对着看源事实、用户的话、歌去搜。用户明确不要搜，就跳过。方法论见 `video_skill_load("video-research")`。`research.generate` 的 `user_input` 用看源事实当主语。
+对着 brief、用户的话、歌去搜。用户明确不要搜，就跳过。方法论见 `video_skill_load("video-research")`。`research.generate` 的 `user_input` 从 brief 取。
 
 只想补一两句 prompt 句式时直接 `web_search`：
 
@@ -175,7 +175,7 @@ metadata:
 
 ## 怎么拍
 
-1. **先看源，再决定要不要搜。** 然后才 `research.generate`（可跳过）。三条里走质量和效果更好的那条，后面设定图和每段 prompt 用上。调研改气质、光、剪、音乐，不换已经锁住的。
+1. **先看源，再决定要不要搜。** 看源进 brief。然后才 `research.generate`（可跳过）。三条里走质量和效果更好的那条，后面设定图和每段 prompt 用上。
 2. **先有歌。** 用户已经丢了音频，直接听它。
 
    没歌就出一首，交给 `suno.generate`。先 `video_skill_load("suno-song")`，按那条 skill 走词和 Style Box。唱不唱、要不要词、描述还是填词，由你定。唱的人按班子走，落在 `tags` 起首和 `vocal_gender`。字段看这条 capability。搜过参考的话，曲风和情绪取你选的那条方向的 `mood_direction`。
@@ -185,7 +185,7 @@ metadata:
    然后 `media.audio_analyze` 听结构、段落、歌词时间。听完先看真实长度（`audio_duration_sec`）：跟你要的差不多（几秒之内），整曲本身就是窗，从 0 切下去就行，不用再挑；差得远，才自己挑窗——成片总长跟用户走；班子里唱的人，窗里要有他。切点跟情绪、揭示、音乐转折、画面对比走；一个眼神、一句话、一个动作正在起作用，就让它演完，不要只顾信息密度。挑窗时起点从分析里抄，或者把 audiomap 钉上、`start_sec`/`duration` 都不传，让它用 `smart_clip.recommended`。
 
    `media.audio_cut` 切整窗，并把你定好的各段（`segments`：每段 `start_sec` + 整数秒 `duration`，不超过生成上限）一起切成参考轨。整窗已经不超过生成上限时，可以不传 `segments`。
-3. **设定图按需。** 给每份源标角色：`identity` / `setting` / `object` / `style` / 这次不用。片子要锁什么，才用 `atomic.image.generate` 出什么。prompt 用看源事实 + 用户文本。要把源送进模型时，写进 `reference_from_steps` 或 `images`；`depends_on` 只排队。选中方向给气质，不换已经锁住的。
+3. **设定图按需。** 给每份源标角色：`identity` / `setting` / `object` / `style` / 这次不用。片子要锁什么，才用 `atomic.image.generate` 出什么。prompt 用 brief + 用户文本。要把源送进模型时，写进 `reference_from_steps` 或 `images`；`depends_on` 只排队。选中方向给气质。
 4. **分段出画**，单段 4–15 整数秒，`duration` 用该段秒数。prompt 从 [reference.md](reference.md) 取词；运镜和光把这条参考融进去——词库对上它的技法，不照抄调研原文。这一段的词画关系和表演模式按〈词和画〉定，对口型的段才抄词做口型。
    - 默认 H3：`video_skill_load("h3")`，`model: minimax-h3`，`images` 带这一镜的设定图和仍要锁的源，外加该段音频
    - 也可即梦：`model: doubao-seedance-2-0`，只传 images，**不传** audios
