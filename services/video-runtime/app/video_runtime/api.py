@@ -1294,6 +1294,7 @@ async def project_events(
     identity: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
     after: int = Query(default=0, ge=0),
+    tail: bool = Query(default=False),
 ) -> StreamingResponse | dict:
     await _owned_and_bound(build_runtime, project_id, identity)
     last_event_id = request.headers.get("last-event-id", "")
@@ -1301,6 +1302,11 @@ async def project_events(
         cursor_start = max(after, int(last_event_id)) if last_event_id else after
     except ValueError:
         cursor_start = after
+    if tail and not last_event_id:
+        cursor_start = max(
+            cursor_start,
+            await build_runtime.repo.latest_event_sequence(project_id),
+        )
     events = await build_runtime.repo.list_events(project_id, cursor_start)
     if "text/event-stream" not in request.headers.get("accept", ""):
         return {"data": [event.model_dump(mode="json") for event in events]}

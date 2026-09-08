@@ -1235,6 +1235,11 @@ class InMemoryVideoProjectRepository:
             })
             return deepcopy(export)
 
+    async def latest_event_sequence(self, project_id: str) -> int:
+        await self.get_project(project_id)
+        events = self.events.get(project_id) or []
+        return events[-1].sequence if events else 0
+
     async def list_events(self, project_id: str, after: int = 0) -> list[ProjectEvent]:
         await self.get_project(project_id)
         return deepcopy([event for event in self.events[project_id] if event.sequence > after])

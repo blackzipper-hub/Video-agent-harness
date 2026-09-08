@@ -1613,6 +1613,14 @@ class PostgresVideoProjectRepository:
             })
         return export
 
+    async def latest_event_sequence(self, project_id: str) -> int:
+        await self.get_project(project_id)
+        value = await self.pool.fetchval(
+            f"SELECT COALESCE(MAX(sequence), 0) FROM {self.schema}.project_events WHERE project_id=$1",
+            project_id,
+        )
+        return int(value or 0)
+
     async def list_events(self, project_id: str, after: int = 0) -> list[ProjectEvent]:
         await self.get_project(project_id)
         rows = await self.pool.fetch(
