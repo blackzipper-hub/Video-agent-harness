@@ -8,16 +8,12 @@ metadata:
   roles: [guidance, stage_supervisor]
   scope:
     type: stage
-  selectors:
+    selectors:
     capabilities:
       - atomic.text.generate
       - atomic.video.generate
       - api.provider.generate
       - api.ark_protocol.generate
-      - shot.generate
-      - shot.video.generate
-      - video.generate
-      - video_gen.generate
     artifact_types:
       - script
       - storyboard

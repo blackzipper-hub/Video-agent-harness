@@ -23,17 +23,6 @@ def test_generate_research_alias_resolves():
     assert CapabilityRegistry().canonical_id("generate-research") == "research.generate"
 
 
-def test_research_output_is_not_media_scoped():
-    """Media-scoped outputs are rejected unless the user asked for that medium.
-
-    Research produces no media, so it must stay out of MEDIA_TERMS or planning a
-    research task would fail the plan validator's scope check.
-    """
-    from app.orchestration.policy.plan_validator import MEDIA_TERMS
-
-    assert "research" not in MEDIA_TERMS
-
-
 def test_research_does_not_require_a_locked_workflow():
     """Research is most useful while the user is still deciding what to make."""
     from app.chat.v2.workflows import capability_requires_workflow
@@ -141,19 +130,6 @@ def test_the_prompt_infers_delivery_shape_from_the_brief():
     assert "Infer the delivery shape from the brief." in prompt
     assert "content_category" not in prompt
     assert "Per-type" not in prompt
-
-
-def test_workflow_short_drama_still_declares_content_category():
-    from app.chat.v2.skill_catalog import SkillCatalog
-    from app.chat.v2.workflows import configure_workflows, WORKFLOWS
-
-    roots = Path(__file__).resolve().parents[1] / "skills"
-    catalog = SkillCatalog([roots / "system", roots / "builtin", roots / "external"])
-    catalog.discover()
-    configure_workflows(catalog, CapabilityRegistry())
-
-    spec = next(s for s in WORKFLOWS.values() if s.skill_name == "workflow-short-drama")
-    assert spec.parameters["content_category"] == "short_drama"
 
 
 def test_mv_workflow_does_not_stamp_content_category():
@@ -923,47 +899,3 @@ def test_research_generate_is_declared_on_the_atomic_plugin():
     )
     assert "research.generate" in manifest["contributions"]["capabilities"]
     assert "research.generate" in CutiAtomicProviderPlugin().capability_handlers()
-
-
-@pytest.mark.asyncio
-async def test_executor_research_generate_stores_the_brief(monkeypatch):
-    async def _fake(**kwargs):
-        assert "15秒MV" in kwargs["user_input"]
-        return {
-            "topic": "15秒MV",
-            "research_summary": "grounded",
-            "directions": [{}, {}, {}],
-            "sources": [{}, {}, {}, {}, {}],
-            "title": "Reference research: 15秒MV",
-            "summary": "3 directions grounded in 5 sources from search",
-        }
-
-    monkeypatch.setattr(
-        "app.services.agent.video.generate_research_by_request_service.generate_research_by_request",
-        _fake,
-    )
-    from uuid import uuid4
-
-    from app.chat.v2.capability_loader import build_registry
-    from app.chat.v2.executors import CapabilityExecutor
-    from app.chat.v2.models import AgentRun, Task
-
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="生成15s mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="research",
-        capability_id="research.generate", objective="调研",
-        parameters={"brief": "生成一支15秒MV。"},
-    )
-    result = await executor._run_local_service(
-        run, task, [], f"idem-{uuid4()}",
-        registry.get("research.generate"),
-    )
-    assert result.status == "completed"
-    assert result.artifact["uri"] is None
-    assert result.artifact["title"].startswith("Reference research")
-    assert result.artifact["metadata"]["topic"] == "15秒MV"

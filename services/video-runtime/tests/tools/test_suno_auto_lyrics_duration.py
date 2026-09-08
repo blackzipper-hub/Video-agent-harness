@@ -136,46 +136,6 @@ async def test_auto_lyrics_prompt_with_explicit_duration():
     _print_duration_result("描述中显式 30 秒", result, USER_TARGET_DURATION)
 
 
-@pytest.mark.asyncio
-async def test_auto_lyrics_via_llm_tool():
-    """
-    验证3：走完整流程（LLM 读 prompt → 调用 generate_music_with_suno）。
-
-    检查更新后的 prompt 是否能让 LLM 在描述里加短时长句，从而得到接近目标的时长。
-    通过条件：成功且选用 clip 时长 ≤ 60 秒（放宽以容纳 LLM 表述差异）。
-    """
-    from app.services.agent.video.music_generation_service import generate_single_suno_music
-
-    user_input = USER_PROMPT
-    target_duration = USER_TARGET_DURATION
-    print("\n🎵 验证3：LLM + 工具完整调用（目标 30s）")
-    print(f"   user_input: {user_input[:60]}...")
-
-    all_messages, music_version = await generate_single_suno_music(
-        user_input=user_input,
-        target_duration=target_duration,
-        needs_lyrics=False,
-        prioritize_duration=True,
-        images=[],
-        send_event_func=None,
-        conversation_id=None,
-        use_auto_lyrics=True,
-    )
-
-    assert music_version.success, f"音乐生成失败: {music_version.error_msg}"
-    actual_duration = music_version.duration or 0
-    print(f"\n   实际时长: {actual_duration}s (目标 {target_duration}s)")
-    # 期望 prompt 要求 LLM 加短时长句后，Suno 返回短曲；放宽到 60s 视为通过
-    assert actual_duration <= 60, (
-        f"期望 auto_lyrics 短曲 ≤60s，实际 {actual_duration}s。"
-        "请确认 prompt 中「描述末尾必须加英文短时长」已被 LLM 执行。"
-    )
-    print("   ✅ 时长在预期范围内（≤60s）")
-
-
-# ---------- auto_lyrics 多档位时长测试（0–300s 代表性子，误差 ≤15s） ----------
-
-
 @pytest.mark.parametrize("target_sec", AUTO_LYRICS_DURATION_TARGETS)
 @pytest.mark.asyncio
 async def test_auto_lyrics_duration_targets(target_sec: int):

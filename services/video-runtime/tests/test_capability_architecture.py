@@ -8,8 +8,8 @@ from app.integrations.providers.manifests import provider_capabilities
 
 def test_platform_atomic_capabilities_are_not_skill_packages():
     platform = platform_capabilities()
-    assert len(platform) == 33
-    assert len({item.id for item in platform}) == 33
+    assert len(platform) == 18
+    assert len({item.id for item in platform}) == 18
 
     root = Path(__file__).resolve().parents[1] / "skills" / "system"
     skill_names = {item.name for item in SkillCatalog([root]).discover()}
@@ -28,10 +28,17 @@ def test_provider_capabilities_have_dedicated_sources():
     assert {item.id for item in providers} == {
         "api.provider.generate",
         "api.ark_protocol.generate",
-        "open_montage.tool.invoke",
     }
 
     all_items = default_capabilities()
-    assert len(all_items) == 36
-    assert len({item.id for item in all_items}) == 36
+    assert len(all_items) == 20
+    assert len({item.id for item in all_items}) == 20
     assert "video.pipeline.generate" not in {item.id for item in all_items}
+    dest_ids = {
+        "story.generate", "image.generate", "music.generate", "video.generate",
+        "video_gen.generate", "video.edit", "outline.generate", "character.generate",
+        "scene.generate", "shot.generate", "keyframe.generate", "shot.video.generate",
+        "character.regenerate", "keyframe.regenerate", "shot.video.regenerate",
+        "video.assemble",
+    }
+    assert dest_ids.isdisjoint({item.id for item in all_items})

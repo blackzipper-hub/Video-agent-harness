@@ -1,1 +1,1 @@
-"""Planner, workflow compilation and durable task-runtime entry points."""
+"""Workflow compilation and Skill resolution for the Video Runtime."""

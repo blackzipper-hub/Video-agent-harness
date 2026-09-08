@@ -215,7 +215,7 @@ instructions
         source = await _add_product_source(runtime, project.id)
         lock = await runtime.set_project_skill_enabled(
             project_id=project.id,
-            skill_id="character-director",
+            skill_id="product-voiceover-narration",
             enabled=True,
         )
         self.assertEqual(lock.project_id, project.id)
@@ -231,15 +231,15 @@ instructions
         )
         persisted = await runtime.list_project_skill_locks(project.id)
         self.assertEqual(
-            [item.skill_id for item in persisted],
-            ["character-director", "product-ad-video"],
+            {item.skill_id for item in persisted},
+            {"product-voiceover-narration", "product-ad-video"},
         )
         # product-ad-video is intentionally a direct I2V workflow and no longer
         # creates the generic `characters` stage.  A project lock is still
         # frozen into its own workflow-specific planning artifact.
         brief_step = next(item for item in plan.items if item.step_id == "commercial-brief")
         resolved = {item.skill_id: item for item in brief_step.resolved_skills}
-        self.assertEqual(resolved["character-director"].source, "project_lock")
+        self.assertEqual(resolved["product-voiceover-narration"].source, "project_lock")
 
         switched = await runtime.plan_project(
             project_id=project.id,

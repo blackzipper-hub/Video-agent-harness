@@ -1,19 +1,17 @@
 """Paths for stage runtime.
 
-kit/     = agent knowledge (skills + exported JSON schemas)
+kit/     = agent knowledge (skills)
 data/…   = per-run workspaces (not part of kit)
 Backend root = AGENT_SERVICE_ROOT so both /kit/... and /data/... are visible.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
 
 # services/agent/
 AGENT_SERVICE_ROOT = Path(__file__).resolve().parents[4]
 KIT_ROOT = AGENT_SERVICE_ROOT / "kit"
 SKILLS_ROOT = KIT_ROOT / "skills"
-SCHEMAS_ROOT = KIT_ROOT / "schemas"
 
 
 def virtual_skills_stage(stage: str) -> str:
@@ -21,56 +19,14 @@ def virtual_skills_stage(stage: str) -> str:
     return f"/kit/skills/stages/{stage}"
 
 
-def virtual_skills_creative() -> str:
-    """Shared cinematic creative skills (storytelling / short-form / …)."""
-    return "/kit/skills/creative"
-
-
 def virtual_skills_builtin(domain: str) -> str:
     """Virtual path for a platform builtin Skill domain.
 
-    Lets a stage agent mount the same package the v2 coordinator loads, so a
+    Lets a stage agent mount the same package the coordinator loads, so a
     methodology shared by both does not get forked into a kit copy. The backend
     root is AGENT_SERVICE_ROOT, so ``skills/`` is visible alongside ``kit/``.
     """
     return f"/skills/builtin/{domain}"
-
-
-def is_short_drama_category(content_category: Optional[str]) -> bool:
-    """True when content_category is Short Drama (delivery/routing only)."""
-    return (content_category or "").strip().lower() == "short drama"
-
-
-def is_story_narrative_category(content_category: Optional[str]) -> bool:
-    """Story/narrative craft path: Default + Short Drama (+ empty → Default).
-
-    Product Launch and Lip-Sync MV keep their own TTS/music/lipsync routing and
-    are excluded from Explainer-skip / chapter-hint-skip / dense-dialogue craft.
-    """
-    raw = (content_category or "").strip().lower()
-    if raw in {"product launch", "lip-sync mv"}:
-        return False
-    return True
-
-
-def narrative_skills_paths(
-    stage: str,
-    *,
-    content_category: Optional[str] = None,
-) -> List[str]:
-    """Stage skills + optional creative craft for narrative stages.
-
-    Story narrative (Default / Short Drama): stage directors only — skip Explainer
-    creative pack. Product Launch / Lip-Sync MV still mount creative when useful.
-    """
-    paths = [virtual_skills_stage(stage)]
-    if not is_story_narrative_category(content_category):
-        paths.append(virtual_skills_creative())
-    return paths
-
-
-# Back-compat alias
-VIRTUAL_SKILLS_OUTLINE = virtual_skills_stage("outline")
 
 
 def get_stage_artifact_root() -> Path:

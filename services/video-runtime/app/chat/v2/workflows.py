@@ -16,15 +16,10 @@ EXPLICIT_SKILL_RE = re.compile(
 )
 
 STAGE_CAPABILITY_IDS = frozenset({
-    "outline.generate", "character.generate", "scene.generate", "shot.generate",
-    "keyframe.generate", "shot.video.generate", "video.assemble",
-    "keyframe.regenerate", "character.regenerate", "shot.video.regenerate",
-    "story.generate", "image.generate", "music.generate", "video.generate",
-    "video_gen.generate", "video.edit",
     "api.provider.generate", "api.ark_protocol.generate", "media.concat",
     "media.extract_frame", "media.audio_trim", "media.audio_analyze",
     "media.audio_cut",
-    "media.mix_audio", "open_montage.tool.invoke", "atomic.text.generate",
+    "media.mix_audio", "atomic.text.generate",
     "atomic.image.generate", "atomic.music.generate", "atomic.video.generate",
     "suno.generate",
 })

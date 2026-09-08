@@ -303,5 +303,5 @@ def get_settings() -> Settings:
     return _settings
 
 
-# 与 Cuti-VideoAgent 一致：模块级 ``settings``，供 ``agent_router_service``、``models.database`` 等使用
+# Process-wide settings used by chat helpers, BFF uploads, and provider clients.
 settings = get_settings()

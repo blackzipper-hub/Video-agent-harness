@@ -14,11 +14,11 @@ _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _CONTRACT = re.compile(r"```cuti-contract\s*\n(.*?)\n```", re.DOTALL)
 
 SUPPORTED_EXECUTORS = frozenset({
-    "video-agent.delegate",
     "local.structured",
     "local.service",
     "mcp.call",
     "sandbox.run",
+    "atomic.direct",
 })
 UNTRUSTED_EXECUTORS = frozenset({"sandbox.run"})
 

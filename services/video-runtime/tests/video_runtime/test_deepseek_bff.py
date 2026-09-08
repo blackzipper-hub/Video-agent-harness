@@ -291,7 +291,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         catalog = self.client.get("/chat-v1/service/v2/skills")
         self.assertEqual(catalog.status_code, 200, catalog.text)
         names = {item["name"] for item in catalog.json()["data"]}
-        self.assertIn("character-director", names)
+        self.assertIn("product-voiceover-narration", names)
         self.assertNotIn("cuti.atomic-providers", names)
 
         created = self.client.post(
@@ -300,36 +300,36 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                 "objective": "Make a Skill-driven trailer",
                 "idempotency_key": "skill-selection-1",
                 "workflow_id": "product-ad-video",
-                "activated_skill_ids": ["character-director"],
+                "activated_skill_ids": ["product-voiceover-narration"],
             },
         ).json()["data"]
         prompt = self.deepseek.prompts[-1][1]
         self.assertIn('"product-ad-video"', prompt)
         self.assertIn("Call video_workflow_load", prompt)
-        self.assertIn('VideoSpec.activated_skill_ids exactly to ["character-director"]', prompt)
+        self.assertIn('VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]', prompt)
         self.assertNotIn("$product-ad-video", prompt)
 
         lock_response = self.client.post(
             f"/chat-v1/service/studio/projects/{created['thread_id']}"
-            "/skills/character-director/enable",
+            "/skills/product-voiceover-narration/enable",
             json={"enabled": True},
         )
         self.assertEqual(lock_response.status_code, 200, lock_response.text)
         lock = lock_response.json()["data"]
         self.assertEqual(lock["project_id"], created["project_id"])
-        self.assertEqual(lock["skill_id"], "character-director")
+        self.assertEqual(lock["skill_id"], "product-voiceover-narration")
         self.assertTrue(lock["enabled"])
         listed = self.client.get(
             f"/chat-v1/service/studio/projects/{created['thread_id']}/skills",
         ).json()["data"]
-        self.assertEqual([item["skill_id"] for item in listed], ["character-director"])
+        self.assertEqual([item["skill_id"] for item in listed], ["product-voiceover-narration"])
 
         self.client.post(
             f"/chat-v1/service/v2/runs/{created['id']}/messages",
             json={"content": "Make the hero warmer", "idempotency_key": "skill-edit-1"},
         )
         self.assertIn(
-            'VideoSpec.activated_skill_ids exactly to ["character-director"]',
+            'VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]',
             self.deepseek.prompts[-1][1],
         )
 

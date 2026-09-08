@@ -9,10 +9,6 @@ from app.agent_config.duration import (
     get_video_driven_duration_values,
     get_video_driven_split_threshold,
 )
-from app.agent_config.image_tool_profiles import (
-    ImageToolPlanningProfile,
-    get_image_tool_planning_profile,
-)
 from app.agent_config.transcription import (
     TRANSCRIPTION_ENGINE_PROFILES,
     TRANSCRIPTION_METHOD_CONFIG,
@@ -41,8 +37,6 @@ __all__ = [
     "VIDEO_TOOL_PLANNING_PROFILES",
     "get_video_tool_planning_profile",
     "resolve_audio_driven_scene_split_threshold",
-    "ImageToolPlanningProfile",
-    "get_image_tool_planning_profile",
     "get_audio_driven_duration_values",
     "get_video_driven_duration_values",
     "get_audio_driven_split_threshold",

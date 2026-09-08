@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from app.chat.v2.models import AgentRun
-from app.chat.v2.repository import InMemoryV2Repository
 from app.chat.v2.skill_catalog import SkillCatalog
 from app.domain.skills import make_skill_lock, skill_digest
 
@@ -30,7 +29,7 @@ def test_skill_lock_uses_version_source_and_content_digest(tmp_path):
     assert lock.digest == skill_digest(directory)
 
 
-async def test_skill_locks_persist_with_agent_run_payload(tmp_path):
+def test_skill_locks_attach_to_agent_run_payload(tmp_path):
     root = tmp_path / "external"
     _write_skill(root)
     metadata = SkillCatalog([root]).discover()[0]
@@ -39,8 +38,4 @@ async def test_skill_locks_persist_with_agent_run_payload(tmp_path):
         objective="make a sample", idempotency_key="key-1",
         skill_locks=[make_skill_lock("project-1", metadata)],
     )
-    repo = InMemoryV2Repository()
-    stored, created = await repo.create_run(run)
-
-    assert created
-    assert stored.skill_locks[0].digest == skill_digest(root / "camera-language")
+    assert run.skill_locks[0].digest == skill_digest(root / "camera-language")

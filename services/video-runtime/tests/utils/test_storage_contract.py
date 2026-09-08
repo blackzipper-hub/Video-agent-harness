@@ -137,20 +137,14 @@ async def test_s3_fetch_foreign_url_over_real_http(monkeypatch, http_audio, tmp_
 
 
 @pytest.mark.asyncio
-async def test_temp_file_utils_and_convert_use_same_fetch(tmp_path, monkeypatch, http_audio):
+async def test_convert_media_url_uses_same_fetch(tmp_path, monkeypatch, http_audio):
     s3 = _local_store(tmp_path, monkeypatch)
     monkeypatch.setattr("app.utils.s3_utils.s3_utils", s3)
-    monkeypatch.setattr("app.utils.temp_file_utils.s3_utils", s3)
 
     from app.utils.file_utils import MediaFormat, MediaType
     from app.utils.s3_utils import convert_media_url_to_s3
-    from app.utils.temp_file_utils import download_media_to_temp
 
     stored = await s3.download_and_upload_audio_to_s3(http_audio, generation_id="shared")
-    with tempfile.TemporaryDirectory() as temp_dir:
-        local = await download_media_to_temp(stored, temp_dir, MediaType.AUDIO)
-        assert local and open(local, "rb").read() == PAYLOAD
-
     converted = await convert_media_url_to_s3(stored, MediaType.AUDIO, MediaFormat.LOCAL_PATH)
     assert converted and open(converted, "rb").read() == PAYLOAD
 

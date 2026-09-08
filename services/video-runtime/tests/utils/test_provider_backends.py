@@ -1,7 +1,6 @@
 """Provider 后端开关（开源自托管：只需 Postgres + Redis）。
 
-覆盖三条 backend 的「切换 + 默认参数不变」语义：
-- QUEUE_BACKEND：redis -> RedisTaskQueue；默认 sqs -> SQSTaskService（工厂选择）
+覆盖：
 - STORAGE_BACKEND：local -> S3Utils 写本地磁盘并产出 /files URL；默认 s3 不变
 - ACCOUNT_BACKEND：env -> 从环境变量读各家 key；默认 appconfig 不变
 """
@@ -9,22 +8,6 @@ import asyncio
 import os
 
 from app.config import settings
-
-
-# ---------------- QUEUE ----------------
-
-def test_queue_factory_defaults_to_sqs(monkeypatch):
-    monkeypatch.setattr(settings, "QUEUE_BACKEND", "sqs", raising=False)
-    from app.services.queue import create_task_queue
-    q = create_task_queue(queue_url="https://sqs.x.amazonaws.com/1/q", environment="local")
-    assert type(q).__name__ == "SQSTaskService"
-
-
-def test_queue_factory_selects_redis(monkeypatch):
-    monkeypatch.setattr(settings, "QUEUE_BACKEND", "redis", raising=False)
-    from app.services.queue import create_task_queue
-    q = create_task_queue(environment="local")
-    assert type(q).__name__ == "RedisTaskQueue"
 
 
 # ---------------- STORAGE ----------------

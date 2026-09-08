@@ -344,58 +344,9 @@ VideoAgent 可以 polling 或 webhook 回调。
 
 ---
 
-## 5. 迁移清单：每个调用点的改造
+## 5. 迁移清单
 
-### 5.1 video_segments_service.py
-
-| 原代码位置 | 原调用 | 迁移为 |
-|------------|--------|--------|
-| `process_and_merge_videos` (use_per_shot 路径) | `batch_download_media_to_temp` → `align_video_to_duration_exact_local` × N → `concat_local_videos_with_normalize` → `upload_file_from_temp` | `POST /pipeline/segment-process` |
-| `_process_single_segment` (非 use_per_shot 路径) | `batch_download_media_to_temp` → `align_video_to_duration_exact_local` → `upload_file_from_temp` | `POST /video/trim` (单视频 align) |
-| `merge_and_trim_lipsync_videos` | `batch_download_media_to_temp` → FFmpeg concat → `trim_video_to_duration_exact_local` → `upload_file_from_temp` | `POST /pipeline/segment-process` |
-| `create_placeholder_video` | `create_black_placeholder_video` → upload | `POST /video/create-placeholder` |
-| `_adjust_video_speed_without_audio` | FFmpeg speed adjust (内联) | `POST /video/speed-adjust` |
-| `_concatenate_videos_in_temp` | FFmpeg concat (内联) | `POST /video/concat` |
-
-### 5.2 video_assembly_service.py
-
-| 原代码位置 | 原调用 | 迁移为 |
-|------------|--------|--------|
-| `_download_media_to_temp` + `_concatenate_video_segments_local_only` + `_add_watermark_to_video` + `_upload_final_video_to_s3` | 4步组合 | `POST /pipeline/video-assembly` |
-| `concatenate_segments_narration_driven` | `concatenate_videos_with_narration_and_effects` | `POST /pipeline/video-assembly` (带 narrations) |
-| `concatenate_segments_with_music_pieces` | 多步 download + concat + music | `POST /pipeline/video-assembly` (带 music) |
-| `add_background_music_to_video` (wrapper) | `video_utils.add_background_music_to_video` | `POST /video/mix-audio` |
-| `_get_video_duration_simple` | ffprobe 内联 | `POST /video/info` |
-| `_adjust_video_speed_without_audio` | ffmpeg 内联 | `POST /video/speed-adjust` |
-| `_replace_video_audio` | ffmpeg 内联 | `POST /video/add-audio` |
-| `mix_narration_with_video` | ffmpeg 内联 | `POST /video/mix-audio` |
-| `concatenate_video_segments_by_urls` (独立版本) | ffmpeg concat 内联 | `POST /video/concat` |
-
-### 5.3 video_utils.py（整体迁移为 media-service 内部实现）
-
-| 原函数 | 对应 API | 说明 |
-|--------|---------|------|
-| `get_video_duration` | `POST /video/info` | 只返回 duration |
-| `get_video_stream_info_async` | `POST /video/info` | 返回全部元数据 |
-| `check_video_has_audio_async` | `POST /video/info` | 合并到 info.has_audio |
-| `normalize_single_video_to_match_async` | `POST /video/normalize` | 内部实现 |
-| `concat_local_videos_with_normalize` | `POST /video/concat` | 带自动 normalize |
-| `add_watermark_to_video_async` | `POST /video/add-watermark` | |
-| `normalize_video_to_target_sync` | `POST /video/normalize` | |
-| `create_black_placeholder_video` | `POST /video/create-placeholder` | |
-| `add_audio_track_to_video` | `POST /video/add-audio` | |
-| `concatenate_videos_with_narration_and_effects` | `POST /pipeline/video-assembly` | 组合 pipeline |
-| `adjust_video_speed_to_duration` | `POST /video/speed-adjust` | |
-| `trim_video_to_duration` / `trim_video_to_duration_exact_local` | `POST /video/trim` | 统一 |
-| `align_video_to_duration_exact_local` / `force_video_to_duration_local` | `POST /video/trim` (mode=pad_or_trim) | 统一 |
-| `strip_audio_from_video` | `POST /video/strip-audio` | |
-| `get_audio_duration_from_url` | `POST /audio/info` | |
-| `trim_audio_clip` | `POST /audio/trim` | |
-| `concatenate_video_segments_by_urls` | `POST /video/concat` | |
-| `merge_video_with_mixed_audio` | `POST /video/mix-audio` | |
-| `adjust_lipsync_audio_volume` | `POST /video/mix-audio` | 合并 |
-| `add_background_music_to_video` | `POST /video/mix-audio` + music 参数 | |
-| `_process_music_duration` | media-service 内部实现 | |
+Dest LangGraph 的 `video_segments_service` / `video_assembly_service` 以及 `video_utils` 里的本地 FFmpeg 拼接 helper 已删除。Video Runtime 通过 `app.utils.media_service_client` 调用 Media Service；`video_utils.py` 只保留 provider 出片后仍需要的薄封装（`finalize_pipeline_video_upload`、`trim_video_to_duration`、`strip_audio_from_video`、`get_audio_duration_from_url`、`normalize_video_to_target_sync`）。
 
 ### 5.4 s3_utils.py
 
@@ -422,12 +373,8 @@ VideoAgent 可以 polling 或 webhook 回调。
 
 | 原函数 | 迁移为 |
 |--------|--------|
-| `merge_audio_with_video` → `merge_video_with_audio` | `POST /video/add-audio` |
 | `extract_audio_from_video` | `POST /audio/extract-from-video` |
-| `extract_audio_segment` / `extract_audio_segment_from_local` | `POST /audio/trim` |
-| `convert_audio_to_wav` | `POST /audio/convert` |
-| `process_audio_duration` (get duration) | `POST /audio/info` |
-| `prepare_video_content_for_llm` (download for Google upload) | 保留（特殊用途，非通用媒体处理） |
+| `prepare_video_for_llm` (download for Google upload) | 保留（一致性检查，非通用媒体处理） |
 
 ### 5.7 其他
 
@@ -437,7 +384,6 @@ VideoAgent 可以 polling 或 webhook 回调。
 | `services/download_service.py` → `create_image_sheets` | PIL 拼图 | 可选：`POST /image/create-sheet` 或保留（非关键路径）|
 | `services/.../user_input_analysis_service.py` → 音频提取 | ffmpeg 内联 | `POST /audio/extract-from-video` |
 | `tools/transcribe/gemini.py` → ffprobe 获取 duration | ffprobe 内联 | `POST /audio/info` |
-| `crud/video/video_audio.py` → 音频分段 | ffprobe + ffmpeg | `POST /audio/trim` |
 | `api/admin/smart_testing_endpoints.py` → `_get_video_dimensions_sync` | ffprobe 内联 | `POST /video/info` |
 | `utils/subtitle_utils.py` → `add_subtitles_to_video_command` | 返回 FFmpeg 命令 | media-service 内部实现（当字幕功能启用时）|
 

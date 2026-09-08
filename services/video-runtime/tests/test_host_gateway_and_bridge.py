@@ -13,11 +13,8 @@ from app.chat.v2.provider_bridge import (
     normalize_video_profile,
     resolve_provider,
 )
-from app.chat.v2.sandbox_client import SandboxClient
 from app.chat.v2.skill_catalog import SkillCatalog
 from app.chat.v2.capability_loader import build_registry
-from app.chat.v2.executors import CapabilityExecutor
-from app.chat.v2.models import ArtifactVersion
 
 
 def test_host_allowed_exact_and_subdomain():
@@ -490,26 +487,6 @@ async def test_wavespeed_generate_only_uses_explicit_end_frame(monkeypatch):
     assert calls["create"]["last_image"] == "https://cdn/end.png"
 
 
-def test_sandbox_client_exposes_wavespeed_allowlist(monkeypatch):
-    monkeypatch.setenv("ARK_API_KEY", "a")
-    monkeypatch.setenv("WAVESPEED_API_KEY", "w")
-    client = SandboxClient(SimpleNamespace(
-        DEEP_AGENT_V2_SANDBOX_ENABLED=True,
-        DEEP_AGENT_V2_SANDBOX_WORKER_URL="http://worker:8090",
-        DEEP_AGENT_V2_SANDBOX_TOKEN="token",
-        DEEP_AGENT_V2_INTERNAL_EVENT_TOKEN="",
-        CUTI_SERVICE_TOKEN="",
-        DEEP_AGENT_V2_SANDBOX_REQUEST_TIMEOUT_SECONDS=30,
-        DEEP_AGENT_V2_SKILL_ENV_ALLOWLIST="ARK_API_KEY,WAVESPEED_API_KEY",
-        DEEP_AGENT_V2_HOST_GATEWAY_PUBLIC_URL="http://127.0.0.1:19004/chat-v1/service/v2/internal/host/dispatch",
-    ))
-    assert client._skill_environment() == {
-        "ARK_API_KEY": "a",
-        "WAVESPEED_API_KEY": "w",
-    }
-    assert "host/dispatch" in client._host_gateway_url()
-
-
 def test_system_skills_register_provider_and_media_concat():
     registry = build_registry(include_platform=True)
     assert registry.get("api.provider.generate").service_target == "api_provider_generate"
@@ -531,46 +508,6 @@ def test_mv_skill_is_instruction_only_workflow():
     assert "media.audio_analyze" in skill.instructions
     assert "media.hyperframes_caption" in skill.instructions
     assert (root / "mv" / "reference.md").is_file()
-
-
-def test_collect_artifact_urls_prefers_uri_over_nested_history():
-    selected = [
-        ArtifactVersion(
-            id="a1",
-            artifact_id="art-1",
-            project_id="p",
-            type="video",
-            version=1,
-            produced_by_task_id="t1",
-            title="ch1",
-            summary="",
-            uri="http://localhost/files/final.mp4",
-            metadata={
-                "videos": [
-                    {"video_url": "http://localhost/files/retry1.mp4"},
-                    {"video_url": "http://localhost/files/retry2.mp4"},
-                    {"video_url": "http://localhost/files/final.mp4"},
-                ]
-            },
-        ),
-        ArtifactVersion(
-            id="a2",
-            artifact_id="art-2",
-            project_id="p",
-            type="video",
-            version=1,
-            produced_by_task_id="t2",
-            title="ch2",
-            summary="",
-            uri="http://localhost/files/only.mp4",
-            metadata={},
-        ),
-    ]
-    urls = CapabilityExecutor._collect_artifact_video_urls(selected)
-    assert urls == [
-        "http://localhost/files/final.mp4",
-        "http://localhost/files/only.mp4",
-    ]
 
 
 def test_seedance2_skill_remains_instruction_only_without_sandbox_bundle():

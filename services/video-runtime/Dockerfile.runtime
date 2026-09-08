@@ -1,17 +1,11 @@
 FROM python:3.11-slim
 
-# Same OS libs as the full service image: ffmpeg plus WeasyPrint/Pango.
-# Python deps come from pyproject.toml, not a second hand-maintained list.
+# OS libs: ffmpeg for media, libpq for Postgres. Python deps come from pyproject.toml.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libpq-dev \
         gcc \
-        libpango-1.0-0 \
-        libpangocairo-1.0-0 \
-        libgdk-pixbuf-2.0-0 \
         libffi-dev \
-        libcairo2 \
-        fonts-droid-fallback \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/video-runtime

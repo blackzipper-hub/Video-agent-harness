@@ -1,1 +1,0 @@
-# CRUD integration tests

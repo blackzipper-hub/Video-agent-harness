@@ -523,28 +523,32 @@ permissions:
             },
         )
         validator = ContinuityValidatorPlugin()
-        clean_results = await validator.validate_artifact(
-            PluginContext(project_id="project-1", build_id="build-1"), clean,
-        )
-        self.assertEqual(len(clean_results), 1)
-        self.assertTrue(clean_results[0].passed)
-        self.assertEqual(
-            clean_results[0].validator_id,
-            "cuti.continuity.scene-reference-isolation",
-        )
-        self.assertIn("continuity", clean_results[0].validator_id)
+        with patch.dict(
+            "os.environ",
+            {"VIDEO_SCENE_REFERENCE_VISUAL_VALIDATION_ENABLED": "false"},
+        ):
+            clean_results = await validator.validate_artifact(
+                PluginContext(project_id="project-1", build_id="build-1"), clean,
+            )
+            self.assertEqual(len(clean_results), 1)
+            self.assertTrue(clean_results[0].passed)
+            self.assertEqual(
+                clean_results[0].validator_id,
+                "cuti.continuity.scene-reference-isolation",
+            )
+            self.assertIn("continuity", clean_results[0].validator_id)
 
-        contaminated = clean.model_copy(deep=True)
-        contaminated.metadata["skill_prompt_applied"] = True
-        contaminated.metadata["final_prompt"] = (
-            prompt + " Create a character sheet and a product sheet."
-        )
-        contaminated.metadata["resolved_generation_parameters"]["images"] = [
-            "https://cdn.example.test/product.png",
-        ]
-        failed = await validator.validate_artifact(
-            PluginContext(project_id="project-1", build_id="build-1"), contaminated,
-        )
+            contaminated = clean.model_copy(deep=True)
+            contaminated.metadata["skill_prompt_applied"] = True
+            contaminated.metadata["final_prompt"] = (
+                prompt + " Create a character sheet and a product sheet."
+            )
+            contaminated.metadata["resolved_generation_parameters"]["images"] = [
+                "https://cdn.example.test/product.png",
+            ]
+            failed = await validator.validate_artifact(
+                PluginContext(project_id="project-1", build_id="build-1"), contaminated,
+            )
         self.assertFalse(failed[0].passed)
         self.assertTrue(any("image inputs" in issue for issue in failed[0].issues))
         self.assertTrue(any("Skill instructions" in issue for issue in failed[0].issues))

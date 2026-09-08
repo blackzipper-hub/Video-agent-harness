@@ -1,1 +1,1 @@
-"""Stable domain contracts for the Studio orchestration surface."""
+"""Stable domain contracts for Skill locks."""

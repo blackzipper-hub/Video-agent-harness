@@ -101,12 +101,24 @@ class ContinuousSchedulerTest(unittest.IsolatedAsyncioTestCase):
         await coordinator.reconcile_finished_turns()
         self.assertTrue(await coordinator.run_once())
         payload = json.loads(session.calls[-1].split("Checkpoint payload:\n", 1)[1].split("\nACTION REQUIRED", 1)[0])
-        self.assertIn('"step_id": "slow", "status": "completed"', payload["planner_instruction"])
+        snapshot = json.loads(
+            payload["planner_instruction"].split(
+                "Current task snapshot (supersedes earlier notifications):\n", 1,
+            )[1]
+        )
+        by_id = {item["step_id"]: item for item in snapshot}
+        self.assertEqual(by_id["slow"]["status"], "completed")
         self.assertFalse(await coordinator.run_once())
         refreshed = await self.runtime.inspect_checkpoint(
             project_id=self.project.id, build_id=self.build.id, checkpoint_id=checkpoint.id,
         )
-        self.assertIn('"step_id": "slow", "status": "completed"', refreshed.planner_instruction)
+        refreshed_snapshot = json.loads(
+            refreshed.planner_instruction.split(
+                "Current task snapshot (supersedes earlier notifications):\n", 1,
+            )[1]
+        )
+        refreshed_by_id = {item["step_id"]: item for item in refreshed_snapshot}
+        self.assertEqual(refreshed_by_id["slow"]["status"], "completed")
         # A replayed observer of delivery 1 cannot release delivery 2.
         result = await self.runtime.repo.fail_checkpoint_delivery(checkpoint.id, "stale", expected_attempt=1)
         self.assertEqual(result.status, "planning")

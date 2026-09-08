@@ -59,9 +59,7 @@ def load_env_file():
         print(f"⚠️  环境文件不存在: {env_file}")
 
 
-# ⚠️ 重要：在模块顶层立即加载环境变量
-# 这样可以确保在 import app 之前环境变量就已经设置好了
-# 因为某些服务在模块加载时就会初始化（如 agent_router_service.py:206）
+# Load env before importing app modules that read settings at import time.
 load_env_file()
 
 

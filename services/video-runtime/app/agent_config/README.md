@@ -9,7 +9,6 @@
 | global_defaults | `tool_enums.DefaultValues` | — | 定义仍在 `tool_enums`；`agent_config` 包入口 re-export |
 | engine | `transcription` | `hybrid` / `gemini` | granularity 等 |
 | video_tool | `video_tool_profiles` + `duration` | `VideoGenerationTool` | scene_split；秒数从 wrapper 链求交 |
-| image_tool | `image_tool_profiles` | `ImageGenerationTool` | 占位，P2 从 `get_tool_capabilities` 迁入 |
 
 ## 单一事实来源
 

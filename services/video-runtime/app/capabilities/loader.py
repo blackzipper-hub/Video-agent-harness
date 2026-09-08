@@ -62,9 +62,7 @@ def manifest_from_skill(skill: LoadedSkill) -> CapabilityManifest:
     service_target = None
     mcp_server = contract.mcp_server
     mcp_tool = contract.mcp_tool
-    if contract.executor == "video-agent.delegate":
-        target_agent = contract.target
-    elif contract.executor == "local.service":
+    if contract.executor == "local.service":
         service_target = contract.target
     elif contract.executor == "mcp.call":
         mcp_server = mcp_server or contract.target

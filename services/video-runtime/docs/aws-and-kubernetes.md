@@ -97,7 +97,7 @@ sudo cp /etc/postgresql/14/main/pg_hba.conf /etc/postgresql/14/main/pg_hba.conf.
 sudo systemctl restart postgresql
 ```
 
-**执行记录：** ✅ 已执行（2026-03-10）。PG 重启后已验证所有 EC2 本地服务（VideoAgent dev/prod）自动重连正常。重启期间现有活跃 LangGraph task 会报 `AdminShutdown` 错误，需重启 VideoAgent 进程清理连接池。
+**执行记录：** ✅ 已执行（2026-03-10）。PG 重启后已验证所有 EC2 本地服务（VideoAgent dev/prod）自动重连正常。重启期间现有活跃 task 可能报 `AdminShutdown`，需重启 Video Runtime 进程清理连接池。
 
 ---
 
@@ -285,7 +285,7 @@ RUN mkdir -p /workspace /tmp/cuti-workspace
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--log-level", "info"]
+CMD ["uvicorn", "app.video_runtime.standalone:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--log-level", "info"]
 ```
 
 `.dockerignore` 包含 `static/` 防止将本地 static 文件拷进镜像。

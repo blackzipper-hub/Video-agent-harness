@@ -110,40 +110,22 @@
 
 ---
 
-## 6. 业务里 LLM 形态速查（Video 主图；旁白 / 音效不按 resilience 规划）
+## 6. Live LLM call sites (DeepSeek + stage agents)
 
-> 全仓 `grep`（`create_agent` / `with_structured_output` / `with_retry` / `load_prompt_with_fallback`）归纳。**`narration_generation`、`audio_effect_generation`** 仍各有 `load_prompt` + LLM，你方说业务上可不管，此处不列迁移优先级。
+LangGraph dest pipeline services (`agent_router_service`, outline / scene / storyboard /
+keyframe generation, admin smart-testing) have been removed. Remaining callers:
 
-| 模块 / 节点（图序约前→后） | 主要文件 | 典型形态 | 与 `llm_resilience` |
-|----------------------------|----------|----------|---------------------|
-| `user_input_analysis`（含 Gemini 看视频） | `user_input_analysis_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** + 多模态 messages | **已接** |
-| `music_generation`（视频管线 Suno） | `video/music_generation_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** + `MusicGenerationResult` | **已接** |
-| 无音频音乐意图 `analyze_music_intent` | `video/music_generation_service.py` | **`ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)`** + `structured_schema=MusicIntentAnalysis` | **已接** |
-| **`video_analysis`** | `video_analysis_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接** |
-| `outline_generation` | `outline_generation_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`**（audio/video 模板条目各用对应 `PromptName`） | **已接** |
-| `main_character_design` | `main_character_design_service.py` | 匹配/生成/生图/多视角：**`ainvoke_structured_resilient(CREATE_AGENT)`**（匹配用 `structured_schema=CharacterImageMatchingResult`） | **已接** |
-| `scene_generation` | `scene_generation_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接** |
-| `visual_elements_matching` | `visual_elements_matching_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接** |
-| `storyboard_detail_generation` | `storyboard_detail_generation_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接** |
-| `storyboard_first_frame_revision` | `storyboard_first_frame_revision_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** + `FirstFrameRevisionOutput` | **已接** |
-| `character_fusion` | `character_fusion_service.py` | **`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接** |
-| `keyframe_generation` | `keyframe_generation_service.py` | 批量 prompt / eval-fix / tool 执行：**`ainvoke_structured_resilient(CREATE_AGENT)`**（批量 prompt 用 `structured_schema=BatchKeyframePromptResultForLLM`） | **已接（reflection 另文件）** |
-| `keyframe_reflection` | `keyframe_reflection_service.py` | **`invoke_prompt_with_multimodal` → `ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)`**（`KeyframeReflectionVlmStructuredOutput`） | **已接** |
-| `video_generation` | `video_generation_service.py` | 风格检测与批量 prompt：**`STRUCTURED_CHAT_MESSAGES`**；`evaluate_and_fix` + `execute_single_video`：**`ainvoke_structured_resilient(CREATE_AGENT)`** | **部分** |
-| `music_bgm_generation` / 角色重生成等 | `video_agent_service.py` | 自定义 prompt 角色图等：**`ainvoke_structured_resilient(CREATE_AGENT)`** | **已接（流式子图除外）** |
-| **Router 分析 / 选项合并** | `agent_router_service.py` | 分析：**`STRUCTURED_CHAT_MESSAGES`**；合并：**`CREATE_AGENT`** | **已接** |
-| **Router Clarify 流式** | `agent_router_service.py` | **`execute_with_resilience` + `llm.astream`**（与 Story 同套路） | **已接** |
-| **Story 直接生成（流式）** | `story_generation_service.py` | **`execute_with_resilience` + `llm.astream`** | **已接** |
-| **Image 子 Agent（流式）** | `image/image_generation_service.py` | `execute_with_resilience` + 无 structured `create_agent` + `astream_events` | **已接（换模型）** |
-| **Music 子 Agent（流式）** | `music/music_generation_service.py` | 同上 | **已接（换模型）** |
-| **工具链** | `tools/video/video_consistency.py` | **`ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)`** | **已接** |
-| **管理端 baseline / production prompts** | `api/admin/smart_testing_endpoints.py` | 批量生成 prompt、图生 prompt、改 mustache：**`STRUCTURED_CHAT_MESSAGES`**（内联 `prompt_entry` + 专用 Pydantic） | **已接** |
-| **字幕分组** | `utils/subtitle_utils.py` | **`ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)`**（`SubtitleGroupsResponse`） | **已接** |
-| **I2I 角色一致性工具** | `tools/image/character_consistency.py` | multimodal → **`STRUCTURED_CHAT_MESSAGES`** | **已接** |
-| **Gemini 转写** | `tools/transcribe/gemini.py` | multimodal → **`ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)`**（`GeminiTranscriptionResult`） | **已接** |
-| **其它** | `multi_view_generation_service` 等 | `multi_view`：**resilient create_agent** | 按需 |
+| Module | File | Shape |
+|--------|------|--------|
+| Research brief | `services/agent/video/generate_research_by_request_service.py` | `create_deep_agent` + `create_llm_from_model_config` |
+| Video consistency | `tools/video/video_consistency.py` | `ainvoke_structured_resilient(STRUCTURED_CHAT_MESSAGES)` |
+| Image consistency | `tools/image/character_consistency.py` | multimodal → `STRUCTURED_CHAT_MESSAGES` |
+| Gemini transcription | `tools/transcribe/gemini.py` | multimodal → `STRUCTURED_CHAT_MESSAGES` |
+| Music smart-clip | `services/agent/video/music_smart_clip_service.py` | stage director + `PROMPTS_CONFIG` |
+| Stage runtime | `services/agent/stage_runtime/generic_stage.py` | `create_deep_agent` / `FailoverChatOpenAI` |
+| Atomic media | `chat/v2/atomic_executor.py` | provider tools + resilience |
 
-**联调想快**：**`video_analysis`** → **`outline_generation`** → 后半段 **`video_generation`**。集成测见 `test_llm_resilience_execute_real.py` 中 `test_real_ainvoke_structured_video_analysis_create_agent`、`test_real_ainvoke_structured_outline_video_driven_create_agent`、`…_style_detection`。
+`PROMPTS_CONFIG` now only has transcription, video consistency, image consistency, and music smart-clip. Mustache Hub templates are gone; stage craft text lives in `kit/skills/stages/*/SKILL.md`.
 
 ---
 
