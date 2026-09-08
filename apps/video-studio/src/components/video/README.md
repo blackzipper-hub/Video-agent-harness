@@ -74,7 +74,6 @@ charactersData, scenesData, keyframesData, videosData
   onNewTask: () => void;
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chatId: string, e: React.MouseEvent) => void;
-  onLogout: () => void;
 }
 ```
 

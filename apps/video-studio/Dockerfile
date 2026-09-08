@@ -1,11 +1,7 @@
 FROM node:24-bookworm-slim AS build
 
-# Dev / harness-test default: real Go login.
-# Local compose passes --build-arg VITE_LOCAL_SINGLE_USER_MODE=true.
-ARG VITE_LOCAL_SINGLE_USER_MODE=false
 ARG VITE_API_BASE_URL=/api/v1
-ENV VITE_LOCAL_SINGLE_USER_MODE=$VITE_LOCAL_SINGLE_USER_MODE \
-    VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 RUN corepack enable
 WORKDIR /workspace

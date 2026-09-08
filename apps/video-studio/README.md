@@ -8,6 +8,8 @@ Video Studio is the video-native frontend for Cuti Video Agent Harness. The impo
 
 ## Development
 
+The open-source Studio requires no account or login configuration. Create opens immediately without authentication requests or a login redirect; Video Runtime supplies the local project identity. Backend service tokens and capability grants are still enforced where configured. This single-user UI is not a public multi-user access-control system: protect exposed deployments with an authenticated gateway.
+
 Markdown documents support GFM tables with keyboard-accessible horizontal scrolling and chapter navigation. Runtime execution labels remain in progress views rather than appearing as duplicate script results.
 
 Create renders generated text and scripts as readable Markdown, and complete JSON documents as labeled fields and numbered content cards. Long lists expand on demand; raw JSON remains available in collapsed details. Model-provided HTML is not executed. The shared `ArtifactDocument` renderer preserves unknown fields and supports nested structures without requiring Workflow-specific views.

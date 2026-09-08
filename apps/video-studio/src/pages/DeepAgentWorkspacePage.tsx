@@ -16,7 +16,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { useAuth } from '@/contexts/AuthContext'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useLanguage } from '@/i18n/LanguageContext'
 import {
@@ -73,7 +72,6 @@ export default function DeepAgentWorkspacePage() {
   const shouldStartFromHome = Boolean(initialRequest?.shouldAutoSend && initialRequest.initialPrompt?.trim())
   const isMobile = useIsMobile()
   const { language, t } = useLanguage()
-  const { isLoggedIn, isLoading, user, logout } = useAuth()
   const workspaceBase = location.pathname.includes('/deep-agent-v2')
     ? 'deep-agent-v2'
     : 'create'
@@ -336,7 +334,6 @@ export default function DeepAgentWorkspacePage() {
 
   useEffect(() => {
     if (
-      !isLoggedIn ||
       initialRequestHandled.current ||
       !shouldStartFromHome ||
       !initialRequest?.initialPrompt
@@ -360,7 +357,6 @@ export default function DeepAgentWorkspacePage() {
     })
   }, [
     initialRequest,
-    isLoggedIn,
     language,
     location.pathname,
     navigate,
@@ -369,7 +365,6 @@ export default function DeepAgentWorkspacePage() {
   ])
 
   useEffect(() => {
-    if (!isLoggedIn) return
     const controller = new AbortController()
     void deepAgentV2Client.listSkills(controller.signal)
       .then(items => setSkills(items.filter(item => item.enabled)))
@@ -379,10 +374,10 @@ export default function DeepAgentWorkspacePage() {
         }
       })
     return () => controller.abort()
-  }, [isLoggedIn])
+  }, [])
 
   useEffect(() => {
-    if (!isLoggedIn || !activeThreadId || !state.snapshot?.run.id) {
+    if (!activeThreadId || !state.snapshot?.run.id) {
       setProjectSkillLocks([])
       return
     }
@@ -398,7 +393,7 @@ export default function DeepAgentWorkspacePage() {
         }
       })
     return () => controller.abort()
-  }, [activeThreadId, isLoggedIn, state.snapshot?.run.id])
+  }, [activeThreadId, state.snapshot?.run.id])
 
   const setProjectSkill = async (skill: DeepAgentSkill, enabled: boolean) => {
     if (!activeThreadId || !state.snapshot?.run.id) {
@@ -557,24 +552,6 @@ export default function DeepAgentWorkspacePage() {
     } finally {
       setIsUploading(false)
     }
-  }
-
-  useEffect(() => {
-    if (!isLoading && !isLoggedIn) {
-      navigate(`/${language}/auth`, { replace: true, state: { returnTo: `/${language}/create` } })
-    }
-  }, [isLoading, isLoggedIn, language, navigate])
-
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-accent-purple" />
-      </div>
-    )
-  }
-
-  if (!isLoggedIn) {
-    return null
   }
 
   const messageArea = (
@@ -944,8 +921,8 @@ export default function DeepAgentWorkspacePage() {
           collapsed={sidebarCollapsed}
           selectedChat={state.selectedRunId || workspace.pendingThreadId}
           chats={chats}
-          userInfo={{ email: user?.email || '' }}
-          userCredits={{ balance: user?.credits || 0 }}
+          userInfo={null}
+          userCredits={null}
           isLoadingChats={state.isLoadingRuns}
           hasMoreChats={false}
           showConversationActions={false}
@@ -955,7 +932,6 @@ export default function DeepAgentWorkspacePage() {
           onSelectChat={selectSession}
           onDeleteChat={(id, event) => void deleteSession(id, event)}
           onTogglePin={(_, event) => event.stopPropagation()}
-          onLogout={() => void logout().then(() => navigate('/auth'))}
         />
       )}
 
@@ -978,8 +954,8 @@ export default function DeepAgentWorkspacePage() {
                   collapsed={false}
                   selectedChat={state.selectedRunId || workspace.pendingThreadId}
                   chats={chats}
-                  userInfo={{ email: user?.email || '' }}
-                  userCredits={{ balance: user?.credits || 0 }}
+                  userInfo={null}
+                  userCredits={null}
                   isLoadingChats={state.isLoadingRuns}
                   hasMoreChats={false}
                   showConversationActions={false}
@@ -989,7 +965,6 @@ export default function DeepAgentWorkspacePage() {
                   onSelectChat={(id) => { selectSession(id); setMobileSidebarOpen(false) }}
                   onDeleteChat={(id, event) => void deleteSession(id, event)}
                   onTogglePin={(_, event) => event.stopPropagation()}
-                  onLogout={() => void logout().then(() => navigate('/auth'))}
                   isMobileFullScreen
                 />
               </div>

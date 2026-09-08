@@ -1,24 +1,21 @@
-import { useState, useRef, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useLanguage } from '@/i18n/LanguageContext';
-import { useAuth } from '@/hooks/useAuth';
-import { toast } from 'sonner';
-import { validateFiles, createDragDropHandler, normalizeClipboardFile } from '@/utils/fileUploadUtils';
-import { getAudioFileDurationSec, smartCropUploadedAudioFiles } from '@/utils/audioCrop';
-import { isAudioFile } from '@/utils/fileUploadUtils';
-import { resolveAutoCropTargetDurationSec, resolveSendDurationPlan } from '@/utils/targetVideoDuration';
-import { FilePreview } from '@/components/FilePreview';
-import { AudioCropDialog } from '@/components/AudioCropDialog';
-import CharacterSelectPopover from '@/components/CharacterSelectDialog';
-import { api } from '@/services/api';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
-import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Switch } from '@/components/ui/switch';
+import { useState, useRef, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useLanguage } from '@/i18n/LanguageContext'
+import { toast } from 'sonner'
+import { validateFiles, createDragDropHandler, normalizeClipboardFile } from '@/utils/fileUploadUtils'
+import { getAudioFileDurationSec, smartCropUploadedAudioFiles } from '@/utils/audioCrop'
+import { isAudioFile } from '@/utils/fileUploadUtils'
+import { resolveAutoCropTargetDurationSec, resolveSendDurationPlan } from '@/utils/targetVideoDuration'
+import { FilePreview } from '@/components/FilePreview'
+import { AudioCropDialog } from '@/components/AudioCropDialog'
+import CharacterSelectPopover from '@/components/CharacterSelectDialog'
+import { api } from '@/services/api'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,9 +25,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { DEFAULT_IMAGE_GENERATION_TOOL, DEFAULT_VIDEO_OPTIONS, type ImageGenerationToolType } from "@/constants/defaults";
-import { VideoOptionsPanel } from "@/components/VideoOptionsPanel";
+} from '@/components/ui/alert-dialog'
+import { DEFAULT_IMAGE_GENERATION_TOOL, DEFAULT_VIDEO_OPTIONS, type ImageGenerationToolType } from '@/constants/defaults'
+import { VideoOptionsPanel } from '@/components/VideoOptionsPanel'
 import {
   Image,
   Video,
@@ -38,26 +35,19 @@ import {
   Upload,
   Send,
   X,
-  RectangleHorizontal,
-  RectangleVertical,
-  Square,
   User,
-  AudioLines,
-  Plus,
-  Mic,
-  ChevronDown
-} from 'lucide-react';
+} from 'lucide-react'
 
 interface GenerationBoxProps {
-  title?: string;
-  subtitle?: string;
-  className?: string;
-  externalPrompt?: string; // External prompt to fill into the input
-  externalFiles?: File[]; // External files to pre-upload
+  title?: string
+  subtitle?: string
+  className?: string
+  externalPrompt?: string // External prompt to fill into the input
+  externalFiles?: File[] // External files to pre-upload
   /** 内容模版：如 "Lip-Sync MV"（点 Lip-sync 卡片时），默认不传为 Default */
-  externalContentCategory?: string;
+  externalContentCategory?: string
   /** 当此值变化且 > 0 时，播放发送按钮动效并自动发送（如从卡片1上传头像后） */
-  autoSendTrigger?: number;
+  autoSendTrigger?: number
 }
 
 // Options 按钮图标：两行圆+横线样式
@@ -68,183 +58,157 @@ const OptionsIconCustom = ({ className }: { className?: string }) => (
     <line x1="4" y1="17" x2="13" y2="17" />
     <circle cx="18" cy="17" r="2" />
   </svg>
-);
+)
 
 const GenerationBox = ({
-  title = "",
-  subtitle = "",
-  className = "",
+  title = '',
+  subtitle = '',
+  className = '',
   externalPrompt,
   externalFiles,
   externalContentCategory,
   autoSendTrigger,
 }: GenerationBoxProps) => {
-  const { t, language } = useLanguage();
-  const navigate = useNavigate();
-  const { lang: routeLang } = useParams<{ lang: string }>();
-  const { isLoggedIn, isLoading: authLoading } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const characterFileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const characterNameInputRef = useRef<HTMLInputElement>(null);
-  const lastExternalPromptRef = useRef<string>("");
-  const lastAutoSendTriggerRef = useRef(0);
+  const { t, language } = useLanguage()
+  const navigate = useNavigate()
+  const { lang: routeLang } = useParams<{ lang: string }>()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const characterFileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const characterNameInputRef = useRef<HTMLInputElement>(null)
+  const lastExternalPromptRef = useRef<string>('')
+  const lastAutoSendTriggerRef = useRef(0)
 
   // 读取环境变量配置，默认为 false（不显示 image/music）
-  const showImageMusicCreation = import.meta.env.VITE_SHOW_IMAGE_MUSIC_CREATION === "true";
+  const showImageMusicCreation = import.meta.env.VITE_SHOW_IMAGE_MUSIC_CREATION === 'true'
   // 读取环境变量配置，默认为 false（不显示 instant 模式切换）
-  const showInstantMode = import.meta.env.VITE_SHOW_INSTANT_MODE === "true";
+  const showInstantMode = import.meta.env.VITE_SHOW_INSTANT_MODE === 'true'
 
   // Generation states
-  const [prompt, setPrompt] = useState("");
-  const [selectedMediaType, setSelectedMediaType] = useState<"image" | "video" | "music" | "character">("video");
-  const [isInstantMode, setIsInstantMode] = useState(false);
-  const [duration, setDuration] = useState([DEFAULT_VIDEO_OPTIONS.duration]);
-  const durationExplicitlySetRef = useRef(false);
-  const [isDurationEditOpen, setIsDurationEditOpen] = useState(false);
-  const [editMinutes, setEditMinutes] = useState("0");
-  const [editSeconds, setEditSeconds] = useState(String(DEFAULT_VIDEO_OPTIONS.duration));
-  const [aspectRatio, setAspectRatio] = useState<"16:9" | "1:1" | "9:16">(DEFAULT_VIDEO_OPTIONS.aspectRatio);
-  const [resolution, setResolution] = useState<"480p" | "720p" | "1080p">(DEFAULT_VIDEO_OPTIONS.resolution);
-  const [lipsyncRatio, setLipsyncRatio] = useState([DEFAULT_VIDEO_OPTIONS.lipsyncCoverage]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [audioCropOpen, setAudioCropOpen] = useState(false);
-  const [audioCropTarget, setAudioCropTarget] = useState<{ index: number; file: File } | null>(null);
-  
+  const [prompt, setPrompt] = useState('')
+  const [selectedMediaType, setSelectedMediaType] = useState<'image' | 'video' | 'music' | 'character'>('video')
+  const [isInstantMode, setIsInstantMode] = useState(false)
+  const [duration, setDuration] = useState([DEFAULT_VIDEO_OPTIONS.duration])
+  const durationExplicitlySetRef = useRef(false)
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '1:1' | '9:16'>(DEFAULT_VIDEO_OPTIONS.aspectRatio)
+  const [resolution, setResolution] = useState<'480p' | '720p' | '1080p'>(DEFAULT_VIDEO_OPTIONS.resolution)
+  const [lipsyncRatio, setLipsyncRatio] = useState([DEFAULT_VIDEO_OPTIONS.lipsyncCoverage])
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [audioCropOpen, setAudioCropOpen] = useState(false)
+  const [audioCropTarget, setAudioCropTarget] = useState<{ index: number; file: File } | null>(null)
+
   // 拖拽上传状态
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
 
   // Sora 模型选择确认对话框状态
-  const [showSoraDialog, setShowSoraDialog] = useState(false);
-  const [pendingSoraModel, setPendingSoraModel] = useState<string>("");
+  const [showSoraDialog, setShowSoraDialog] = useState(false)
+  const [pendingSoraModel, setPendingSoraModel] = useState<string>('')
 
-  const [characterName, setCharacterName] = useState("");
-  const [characterImages, setCharacterImages] = useState<File[]>([]);
-  const [isUploadingCharacter, setIsUploadingCharacter] = useState(false);
+  const [characterName, setCharacterName] = useState('')
+  const [characterImages, setCharacterImages] = useState<File[]>([])
+  const [isUploadingCharacter, setIsUploadingCharacter] = useState(false)
 
   // Character selection
   const [selectedCharacters, setSelectedCharacters] = useState<Array<{
-    id: string;
-    name: string;
-    image: string;
-    isDefault?: boolean;
-  }>>([]);
+    id: string
+    name: string
+    image: string
+    isDefault?: boolean
+  }>>([])
 
   // Auto/Manual model selection（图片模型默认与 constants 一致）
-  const [isAutoModel, setIsAutoModel] = useState(true);
-  const [imageModel, setImageModel] = useState<ImageGenerationToolType>(DEFAULT_IMAGE_GENERATION_TOOL);
-  const [videoModel, setVideoModel] = useState("seedance_1_0_pro_fast");
-  const [lipsyncVideoModel, setLipsyncVideoModel] = useState(DEFAULT_VIDEO_OPTIONS.lipsyncVideoModel);
+  const [isAutoModel, setIsAutoModel] = useState(true)
+  const [imageModel, setImageModel] = useState<ImageGenerationToolType>(DEFAULT_IMAGE_GENERATION_TOOL)
+  const [videoModel, setVideoModel] = useState('seedance_1_0_pro_fast')
+  const [lipsyncVideoModel, setLipsyncVideoModel] = useState(DEFAULT_VIDEO_OPTIONS.lipsyncVideoModel)
 
   // Continuous Mode: all frames linked end-to-end throughout the entire video（与 Create 页默认一致）
-  const [isContinuousMode, setIsContinuousMode] = useState(DEFAULT_VIDEO_OPTIONS.enableContinuityMode);
+  const [isContinuousMode, setIsContinuousMode] = useState(DEFAULT_VIDEO_OPTIONS.enableContinuityMode)
   // Reflection Mode: AI 检查关键帧角色一致性并自动优化（默认关闭）
-  const [enableReflectionMode, setEnableReflectionMode] = useState(DEFAULT_VIDEO_OPTIONS.enableKeyframeReflection);
+  const [enableReflectionMode, setEnableReflectionMode] = useState(DEFAULT_VIDEO_OPTIONS.enableKeyframeReflection)
 
   // Run mode: true = Full Auto, false = Step-by-Step
-  const [isFullAuto, setIsFullAuto] = useState(true);
+  const [isFullAuto, setIsFullAuto] = useState(true)
 
   /** 发送按钮动效：idle | 放大 | 点击 */
-  const [sendButtonAnim, setSendButtonAnim] = useState<'idle' | 'enlarge' | 'click'>('idle');
-
-  const imageModelOptions = [
-    { value: "seedream", label: "Seedream" },
-    { value: "nano_banana", label: "Nano Banana" },
-    { value: "nano_banana_2", label: "Nano Banana 2" },
-    { value: "nano_banana_pro", label: "Nano Banana Pro" },
-    { value: "gpt_image_2", label: "GPT Image 2" },
-  ];
-
-  const videoModelOptions = [
-    { value: "seedance_1_0_pro_fast", label: "Seedance 1.0 Pro Fast" },
-    { value: "seedance_1_5_pro_fast", label: "Seedance 1.5 Pro Fast" },
-    { value: "seedance_2_i2v", label: "Seedance 2.0" },
-    { value: "seedance_2_i2v_turbo", label: "Seedance 2.0 Turbo" },
-    { value: "seedance_2_fast_i2v", label: "Seedance 2.0 Fast" },
-    { value: "seedance_2_fast_i2v_turbo", label: "Seedance 2.0 Fast Turbo" },
-    { value: "kling_v3_std", label: "Kling v3 Std" },
-    { value: "happyhorse_1_0_i2v", label: "HappyHorse 1.0" },
-    { value: "happyhorse_1_1_i2v", label: "HappyHorse 1.1" },
-    { value: "sora", label: "Sora" },
-    { value: "sora2_pro", label: "Sora2 Pro" },
-  ];
+  const [sendButtonAnim, setSendButtonAnim] = useState<'idle' | 'enlarge' | 'click'>('idle')
 
   // Auto-resize textarea based on content
   useEffect(() => {
-    const textarea = textareaRef.current;
+    const textarea = textareaRef.current
     if (textarea) {
-      textarea.style.height = 'auto';
-      const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100);
-      textarea.style.height = `${newHeight}px`;
+      textarea.style.height = 'auto'
+      const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
+      textarea.style.height = `${newHeight}px`
     }
-  }, [prompt]);
+  }, [prompt])
 
   // 如果配置为不显示 image/music，且当前选中了这些类型，则切换到 video
   useEffect(() => {
     if (!showImageMusicCreation && (selectedMediaType === 'image' || selectedMediaType === 'music')) {
-      setSelectedMediaType('video');
+      setSelectedMediaType('video')
     }
-  }, [showImageMusicCreation, selectedMediaType]);
+  }, [showImageMusicCreation, selectedMediaType])
 
   // 强制移除 character tab 选项后，如果当前选中了 character，则切换回 video（默认模式）
   useEffect(() => {
     if (selectedMediaType === 'character') {
-      setSelectedMediaType('video');
+      setSelectedMediaType('video')
     }
-  }, [selectedMediaType]);
+  }, [selectedMediaType])
 
   // 如果配置为不显示 instant 模式，则强制使用 master 模式
   useEffect(() => {
     if (!showInstantMode && isInstantMode) {
-      setIsInstantMode(false);
+      setIsInstantMode(false)
     }
-  }, [showInstantMode, isInstantMode]);
+  }, [showInstantMode, isInstantMode])
 
   // Fill external prompt into input when it changes
   useEffect(() => {
     if (externalPrompt && externalPrompt.trim() && externalPrompt !== lastExternalPromptRef.current) {
-      setPrompt(externalPrompt);
-      lastExternalPromptRef.current = externalPrompt;
+      setPrompt(externalPrompt)
+      lastExternalPromptRef.current = externalPrompt
       // Auto-resize textarea after setting prompt
       setTimeout(() => {
-        const textarea = textareaRef.current;
+        const textarea = textareaRef.current
         if (textarea) {
-          textarea.style.height = 'auto';
-          const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100);
-          textarea.style.height = `${newHeight}px`;
+          textarea.style.height = 'auto'
+          const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
+          textarea.style.height = `${newHeight}px`
           // Focus the textarea
-          textarea.focus();
+          textarea.focus()
         }
-      }, 0);
+      }, 0)
     }
-  }, [externalPrompt]);
+  }, [externalPrompt])
 
   // Handle external files when provided
   useEffect(() => {
     if (externalFiles && externalFiles.length > 0) {
-      setUploadedFiles(externalFiles);
+      setUploadedFiles(externalFiles)
     }
-  }, [externalFiles]);
+  }, [externalFiles])
 
   // 外部触发：发送按钮放大 -> 点击动效 -> 自动发送
   useEffect(() => {
-    if (autoSendTrigger == null || autoSendTrigger <= 0 || autoSendTrigger === lastAutoSendTriggerRef.current) return;
-    lastAutoSendTriggerRef.current = autoSendTrigger;
-    setSendButtonAnim('enlarge');
+    if (autoSendTrigger == null || autoSendTrigger <= 0 || autoSendTrigger === lastAutoSendTriggerRef.current) return
+    lastAutoSendTriggerRef.current = autoSendTrigger
+    setSendButtonAnim('enlarge')
     const t1 = setTimeout(() => {
-      setSendButtonAnim('click');
-    }, 450);
+      setSendButtonAnim('click')
+    }, 450)
     const t2 = setTimeout(() => {
-      setSendButtonAnim('idle');
-      handleSendMessage();
-    }, 650);
+      setSendButtonAnim('idle')
+      handleSendMessage()
+    }, 650)
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [autoSendTrigger]);
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [autoSendTrigger])
 
   // 页面加载时自动聚焦到输入框
   useEffect(() => {
@@ -252,200 +216,166 @@ const GenerationBox = ({
     const timer = setTimeout(() => {
       if (selectedMediaType === 'character') {
         // Character 模式：聚焦到 characterName 输入框
-        characterNameInputRef.current?.focus();
+        characterNameInputRef.current?.focus()
       } else {
         // 其他模式：聚焦到 textarea
-        textareaRef.current?.focus();
+        textareaRef.current?.focus()
       }
-    }, 100);
+    }, 100)
 
-    return () => clearTimeout(timer);
-  }, []); // 只在组件挂载时执行一次
+    return () => clearTimeout(timer)
+  }, []) // 只在组件挂载时执行一次
 
   const autoCropUploadedAudioFiles = async (files: File[], targetDurationSec?: number | null) =>
-    smartCropUploadedAudioFiles(files, targetDurationSec);
+    smartCropUploadedAudioFiles(files, targetDurationSec)
 
   const getUploadAutoCropTargetSec = () =>
     resolveAutoCropTargetDurationSec(
       Number(duration?.[0] || DEFAULT_VIDEO_OPTIONS.duration),
       prompt,
       { panelDurationExplicit: durationExplicitlySetRef.current },
-    );
+    )
 
   const syncDurationFromUploadedAudio = async (files: File[]) => {
-    const audioFile = files.find((file) => isAudioFile(file));
-    if (!audioFile) return;
+    const audioFile = files.find(file => isAudioFile(file))
+    if (!audioFile) return
     try {
-      const sec = await getAudioFileDurationSec(audioFile);
-      setDuration([sec]);
+      const sec = await getAudioFileDurationSec(audioFile)
+      setDuration([sec])
     } catch (error) {
-      console.warn('Failed to read uploaded audio duration:', error);
+      console.warn('Failed to read uploaded audio duration:', error)
     }
-  };
+  }
 
   const appendUploadedFilesAndOpenAudioCrop = async (files: File[]) => {
-    if (files.length === 0) return;
-    const audioIndex = files.findIndex((file) => file.type.startsWith('audio/'));
-    const nextAudioFile = audioIndex >= 0 ? files[audioIndex] : null;
-    const startIndex = uploadedFiles.length;
-    setUploadedFiles((prev) => [...prev, ...files]);
-    await syncDurationFromUploadedAudio(files);
+    if (files.length === 0) return
+    const audioIndex = files.findIndex(file => file.type.startsWith('audio/'))
+    const nextAudioFile = audioIndex >= 0 ? files[audioIndex] : null
+    const startIndex = uploadedFiles.length
+    setUploadedFiles(prev => [...prev, ...files])
+    await syncDurationFromUploadedAudio(files)
     if (nextAudioFile) {
-      setAudioCropTarget({ index: startIndex + audioIndex, file: nextAudioFile });
-      setAudioCropOpen(true);
+      setAudioCropTarget({ index: startIndex + audioIndex, file: nextAudioFile })
+      setAudioCropOpen(true)
     }
-  };
+  }
 
   // 创建拖拽处理器
   const dragDropHandler = createDragDropHandler(
     setIsDragOver,
     async (files: File[]) => {
-      const { validFiles } = validateFiles(files, uploadedFiles, t);
+      const { validFiles } = validateFiles(files, uploadedFiles, t)
       if (validFiles.length > 0) {
-        await appendUploadedFilesAndOpenAudioCrop(validFiles);
+        await appendUploadedFilesAndOpenAudioCrop(validFiles)
       }
     },
     () => isGenerating,
-    t
-  );
+    t,
+  )
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files);
-      const { validFiles } = validateFiles(files, uploadedFiles, t);
+      const files = Array.from(e.target.files)
+      const { validFiles } = validateFiles(files, uploadedFiles, t)
       if (validFiles.length > 0) {
-        await appendUploadedFilesAndOpenAudioCrop(validFiles);
+        await appendUploadedFilesAndOpenAudioCrop(validFiles)
       }
-      e.target.value = '';
+      e.target.value = ''
     }
-  };
+  }
 
   const handleFileRemove = (index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-  };
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index))
+  }
 
   const handleOpenAudioCrop = (index: number, file: File) => {
-    setAudioCropTarget({ index, file });
-    setAudioCropOpen(true);
-  };
+    setAudioCropTarget({ index, file })
+    setAudioCropOpen(true)
+  }
 
   const handleApplyAudioCrop = (nextFile: File) => {
-    if (!audioCropTarget) return;
-    setUploadedFiles((prev) => prev.map((item, i) => (i === audioCropTarget.index ? nextFile : item)));
-  };
+    if (!audioCropTarget) return
+    setUploadedFiles(prev => prev.map((item, i) => (i === audioCropTarget.index ? nextFile : item)))
+  }
 
   const handleCharacterImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files);
+      const files = Array.from(e.target.files)
 
-      const validFiles: File[] = [];
+      const validFiles: File[] = []
       for (const file of files) {
-        const fileType = file.type.toLowerCase();
-        const fileSize = file.size;
+        const fileType = file.type.toLowerCase()
+        const fileSize = file.size
 
         if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(fileType)) {
-          toast.error(`${file.name}: ${t('unsupportedFormat')}`);
-          continue;
+          toast.error(`${file.name}: ${t('unsupportedFormat')}`)
+          continue
         }
 
         if (fileSize > 10 * 1024 * 1024) {
-          toast.error(`${file.name}: ${t('fileSizeLimit')}`);
-          continue;
+          toast.error(`${file.name}: ${t('fileSizeLimit')}`)
+          continue
         }
 
-        validFiles.push(file);
+        validFiles.push(file)
       }
 
-      setCharacterImages((prev) => [...prev, ...validFiles]);
-      e.target.value = '';
+      setCharacterImages(prev => [...prev, ...validFiles])
+      e.target.value = ''
     }
-  };
+  }
 
   const handleCharacterImageRemove = (index: number) => {
-    setCharacterImages((prev) => prev.filter((_, i) => i !== index));
-  };
+    setCharacterImages(prev => prev.filter((_, i) => i !== index))
+  }
 
   const handleCharacterUpload = async () => {
     if (!characterName.trim()) {
-      toast.error(t('nameRequired'));
-      return;
+      toast.error(t('nameRequired'))
+      return
     }
 
     if (characterImages.length === 0) {
-      toast.error(t('imagesRequired'));
-      return;
+      toast.error(t('imagesRequired'))
+      return
     }
 
-    if (authLoading) return;
-    if (!isLoggedIn) {
-      toast.error(t('pleaseLogin'));
-      navigate("/auth");
-      return;
-    }
-
-    setIsUploadingCharacter(true);
+    setIsUploadingCharacter(true)
 
     try {
       const response = await api.characterUpload.createCharacter({
         characterName: characterName,
         images: characterImages,
-      });
+      })
 
       if (response.code === 0) {
-        toast.success(t('characterUploadSuccess'));
+        toast.success(t('characterUploadSuccess'))
 
-        setCharacterName("");
-        setCharacterImages([]);
+        setCharacterName('')
+        setCharacterImages([])
 
-        const folderId = response.data.folder_id;
         setTimeout(() => {
-          navigate(`/vault`);
-        }, 1500);
+          navigate('/vault')
+        }, 1500)
       } else {
-        toast.error(`${t('characterUploadError')}: ${response.message}`);
+        toast.error(`${t('characterUploadError')}: ${response.message}`)
       }
     } catch (error) {
-      console.error('Character upload error:', error);
-      toast.error(t('characterUploadError'));
+      console.error('Character upload error:', error)
+      toast.error(t('characterUploadError'))
     } finally {
-      setIsUploadingCharacter(false);
+      setIsUploadingCharacter(false)
     }
-  };
-
-  const handleDurationEdit = () => {
-    const minutes = parseInt(editMinutes) || 0;
-    const seconds = parseInt(editSeconds) || 0;
-    const totalSeconds = minutes * 60 + seconds;
-
-    if (totalSeconds >= 5 && totalSeconds <= 300) {
-      durationExplicitlySetRef.current = true;
-      setDuration([totalSeconds]);
-      setIsDurationEditOpen(false);
-    }
-  };
-
-  const openDurationEdit = () => {
-    const totalSeconds = duration[0];
-    setEditMinutes(Math.floor(totalSeconds / 60).toString());
-    setEditSeconds((totalSeconds % 60).toString());
-    setIsDurationEditOpen(true);
-  };
+  }
 
   const handleSendMessage = async () => {
     if (!prompt.trim() || isGenerating) {
-      return;
+      return
     }
 
-    if (authLoading) return;
-    if (!isLoggedIn) {
-      toast.error(t('pleaseLogin'));
-      navigate("/auth");
-      return;
-    }
+    setIsGenerating(true)
 
-    setIsGenerating(true);
-
-    let sendDurationPlan: Awaited<ReturnType<typeof resolveSendDurationPlan>>;
+    let sendDurationPlan: Awaited<ReturnType<typeof resolveSendDurationPlan>>
     try {
       sendDurationPlan = await resolveSendDurationPlan(
         uploadedFiles,
@@ -455,40 +385,40 @@ const GenerationBox = ({
           panelDurationExplicit: durationExplicitlySetRef.current,
           messageTexts: [prompt],
         },
-      );
+      )
     } catch (error) {
-      setIsGenerating(false);
-      toast.error(error instanceof Error ? error.message : String(error));
-      return;
+      setIsGenerating(false)
+      toast.error(error instanceof Error ? error.message : String(error))
+      return
     }
     const processedUploadedFiles =
-      sendDurationPlan.cropTargetSec != null && uploadedFiles.some((file) => isAudioFile(file))
+      sendDurationPlan.cropTargetSec != null && uploadedFiles.some(file => isAudioFile(file))
         ? await autoCropUploadedAudioFiles(uploadedFiles, sendDurationPlan.cropTargetSec)
-        : uploadedFiles;
-    const userOptionDurationSec = sendDurationPlan.userOptionDurationSec;
+        : uploadedFiles
+    const userOptionDurationSec = sendDurationPlan.userOptionDurationSec
     if (
       sendDurationPlan.panelDurationSec != null &&
       sendDurationPlan.panelDurationSec !== duration[0]
     ) {
-      setDuration([sendDurationPlan.panelDurationSec]);
+      setDuration([sendDurationPlan.panelDurationSec])
     }
-    
+
     // Determine backend tools based on Auto/Manual mode
-    const backendVideoTool = isAutoModel 
-      ? 'auto' 
-      : (videoModel === 'seedance_1_0_pro_fast' ? 'pollo_seedance' 
-         : videoModel === 'seedance_1_5_pro_fast' ? 'pollo_seedance_v1_5'
-         : videoModel === 'seedance_2_i2v' ? 'seedance_2_i2v'
-         : videoModel === 'seedance_2_i2v_turbo' ? 'seedance_2_i2v_turbo'
-         : videoModel === 'seedance_2_fast_i2v' ? 'seedance_2_fast_i2v'
-         : videoModel === 'seedance_2_fast_i2v_turbo' ? 'seedance_2_fast_i2v_turbo'
-         : videoModel === 'kling_v3_std' ? 'kling_v3_std'
-         : videoModel === 'happyhorse_1_0_i2v' ? 'happyhorse_1_0_i2v'
-         : videoModel === 'happyhorse_1_1_i2v' ? 'happyhorse_1_1_i2v'
-         : videoModel === 'sora' ? 'openai_sora'
-         : 'openai_sora_pro');
-    
-    const backendImageTool = isAutoModel ? "auto" : imageModel;
+    const backendVideoTool = isAutoModel
+      ? 'auto'
+      : (videoModel === 'seedance_1_0_pro_fast' ? 'pollo_seedance'
+        : videoModel === 'seedance_1_5_pro_fast' ? 'pollo_seedance_v1_5'
+          : videoModel === 'seedance_2_i2v' ? 'seedance_2_i2v'
+            : videoModel === 'seedance_2_i2v_turbo' ? 'seedance_2_i2v_turbo'
+              : videoModel === 'seedance_2_fast_i2v' ? 'seedance_2_fast_i2v'
+                : videoModel === 'seedance_2_fast_i2v_turbo' ? 'seedance_2_fast_i2v_turbo'
+                  : videoModel === 'kling_v3_std' ? 'kling_v3_std'
+                    : videoModel === 'happyhorse_1_0_i2v' ? 'happyhorse_1_0_i2v'
+                      : videoModel === 'happyhorse_1_1_i2v' ? 'happyhorse_1_1_i2v'
+                        : videoModel === 'sora' ? 'openai_sora'
+                          : 'openai_sora_pro')
+
+    const backendImageTool = isAutoModel ? 'auto' : imageModel
 
     if (!isInstantMode) {
       const createState: Record<string, unknown> = {
@@ -500,20 +430,20 @@ const GenerationBox = ({
           duration: userOptionDurationSec,
           video_generation_tool: backendVideoTool,
           // auto 时不写入 navigate state，避免 history 里快照旧默认 wan_2_6；Create 页保持 DEFAULT_VIDEO_OPTIONS.lipsyncVideoModel
-          ...(lipsyncVideoModel !== "auto" ? { lipsync_video_tool: lipsyncVideoModel } : {}),
-          image_generation_tool: backendImageTool === "auto"
+          ...(lipsyncVideoModel !== 'auto' ? { lipsync_video_tool: lipsyncVideoModel } : {}),
+          image_generation_tool: backendImageTool === 'auto'
             ? DEFAULT_IMAGE_GENERATION_TOOL
-            : backendImageTool === "seedream"
-              ? "seedream"
-              : backendImageTool === "nano_banana_pro"
-                ? "nano_banana_pro"
-                : backendImageTool === "nano_banana_2"
-                  ? "nano_banana_2"
-                  : backendImageTool === "gpt_image_2"
-                    ? "gpt_image_2"
-                    : "nano_banana",
+            : backendImageTool === 'seedream'
+              ? 'seedream'
+              : backendImageTool === 'nano_banana_pro'
+                ? 'nano_banana_pro'
+                : backendImageTool === 'nano_banana_2'
+                  ? 'nano_banana_2'
+                  : backendImageTool === 'gpt_image_2'
+                    ? 'gpt_image_2'
+                    : 'nano_banana',
           // 首页/create 默认 Default，点模版（如 Lip-sync Music Video）时传模版值
-          content_category: externalContentCategory?.trim() ? externalContentCategory : "Default",
+          content_category: externalContentCategory?.trim() ? externalContentCategory : 'Default',
           lipsync_coverage: lipsyncRatio[0],
           continuous_mode: isContinuousMode,
           // ⚠️ 必须传 enable_keyframe_reflection：与 continuous_mode / full_auto 同级，
@@ -523,13 +453,13 @@ const GenerationBox = ({
           full_auto: isFullAuto,
         },
         shouldAutoSend: true,
-      };
+      }
       // 与 create 页一致：video 传 auto 由后端路由分析决定类型，image/music 传具体类型
-      createState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType;
-      const lang = routeLang || language || 'en';
-      navigate(`/${lang}/create`, { state: createState });
-      setIsGenerating(false);
-      return;
+      createState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType
+      const lang = routeLang || language || 'en'
+      navigate(`/${lang}/create`, { state: createState })
+      setIsGenerating(false)
+      return
     }
 
     const instantState: Record<string, unknown> = {
@@ -540,16 +470,16 @@ const GenerationBox = ({
       duration: duration[0],
       videoGenerationTool: backendVideoTool,
       skipGeneration: false,
-      imageGenerationTool: backendImageTool === "auto" ? DEFAULT_IMAGE_GENERATION_TOOL : backendImageTool === "seedream" ? "seedream" : backendImageTool === "nano_banana_pro" ? "nano_banana_pro" : backendImageTool === "nano_banana_2" ? "nano_banana_2" : backendImageTool === "gpt_image_2" ? "gpt_image_2" : "nano_banana",
-      nanoBananaModel: backendImageTool === "nano_banana_pro" ? "gemini-3-pro-image-preview" : backendImageTool === "nano_banana_2" ? "gemini-3.1-flash-image-preview" : backendImageTool === "gpt_image_2" ? "gpt-image-2" : "gemini-2.5-flash-image",
+      imageGenerationTool: backendImageTool === 'auto' ? DEFAULT_IMAGE_GENERATION_TOOL : backendImageTool === 'seedream' ? 'seedream' : backendImageTool === 'nano_banana_pro' ? 'nano_banana_pro' : backendImageTool === 'nano_banana_2' ? 'nano_banana_2' : backendImageTool === 'gpt_image_2' ? 'gpt_image_2' : 'nano_banana',
+      nanoBananaModel: backendImageTool === 'nano_banana_pro' ? 'gemini-3-pro-image-preview' : backendImageTool === 'nano_banana_2' ? 'gemini-3.1-flash-image-preview' : backendImageTool === 'gpt_image_2' ? 'gpt-image-2' : 'gemini-2.5-flash-image',
       continuousMode: isContinuousMode,
       enableKeyframeReflection: enableReflectionMode,
       fullAuto: isFullAuto,
-    };
-    instantState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType;
-    navigate('/instant-generation', { state: instantState });
-    setIsGenerating(false);
-  };
+    }
+    instantState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType
+    navigate('/instant-generation', { state: instantState })
+    setIsGenerating(false)
+  }
 
   return (
     <div className={`text-center ${className}`}>
@@ -568,23 +498,23 @@ const GenerationBox = ({
             { type: 'image' as const, icon: Image, label: t('image') },
             { type: 'video' as const, icon: Video, label: t('video') },
             { type: 'music' as const, icon: Music, label: t('music') },
-            { type: 'character' as const, icon: User, label: t('character') }
+            { type: 'character' as const, icon: User, label: t('character') },
           ]
-          .filter(({ type }) => {
+            .filter(({ type }) => {
             // 去除 Visual element (character) 和 Video 选项
-            if (type === 'character' || type === 'video') {
-              return false;
-            }
-            // 如果配置为不显示 image/music，则过滤掉这些选项
-            if (!showImageMusicCreation && (type === 'image' || type === 'music')) {
-              return false;
-            }
-            return true;
-          });
+              if (type === 'character' || type === 'video') {
+                return false
+              }
+              // 如果配置为不显示 image/music，则过滤掉这些选项
+              if (!showImageMusicCreation && (type === 'image' || type === 'music')) {
+                return false
+              }
+              return true
+            })
 
           // 如果没有可用的tab选项，则不显示tab选择器
           if (availableTabs.length === 0) {
-            return null;
+            return null
           }
 
           return (
@@ -618,7 +548,7 @@ const GenerationBox = ({
                 </button>
               ))}
             </div>
-          );
+          )
         })()}
 
         {/* Input Card */}
@@ -664,7 +594,7 @@ const GenerationBox = ({
                   id="characterName"
                   type="text"
                   value={characterName}
-                  onChange={(e) => setCharacterName(e.target.value)}
+                  onChange={e => setCharacterName(e.target.value)}
                   placeholder={t('characterNamePlaceholder')}
                   disabled={isUploadingCharacter}
                   className="text-lg"
@@ -754,56 +684,56 @@ const GenerationBox = ({
                 <textarea
                   ref={textareaRef}
                   value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
+                  onChange={e => setPrompt(e.target.value)}
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
                   onKeyDown={(e) => {
-                    const target = e.target as HTMLTextAreaElement & { composing?: boolean };
-                    const isComposing = e.nativeEvent?.isComposing || target.composing;
-                    if (e.key === "Enter" && !e.shiftKey && !isComposing) {
-                      e.preventDefault();
-                      handleSendMessage();
+                    const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+                    const isComposing = e.nativeEvent?.isComposing || target.composing
+                    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                      e.preventDefault()
+                      handleSendMessage()
                     }
                   }}
                   onCompositionStart={(e) => {
-                    const target = e.target as HTMLTextAreaElement & { composing?: boolean };
-                    target.composing = true;
+                    const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+                    target.composing = true
                   }}
                   onCompositionEnd={(e) => {
-                    const target = e.target as HTMLTextAreaElement & { composing?: boolean };
-                    target.composing = false;
+                    const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+                    target.composing = false
                   }}
                   onPaste={async (e) => {
-                    if (isGenerating) return;
-                    const clipboardData = e.clipboardData;
-                    if (!clipboardData) return;
-                    const pasted: File[] = [];
+                    if (isGenerating) return
+                    const clipboardData = e.clipboardData
+                    if (!clipboardData) return
+                    const pasted: File[] = []
                     for (let i = 0; i < clipboardData.items.length; i++) {
-                      const item = clipboardData.items[i];
-                      if (item.kind !== 'file') continue;
-                      const f = item.getAsFile();
-                      if (f) pasted.push(normalizeClipboardFile(f));
+                      const item = clipboardData.items[i]
+                      if (item.kind !== 'file') continue
+                      const f = item.getAsFile()
+                      if (f) pasted.push(normalizeClipboardFile(f))
                     }
-                    if (pasted.length === 0) return;
-                    e.preventDefault();
-                    const { validFiles } = validateFiles(pasted, uploadedFiles, t);
+                    if (pasted.length === 0) return
+                    e.preventDefault()
+                    const { validFiles } = validateFiles(pasted, uploadedFiles, t)
                     if (validFiles.length > 0) {
-                      await appendUploadedFilesAndOpenAudioCrop(validFiles);
+                      await appendUploadedFilesAndOpenAudioCrop(validFiles)
                       toast.success(
                         validFiles.length === 1
                           ? t('pastedImage')
-                          : t('pastedImages').replace('{count}', String(validFiles.length))
-                      );
+                          : t('pastedImages').replace('{count}', String(validFiles.length)),
+                      )
                     }
                   }}
                   placeholder={
                     selectedMediaType === 'image'
                       ? t('describeImageContent')
                       : selectedMediaType === 'music'
-                      ? t('describeMusicContent')
-                      : (selectedMediaType as string) === 'character'
-                      ? t('describeCharacterContent')
-                      : t('describeYourIdeasHere')
+                        ? t('describeMusicContent')
+                        : (selectedMediaType as string) === 'character'
+                          ? t('describeCharacterContent')
+                          : t('describeYourIdeasHere')
                   }
                   className="min-h-[60px] sm:min-h-[80px] border-0 bg-transparent resize-none text-sm sm:text-base placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none outline-none w-full"
                   disabled={isGenerating}
@@ -870,52 +800,52 @@ const GenerationBox = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="inline-flex">
-                    <CharacterSelectPopover
-                  onSelect={async (characters) => {
-                    const prevIds = new Set(selectedCharacters.map(c => c.id));
-                    const newIds = new Set(characters.map(c => c.id));
-                    const added = characters.filter(c => !prevIds.has(c.id));
-                    const removed = selectedCharacters.filter(c => !newIds.has(c.id));
+                      <CharacterSelectPopover
+                        onSelect={async (characters) => {
+                          const prevIds = new Set(selectedCharacters.map(c => c.id))
+                          const newIds = new Set(characters.map(c => c.id))
+                          const added = characters.filter(c => !prevIds.has(c.id))
+                          const removed = selectedCharacters.filter(c => !newIds.has(c.id))
 
-                    setSelectedCharacters(characters);
+                          setSelectedCharacters(characters)
 
-                    if (removed.length > 0) {
-                      const removedIds = new Set(removed.map(c => c.id));
-                      setUploadedFiles(prev => prev.filter(f => {
-                        const m = f.name.match(/^character-(.+)\.(png|jpg|jpeg|webp)$/i);
-                        return !m || !removedIds.has(m[1]);
-                      }));
-                    }
+                          if (removed.length > 0) {
+                            const removedIds = new Set(removed.map(c => c.id))
+                            setUploadedFiles(prev => prev.filter((f) => {
+                              const m = f.name.match(/^character-(.+)\.(png|jpg|jpeg|webp)$/i)
+                              return !m || !removedIds.has(m[1])
+                            }))
+                          }
 
-                    if (added.length > 0) {
-                      const newFiles: File[] = [];
-                      for (const c of added) {
-                        try {
-                          const res = await fetch(c.image);
-                          const blob = await res.blob();
-                          const ext = blob.type === 'image/jpeg' ? '.jpg' : '.png';
-                          const file = new File([blob], `character-${c.id}${ext}`, { type: blob.type });
-                          newFiles.push(file);
-                        } catch (e) {
-                          console.warn('Failed to fetch character image:', c.name, e);
-                        }
-                      }
-                      if (newFiles.length > 0) {
-                        setUploadedFiles(prev => [...prev, ...newFiles]);
-                      }
-                    }
-                  }}
-                  selectedCharacters={selectedCharacters}
-                >
-                  <button
-                    type="button"
-                    disabled={isGenerating}
-                    className="flex items-center gap-2 sm:gap-2.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full bg-gradient-to-br from-purple-600/90 via-pink-600/90 to-rose-700/90 hover:from-purple-500/90 hover:via-pink-500/90 hover:to-rose-600/90 text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
-                  >
-                    <User className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                    <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{t('pickCharacter')}</span>
-                  </button>
-                </CharacterSelectPopover>
+                          if (added.length > 0) {
+                            const newFiles: File[] = []
+                            for (const c of added) {
+                              try {
+                                const res = await fetch(c.image)
+                                const blob = await res.blob()
+                                const ext = blob.type === 'image/jpeg' ? '.jpg' : '.png'
+                                const file = new File([blob], `character-${c.id}${ext}`, { type: blob.type })
+                                newFiles.push(file)
+                              } catch (e) {
+                                console.warn('Failed to fetch character image:', c.name, e)
+                              }
+                            }
+                            if (newFiles.length > 0) {
+                              setUploadedFiles(prev => [...prev, ...newFiles])
+                            }
+                          }
+                        }}
+                        selectedCharacters={selectedCharacters}
+                      >
+                        <button
+                          type="button"
+                          disabled={isGenerating}
+                          className="flex items-center gap-2 sm:gap-2.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full bg-gradient-to-br from-purple-600/90 via-pink-600/90 to-rose-700/90 hover:from-purple-500/90 hover:via-pink-500/90 hover:to-rose-600/90 text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                        >
+                          <User className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                          <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{t('pickCharacter')}</span>
+                        </button>
+                      </CharacterSelectPopover>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={6} className="z-[9999]">
@@ -926,114 +856,114 @@ const GenerationBox = ({
 
               {/* Right: Mode switch (capsule) + Options + Send */}
               <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
-              <span className="inline-flex rounded-full border border-border bg-muted p-0.5 dark:bg-[oklch(24%_0.02_265)] dark:border-white/10 shrink min-w-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={isGenerating}
-                      onClick={() => setIsFullAuto(true)}
-                      className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
-                        isFullAuto
-                          ? "bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]"
-                          : "text-foreground hover:bg-muted-foreground/10 dark:text-gray-300 dark:hover:bg-white/5"
-                      }`}
-                    >
-                      {t('fullAuto')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={6} className="z-[9999] max-w-[16rem]">
-                    {t('fullAutoDesc')}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={isGenerating}
-                      onClick={() => setIsFullAuto(false)}
-                      className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
-                        !isFullAuto
-                          ? "bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]"
-                          : "text-foreground hover:bg-muted-foreground/10 dark:text-gray-300 dark:hover:bg-white/5"
-                      }`}
-                    >
-                      {t('stepByStep')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={6} className="z-[9999] max-w-[16rem]">
-                    {t('stepByStepDesc')}
-                  </TooltipContent>
-                </Tooltip>
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <button className="flex items-center justify-center h-10 sm:h-11 w-10 sm:w-11 rounded-full border border-border bg-transparent hover:bg-muted/50 hover:border-border/80 text-muted-foreground hover:text-foreground transition-all duration-200">
-                        <OptionsIconCustom className="w-4 h-4" />
+                <span className="inline-flex rounded-full border border-border bg-muted p-0.5 dark:bg-[oklch(24%_0.02_265)] dark:border-white/10 shrink min-w-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={isGenerating}
+                        onClick={() => setIsFullAuto(true)}
+                        className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
+                          isFullAuto
+                            ? 'bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
+                            : 'text-foreground hover:bg-muted-foreground/10 dark:text-gray-300 dark:hover:bg-white/5'
+                        }`}
+                      >
+                        {t('fullAuto')}
                       </button>
-                    </PopoverTrigger>
-                  <PopoverContent
-                      side="bottom"
-                      align="end"
-                      sideOffset={6}
-                      collisionPadding={16}
-                      className="w-[min(20rem,92vw)] bg-popover/95 backdrop-blur-xl border border-border shadow-lg dark:bg-[#121212]/95 dark:border-white/10 dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)] z-50 p-4 rounded-xl text-foreground dark:text-gray-300"
-                    >
-                    <VideoOptionsPanel
-                      duration={duration}
-                      onDurationChange={setDuration}
-                      resolution={resolution}
-                      onResolutionChange={setResolution}
-                      aspectRatio={aspectRatio}
-                      onAspectRatioChange={setAspectRatio}
-                      lipsyncCoverage={lipsyncRatio[0]}
-                      onLipsyncCoverageChange={(v) => setLipsyncRatio([v])}
-                      isAutoModel={isAutoModel}
-                      onAutoModelChange={setIsAutoModel}
-                      imageGenerationTool={imageModel}
-                      onImageGenerationToolChange={setImageModel}
-                      videoModel={videoModel}
-                      onVideoModelChange={(v) => setVideoModel(v)}
-                      lipsyncVideoModel={lipsyncVideoModel}
-                      onLipsyncVideoModelChange={(v) => setLipsyncVideoModel(v)}
-                      enableContinuityMode={isContinuousMode}
-                      onEnableContinuityModeChange={setIsContinuousMode}
-                      enableKeyframeReflection={enableReflectionMode}
-                      onEnableKeyframeReflectionChange={setEnableReflectionMode}
-                      isGenerating={isGenerating}
-                      onSoraSelect={(model) => {
-                        setPendingSoraModel(model === "Sora2" ? "sora" : "sora2_pro");
-                        setShowSoraDialog(true);
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={6} className="z-[9999]">
-                  {t('options')}
-                </TooltipContent>
-              </Tooltip>
-              {/* Send Button */}
-              <Button
-                onClick={handleSendMessage}
-                disabled={isGenerating || !prompt.trim()}
-                size="icon"
-                className={`h-10 sm:h-11 w-10 sm:w-11 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-violet-600 text-white shadow-lg hover:shadow-xl hover:scale-105 hover:opacity-95 transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100 ${
-                  sendButtonAnim === 'enlarge' ? 'scale-125 shadow-xl' : ''
-                } ${sendButtonAnim === 'click' ? 'scale-90' : ''}`}
-              >
-                <Send className="w-4 h-4" />
-              </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6} className="z-[9999] max-w-[16rem]">
+                      {t('fullAutoDesc')}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={isGenerating}
+                        onClick={() => setIsFullAuto(false)}
+                        className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
+                          !isFullAuto
+                            ? 'bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
+                            : 'text-foreground hover:bg-muted-foreground/10 dark:text-gray-300 dark:hover:bg-white/5'
+                        }`}
+                      >
+                        {t('stepByStep')}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6} className="z-[9999] max-w-[16rem]">
+                      {t('stepByStepDesc')}
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button className="flex items-center justify-center h-10 sm:h-11 w-10 sm:w-11 rounded-full border border-border bg-transparent hover:bg-muted/50 hover:border-border/80 text-muted-foreground hover:text-foreground transition-all duration-200">
+                            <OptionsIconCustom className="w-4 h-4" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="bottom"
+                          align="end"
+                          sideOffset={6}
+                          collisionPadding={16}
+                          className="w-[min(20rem,92vw)] bg-popover/95 backdrop-blur-xl border border-border shadow-lg dark:bg-[#121212]/95 dark:border-white/10 dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)] z-50 p-4 rounded-xl text-foreground dark:text-gray-300"
+                        >
+                          <VideoOptionsPanel
+                            duration={duration}
+                            onDurationChange={setDuration}
+                            resolution={resolution}
+                            onResolutionChange={setResolution}
+                            aspectRatio={aspectRatio}
+                            onAspectRatioChange={setAspectRatio}
+                            lipsyncCoverage={lipsyncRatio[0]}
+                            onLipsyncCoverageChange={v => setLipsyncRatio([v])}
+                            isAutoModel={isAutoModel}
+                            onAutoModelChange={setIsAutoModel}
+                            imageGenerationTool={imageModel}
+                            onImageGenerationToolChange={setImageModel}
+                            videoModel={videoModel}
+                            onVideoModelChange={v => setVideoModel(v)}
+                            lipsyncVideoModel={lipsyncVideoModel}
+                            onLipsyncVideoModelChange={v => setLipsyncVideoModel(v)}
+                            enableContinuityMode={isContinuousMode}
+                            onEnableContinuityModeChange={setIsContinuousMode}
+                            enableKeyframeReflection={enableReflectionMode}
+                            onEnableKeyframeReflectionChange={setEnableReflectionMode}
+                            isGenerating={isGenerating}
+                            onSoraSelect={(model) => {
+                              setPendingSoraModel(model === 'Sora2' ? 'sora' : 'sora2_pro')
+                              setShowSoraDialog(true)
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6} className="z-[9999]">
+                    {t('options')}
+                  </TooltipContent>
+                </Tooltip>
+                {/* Send Button */}
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={isGenerating || !prompt.trim()}
+                  size="icon"
+                  className={`h-10 sm:h-11 w-10 sm:w-11 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-violet-600 text-white shadow-lg hover:shadow-xl hover:scale-105 hover:opacity-95 transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100 ${
+                    sendButtonAnim === 'enlarge' ? 'scale-125 shadow-xl' : ''
+                  } ${sendButtonAnim === 'click' ? 'scale-90' : ''}`}
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
-          </div>
           )}
         </Card>
       </div>
-      
+
       {/* Sora 模型选择确认对话框 */}
       <AlertDialog open={showSoraDialog} onOpenChange={setShowSoraDialog}>
         <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
@@ -1050,10 +980,10 @@ const GenerationBox = ({
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                setVideoModel(pendingSoraModel);
-                setIsAutoModel(false);
-                setShowSoraDialog(false);
-                setPendingSoraModel("");
+                setVideoModel(pendingSoraModel)
+                setIsAutoModel(false)
+                setShowSoraDialog(false)
+                setPendingSoraModel('')
               }}
             >
               {t('continue') || 'Continue'}
@@ -1062,7 +992,7 @@ const GenerationBox = ({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-};
+  )
+}
 
-export default GenerationBox;
+export default GenerationBox

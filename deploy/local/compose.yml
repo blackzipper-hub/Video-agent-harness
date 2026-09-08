@@ -93,7 +93,6 @@ services:
       context: .
       dockerfile: apps/video-studio/Dockerfile
       args:
-        VITE_LOCAL_SINGLE_USER_MODE: "false"
         VITE_API_BASE_URL: /api/v1
     depends_on:
       video-runtime:

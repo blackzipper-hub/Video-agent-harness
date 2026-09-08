@@ -108,7 +108,6 @@ interface ChatSidebarProps {
   onDeleteChat: (chatId: string, e: React.MouseEvent) => void
   onTogglePin: (chatId: string, e: React.MouseEvent) => void
   onRerunChat?: (chat: Chat) => void
-  onLogout: () => void
   onLoadMore?: () => void
   showConversationActions?: boolean
   showDeleteAction?: boolean
@@ -364,7 +363,7 @@ export const ChatSidebar = ({
             </h3>
             {/* Mobile fullscreen: native scroll; Desktop: Radix ScrollArea */}
             {isMobileFullScreen ? (
-              <div className="grow h-0 overflow-y-auto overscroll-contain touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }} onScroll={handleScroll as any}>
+              <div className="grow h-0 overflow-y-auto overscroll-contain touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }} onScroll={handleScroll as React.UIEventHandler<HTMLDivElement>}>
                 <div className="space-y-2 pb-4" ref={scrollAreaRef}>
                   <TooltipProvider delayDuration={300}>
                     {mergedChats.map(chat => (
@@ -456,13 +455,15 @@ export const ChatSidebar = ({
                                   className="break-words"
                                   style={{
                                     display: '-webkit-box',
-                                    WebkitLineClamp: isMobileFullScreen ? 2 : 2,
+                                    WebkitLineClamp: 2,
                                     WebkitBoxOrient: 'vertical' as const,
                                     overflow: 'hidden',
                                     wordBreak: 'break-word',
                                   }}
                                 >
-                                  {isMobileFullScreen ? (chat.preview ? getDisplayPromptForUserMessage(chat.preview) : chat.title) : chat.title}
+                                  {isMobileFullScreen
+                                    ? (chat.preview ? getDisplayPromptForUserMessage(chat.preview) : chat.title)
+                                    : chat.title}
                                 </span>
                               </h4>
                               {(chat.last_active_at || chat.created_at) && (
@@ -493,7 +494,7 @@ export const ChatSidebar = ({
                                 className="cursor-pointer"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  onTogglePin(chat.id, e as any)
+                                  onTogglePin(chat.id, e as unknown as React.MouseEvent)
                                 }}
                               >
                                 {isConversationPinned(chat.id) ? (
@@ -524,7 +525,7 @@ export const ChatSidebar = ({
                                 className="cursor-pointer text-destructive focus:text-destructive"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  onDeleteChat(chat.id, e as any)
+                                  onDeleteChat(chat.id, e as unknown as React.MouseEvent)
                                 }}
                               >
                                 <Trash2 className="w-4 h-4 mr-2 text-red-500" />

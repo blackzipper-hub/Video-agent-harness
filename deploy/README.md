@@ -18,7 +18,7 @@
 |---|------|------------|--------------|--------------|------------|
 | 1 | Video Runtime | `services/video-runtime/Dockerfile.runtime` | compose.video.yml | 同一份，只改 DSH URL | `services/video-runtime/helm/cuti-videoagent` |
 | 2 | Media | `services/media-service/Dockerfile` | 同上 | 同上 | `services/media-service/helm/cuti-media-service` |
-| 3 | Video Studio | `apps/video-studio/Dockerfile` | compose 传入 `VITE_LOCAL_SINGLE_USER_MODE=true` | 传入 `false`（Go 登录） | `deploy/charts/video-studio` |
+| 3 | Video Studio | `apps/video-studio/Dockerfile` | 无登录、无需认证开关 | 同样无登录；对外访问由网关保护 | `deploy/charts/video-studio` |
 | 4 | DeepSeek Harness | `apps/dsh/Dockerfile` | **不编镜像**，本机 `pnpm dsh` | compose 里编 + sidecar | `deploy/charts/deepseek-harness` |
 | 5 | Go API | `Cuti-backend-go/Dockerfile` | 不启 | compose 编 `../Cuti-backend-go` | `Cuti-backend-go/helm/cuti-api-go` |
 

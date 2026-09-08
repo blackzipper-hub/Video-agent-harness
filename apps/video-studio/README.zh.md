@@ -12,6 +12,8 @@ Video Studio 是 Cuti Video Agent Harness 的视频原生前端。迁移期间�
 
 ## 开发
 
+开源 Studio 无需账号或登录配置。Create 直接打开，不依赖认证请求或登录跳转；本地项目身份由 Video Runtime 提供。后端配置的服务令牌与能力授权仍然生效。单用户界面不提供公网多用户访问控制，对外部署需要通过认证网关保护。
+
 ```sh
 pnpm --filter @cuti-ai/video-studio run dev
 ```
