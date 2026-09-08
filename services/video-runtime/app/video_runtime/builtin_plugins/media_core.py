@@ -328,6 +328,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                 step_id=parameters.get("source_video_step"),
                 url=parameters.get("video_url") or parameters.get("uri"),
                 label="source_video_step or video_url",
+                prefer_canonical=True,
             )
             result = await HostGateway().media_extract_frame({
                 "video_url": video_url,
@@ -689,14 +690,27 @@ class MediaCorePlugin(BaseVideoPlugin):
         step_id: Any,
         url: Any,
         label: str,
+        prefer_canonical: bool = False,
     ) -> str:
         """Accept dest URLs or execute_build step ids for the same media input."""
         direct = str(url or "").strip()
         if direct:
+            if prefer_canonical:
+                for artifact in completed.values():
+                    if str(artifact.uri or "").strip() == direct:
+                        return cls._canonical_video_url(artifact) or direct
             return direct
         if str(step_id or "").strip():
-            return str(cls._required(completed, step_id).uri)
+            artifact = cls._required(completed, step_id)
+            if prefer_canonical:
+                return cls._canonical_video_url(artifact) or str(artifact.uri)
+            return str(artifact.uri)
         raise ValueError(f"required media output is unavailable: {label}")
+
+    @staticmethod
+    def _canonical_video_url(artifact: MediaArtifactVersion) -> str:
+        metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+        return str(metadata.get("canonical_uri") or "").strip()
 
     @classmethod
     def _urls_from_steps_or_direct(

@@ -326,22 +326,26 @@ permissions:
             expires_at=int(time.time()) + 60,
         )
         from app.video_runtime.security import CapabilityExecutionEnvelope
-        result = await plugin.capability_handlers()["atomic.video.generate"](
-            CapabilityExecutionEnvelope(envelope),
-            {
-                "build": {"id": "build-1"},
-                "source": source.model_dump(mode="json"),
-                "completed_replacements": {
-                    step: MediaArtifactVersion(
-                        project_id="project-1",
-                        artifact_id=f"ref:{step}",
-                        type="image",
-                        uri=f"https://cdn.example.test/{step}.png",
-                    ).model_dump(mode="json")
-                    for step in ("product", "character", "scene", "product-sheet")
+        with patch(
+            "app.video_runtime.watermark.publish_public_watermark",
+            AsyncMock(side_effect=lambda url, generation_id=None: f"{url}?wm=1"),
+        ):
+            result = await plugin.capability_handlers()["atomic.video.generate"](
+                CapabilityExecutionEnvelope(envelope),
+                {
+                    "build": {"id": "build-1"},
+                    "source": source.model_dump(mode="json"),
+                    "completed_replacements": {
+                        step: MediaArtifactVersion(
+                            project_id="project-1",
+                            artifact_id=f"ref:{step}",
+                            type="image",
+                            uri=f"https://cdn.example.test/{step}.png",
+                        ).model_dump(mode="json")
+                        for step in ("product", "character", "scene", "product-sheet")
+                    },
                 },
-            },
-        )
+            )
         self.assertEqual(captured["task"].capability_id, "atomic.video.generate")
         self.assertEqual(captured["task"].parameters["prompt"], "A hero enters")
         self.assertNotIn("Keep the hero identity stable", captured["task"].parameters["prompt"])
@@ -359,7 +363,9 @@ permissions:
             ],
         )
         self.assertFalse(result.metadata["skill_prompt_applied"])
-        self.assertEqual(result.metadata["watermark_policy"], "clean_canonical")
+        self.assertEqual(result.metadata["watermark_policy"], "public_overlay")
+        self.assertEqual(result.metadata["canonical_uri"], "https://cdn.example.test/shot.mp4")
+        self.assertEqual(result.uri, "https://cdn.example.test/shot.mp4?wm=1")
 
     async def test_cuti_image_provider_keeps_leaf_prompt_isolated_from_workflow_skill(self):
         captured = {}
@@ -479,16 +485,20 @@ permissions:
         )
         from app.video_runtime.security import CapabilityExecutionEnvelope
 
-        result = await CutiAtomicProviderPlugin(fake_atomic).capability_handlers()[
-            "atomic.video.generate"
-        ](
-            CapabilityExecutionEnvelope(envelope),
-            {
-                "build": {"id": "build-1"},
-                "source": source.model_dump(mode="json"),
-                "completed_replacements": completed,
-            },
-        )
+        with patch(
+            "app.video_runtime.watermark.publish_public_watermark",
+            AsyncMock(side_effect=lambda url, generation_id=None: f"{url}?wm=1"),
+        ):
+            result = await CutiAtomicProviderPlugin(fake_atomic).capability_handlers()[
+                "atomic.video.generate"
+            ](
+                CapabilityExecutionEnvelope(envelope),
+                {
+                    "build": {"id": "build-1"},
+                    "source": source.model_dump(mode="json"),
+                    "completed_replacements": completed,
+                },
+            )
 
         parameters = captured["task"].parameters
         self.assertEqual(parameters["videos"], ["https://cdn.example.test/motion.mp4"])

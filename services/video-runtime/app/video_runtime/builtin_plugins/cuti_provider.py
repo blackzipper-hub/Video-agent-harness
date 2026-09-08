@@ -409,8 +409,24 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             "skill_prompt_applied": skill_prompt_applied,
             "watermark_policy": "clean_canonical",
         }
+        public_uri = generated.get("uri")
+        if (
+            envelope.grant.capability in {
+                "atomic.video.generate", "api.provider.generate",
+            }
+            and public_uri
+        ):
+            from app.video_runtime.watermark import publish_public_watermark
+
+            canonical_uri = str(public_uri)
+            public_uri = await publish_public_watermark(
+                canonical_uri,
+                generation_id=f"video-build-{payload['build']['id']}",
+            )
+            generated_metadata["canonical_uri"] = canonical_uri
+            generated_metadata["watermark_policy"] = "public_overlay"
         digest_payload = json.dumps(
-            {"uri": generated.get("uri"), "metadata": generated_metadata},
+            {"uri": public_uri, "metadata": generated_metadata},
             sort_keys=True,
             default=str,
         ).encode()
@@ -419,7 +435,7 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             project_id=source.project_id,
             type=source.type,
             version=source.version + 1,
-            uri=generated.get("uri"),
+            uri=public_uri,
             title=str(generated.get("title") or source.title),
             summary=str(generated.get("summary") or source.summary),
             content_digest=hashlib.sha256(digest_payload).hexdigest(),

@@ -91,6 +91,58 @@ class MediaCoreDualInputTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["video_urls"], ["https://cdn.example/a.mp4", "https://cdn.example/b.mp4"])
         self.assertEqual(result.uri, "https://cdn.example/out.mp4")
 
+    async def test_concat_uses_public_uri_when_canonical_exists(self):
+        gateway = AsyncMock(return_value={"uri": "https://cdn.example/out.mp4", "video_count": 2})
+        with patch("app.chat.v2.host_gateway.HostGateway.media_concat", gateway):
+            await self._run(
+                "media.concat",
+                {"video_steps": ["shot-1-video", "shot-2-video"], "transition_duration": 0},
+                {
+                    "shot-1-video": MediaArtifactVersion(
+                        project_id="project-1", artifact_id="shot-1-video", type="video",
+                        uri="https://cdn.example/a-wm.mp4",
+                        metadata={
+                            "plan_step_id": "shot-1-video",
+                            "canonical_uri": "https://cdn.example/a-clean.mp4",
+                        },
+                    ).model_dump(mode="json"),
+                    "shot-2-video": MediaArtifactVersion(
+                        project_id="project-1", artifact_id="shot-2-video", type="video",
+                        uri="https://cdn.example/b-wm.mp4",
+                        metadata={
+                            "plan_step_id": "shot-2-video",
+                            "canonical_uri": "https://cdn.example/b-clean.mp4",
+                        },
+                    ).model_dump(mode="json"),
+                },
+            )
+        self.assertEqual(
+            gateway.await_args.args[0]["video_urls"],
+            ["https://cdn.example/a-wm.mp4", "https://cdn.example/b-wm.mp4"],
+        )
+
+    async def test_extract_frame_uses_canonical_uri(self):
+        gateway = AsyncMock(return_value={"uri": "https://cdn.example/frame.png"})
+        with patch("app.chat.v2.host_gateway.HostGateway.media_extract_frame", gateway):
+            await self._run(
+                "media.extract_frame",
+                {"source_video_step": "shot-1-video", "position": "last"},
+                {
+                    "shot-1-video": MediaArtifactVersion(
+                        project_id="project-1", artifact_id="shot-1-video", type="video",
+                        uri="https://cdn.example/a-wm.mp4",
+                        metadata={
+                            "plan_step_id": "shot-1-video",
+                            "canonical_uri": "https://cdn.example/a-clean.mp4",
+                        },
+                    ).model_dump(mode="json"),
+                },
+            )
+        self.assertEqual(
+            gateway.await_args.args[0]["video_url"],
+            "https://cdn.example/a-clean.mp4",
+        )
+
     async def test_mix_audio_accepts_dest_urls(self):
         gateway = AsyncMock(return_value={"uri": "https://cdn.example/mixed.mp4"})
         with patch("app.chat.v2.host_gateway.HostGateway.media_mix_audio", gateway):

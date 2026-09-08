@@ -25,7 +25,13 @@ class ProviderMediaInputTest(unittest.IsolatedAsyncioTestCase):
         grant = CapabilityGrant(project_id="p", session_id="s", user_id="u", plugin_id="cuti.atomic-providers",
             capability=capability, allowed_capabilities=[capability], idempotency_key="stable-key",
             audit_id="a", nonce="n", max_cost_usd=1, timeout_seconds=30, expires_at=int(time.time()) + 60)
-        return await CutiAtomicProviderPlugin(executor)._generate(CapabilityExecutionEnvelope(grant), payload)
+        with patch(
+            "app.video_runtime.watermark.publish_public_watermark",
+            AsyncMock(side_effect=lambda url, generation_id=None: f"{url}?wm=1"),
+        ):
+            return await CutiAtomicProviderPlugin(executor)._generate(
+                CapabilityExecutionEnvelope(grant), payload,
+            )
 
     async def test_direct_provider_receives_all_images_in_agent_order_and_remote_identity(self):
         payload = self.payload()

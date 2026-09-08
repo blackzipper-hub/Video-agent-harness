@@ -11,3 +11,9 @@ def test_first_party_artifact_never_receives_a_second_watermark():
 
 def test_canonical_pipeline_remains_clean_by_default():
     assert not should_apply_watermark(requested=False, source_is_first_party=False)
+
+
+def test_delivery_copy_from_clean_canonical_can_force_one_overlay():
+    assert should_apply_watermark(
+        requested=True, source_is_first_party=True, force=True,
+    )

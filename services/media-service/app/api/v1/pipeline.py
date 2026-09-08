@@ -17,9 +17,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
 
-def should_apply_watermark(*, requested: bool, source_is_first_party: bool) -> bool:
-    """A persisted first-party artifact must never receive a second watermark."""
-    return bool(requested and not source_is_first_party)
+def should_apply_watermark(
+    *,
+    requested: bool,
+    source_is_first_party: bool,
+    force: bool = False,
+) -> bool:
+    """Ingest is one-shot. A delivery copy from a clean canonical may force one overlay."""
+    if not requested:
+        return False
+    if force:
+        return True
+    return not source_is_first_party
 
 
 @router.post("/segment-process", response_model=SegmentProcessResponse)
@@ -115,6 +124,7 @@ async def ensure_on_s3(req: EnsureOnS3Request, request: Request):
     apply_watermark = should_apply_watermark(
         requested=req.watermark,
         source_is_first_party=s3.is_our_url(req.external_url),
+        force=req.force_watermark,
     )
     if req.watermark and not apply_watermark:
         logger.info(

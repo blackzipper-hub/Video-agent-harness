@@ -59,6 +59,7 @@ class EnsureOnS3Request(RunIdMixin):
     target_duration: Optional[float] = None
     strip_audio: bool = False
     watermark: bool = False
+    force_watermark: bool = False
 
 
 class WorkspaceCleanupRequest(BaseModel):

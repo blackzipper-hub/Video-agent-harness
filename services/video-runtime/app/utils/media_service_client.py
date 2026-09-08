@@ -433,6 +433,7 @@ async def pipeline_ensure_on_s3(
     target_duration: Optional[float] = None,
     strip_audio: bool = False,
     watermark: bool = False,
+    force_watermark: bool = False,
 ) -> dict:
     payload: dict = {
         "external_url": video_url,
@@ -448,6 +449,8 @@ async def pipeline_ensure_on_s3(
         payload["strip_audio"] = True
     if watermark:
         payload["watermark"] = True
+    if force_watermark:
+        payload["force_watermark"] = True
     return await _post("pipeline/ensure-on-s3", payload)
 
 
