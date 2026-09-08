@@ -549,7 +549,7 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert "media.hyperframes_caption" in text
     assert "caption_html" in text
     assert "video_skill_load" in text
-    assert "不要只报一个 registry 组件名" in text
+    assert "不要只报一个 registry 组件名" not in text
     for name in (
         "hyperframes-core",
         "hyperframes-cli",
@@ -567,16 +567,28 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert "references/captions/authoring.md" in catalog.list_resources("hyperframes-media")
 
 
-def test_hyperframes_caption_schema_keeps_original_style_contract():
+def test_hyperframes_caption_schema_requires_authored_html():
+    from jsonschema.validators import validator_for
+
     registry = build_registry(include_platform=True)
     schema = registry.get("media.hyperframes_caption").parameters_schema
-    assert "style" in schema["properties"]
-    assert schema["properties"]["style"]["default"] == "caption-highlight"
+    assert "style" not in schema["properties"]
     assert "caption_html" in schema["properties"]
     assert "composition_html" in schema["properties"]
     assert "video_step" in schema["properties"]
     assert "video_url" in schema["properties"]
-    assert "caption_html" not in schema.get("required", [])
+    assert schema.get("anyOf") == [
+        {"required": ["caption_html"]},
+        {"required": ["composition_html"]},
+    ]
+    validator_for(schema)(schema).validate({
+        "video_url": "https://cdn.example/v.mp4",
+        "caption_html": "<!doctype html><html></html>",
+    })
+    validator_for(schema)(schema).validate({
+        "video_step": "mixed-video",
+        "composition_html": "<!doctype html><html></html>",
+    })
 
 
 def test_concat_and_mix_schemas_accept_dest_urls_or_step_ids():

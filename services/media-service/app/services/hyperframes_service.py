@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import shutil
@@ -36,13 +35,6 @@ BROWSER_CANDIDATES = (
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
 )
-STYLE_NAMES = {
-    "caption-highlight", "caption-pill-karaoke", "caption-editorial-emphasis",
-    "caption-glitch-rgb", "caption-kinetic-slam", "caption-neon-glow",
-    "caption-neon-accent", "caption-clip-wipe", "caption-gradient-fill",
-    "caption-matrix-decode", "caption-emoji-pop", "caption-parallax-layers",
-    "caption-particle-burst", "caption-texture", "caption-weight-shift",
-}
 
 
 def _normalize_words(words: list[dict], cues: list[dict]) -> list[dict[str, Any]]:
@@ -289,61 +281,6 @@ def _escape_html(text: str) -> str:
     )
 
 
-def _caption_style_css(style: str, accent: str) -> str:
-    """Translate the intent-level Cuti caption style into deterministic CSS."""
-    extras = {
-        "caption-pill-karaoke": "background:rgba(8,8,12,.82);border-radius:999px;padding:.20em .38em;",
-        "caption-editorial-emphasis": "font-family:'Cuti CJK',serif;font-weight:600;letter-spacing:.01em;",
-        "caption-glitch-rgb": "text-shadow:-4px 0 #00e5ff,4px 0 #ff1745,0 5px 18px #000;",
-        "caption-kinetic-slam": "font-size:clamp(56px,7vw,118px);text-transform:uppercase;",
-        "caption-neon-glow": f"color:#fff;text-shadow:0 0 8px {accent},0 0 24px {accent},0 4px 18px #000;",
-        "caption-neon-accent": "background:linear-gradient(90deg,#00e5ff,#ff2bd6,#ffe600);-webkit-background-clip:text;color:transparent;",
-        "caption-clip-wipe": "border-left:10px solid var(--accent);padding-left:24px;",
-        "caption-gradient-fill": "background:linear-gradient(90deg,#fff,var(--accent));-webkit-background-clip:text;color:transparent;",
-        "caption-matrix-decode": "font-family:'Cuti CJK',monospace;color:#75ff84;text-shadow:0 0 14px #00ff44;",
-        "caption-emoji-pop": "font-family:'Cuti CJK',sans-serif;",
-        "caption-parallax-layers": "text-shadow:5px 5px 0 var(--accent),10px 10px 24px rgba(0,0,0,.7);",
-        "caption-particle-burst": f"text-shadow:0 0 5px #fff,0 0 26px {accent};",
-        "caption-texture": "background:linear-gradient(180deg,#fff3b0,#ff7a18,#b31217);-webkit-background-clip:text;color:transparent;",
-        "caption-weight-shift": "font-variation-settings:'wght' 850;letter-spacing:.04em;",
-    }
-    return extras.get(style, "")
-
-
-def _build_generated_caption_html(
-    *,
-    width: int,
-    height: int,
-    duration: float,
-    groups: list[dict[str, Any]],
-    style: str,
-    accent: str,
-    position: str,
-) -> str:
-    """Build caption composition HTML from the original Cuti style contract.
-
-    The agent chooses semantic parameters (style, position and accent); this
-    adapter performs the mechanical transcript-to-HyperFrames conversion.
-    Authored caption_html remains an optional advanced override.
-    """
-    bottom = {"bottom-safe": "7%", "lower-middle": "24%", "center": "44%"}[position]
-    groups_json = json.dumps(groups, ensure_ascii=False).replace("</", "<\\/")
-    style_css = _caption_style_css(style, accent)
-    return f'''<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width={width},height={height}"></head><body><template>
-<script src="assets/gsap.min.js"></script><style>
-@font-face{{font-family:'Cuti CJK';src:url('assets/cuti-cjk.ttf') format('truetype');font-weight:100 900;font-style:normal;font-display:block}}
-*{{box-sizing:border-box}}
-#root{{position:absolute;inset:0;width:{width}px;height:{height}px;overflow:hidden;--accent:{accent};pointer-events:none}}
-.group{{position:absolute;left:5%;right:5%;bottom:{bottom};display:flex;justify-content:center;align-items:center;opacity:0;text-align:center;font-family:'Cuti CJK',sans-serif;font-size:clamp(34px,4.2vw,78px);font-weight:800;line-height:1.18;color:#fff;text-shadow:0 4px 14px rgba(0,0,0,.95)}}
-.sentence{{display:inline-block;position:relative;{style_css}}}
-</style><div id="root" data-composition-id="overlay" data-duration="{duration:.3f}" data-fps="30" data-width="{width}" data-height="{height}"></div>
-<script>(function(){{window.__timelines=window.__timelines||{{}};var GROUPS={groups_json};var host=document.getElementById('root');var tl=gsap.timeline({{paused:true}});
-GROUPS.forEach(function(g,gi){{var el=document.createElement('div');el.className='group';el.id='cg-'+gi;var s=document.createElement('span');s.className='sentence';s.textContent=g.text;el.appendChild(s);host.appendChild(el);
-tl.fromTo(el,{{opacity:0,y:10}},{{opacity:1,y:0,duration:.14,ease:'power1.out'}},g.start);
-tl.to(el,{{opacity:0,y:-12,duration:.12,ease:'power2.in'}},Math.max(g.start,g.end-.12));tl.set(el,{{opacity:0}},g.end)}});tl.seek(0);window.__timelines.overlay=tl}})();</script>
-</template></body></html>'''
-
-
 def _layer_html(layers: list[dict[str, Any]], duration: float) -> tuple[str, str]:
     mounts: list[str] = []
     tweens: list[str] = []
@@ -411,9 +348,8 @@ async def render_captions(
     *,
     words: list[dict],
     cues: list[dict],
-    style: str = "caption-highlight",
-    accent_color: str = "#ff1745",
-    position: str = "bottom-safe",
+    accent_color: str,
+    position: str,
     playbook: str | None = None,
     layers: list[dict] | None = None,
     caption_html: str | None = None,
@@ -421,14 +357,9 @@ async def render_captions(
 ) -> dict[str, Any]:
     authored_caption = (caption_html or "").strip()
     authored_host = (composition_html or "").strip()
-    normalized = _normalize_words(words, cues)
-    generated_groups: list[dict[str, Any]] = []
     if not authored_caption and not authored_host:
-        if style not in STYLE_NAMES:
-            raise ValueError(f"Unsupported HyperFrames caption style: {style}")
-        generated_groups = _sentence_groups(words, cues)
-        if not generated_groups:
-            raise ValueError("HyperFrames captions require timestamped words or cues")
+        raise ValueError("HyperFrames captions require caption_html or composition_html")
+    normalized = _normalize_words(words, cues)
     overlay_layers = [item for item in (layers or []) if isinstance(item, dict)]
     info = await get_video_info(video_path)
     width, height = int(info.get("width") or 1920), int(info.get("height") or 1080)
@@ -462,20 +393,6 @@ async def render_captions(
                 has_cjk=has_cjk,
             )
             hf_compose.stage_caption_html(project, "overlay", staged)
-        elif not authored_host:
-            hf_compose.stage_caption_html(
-                project,
-                "overlay",
-                _build_generated_caption_html(
-                    width=width,
-                    height=height,
-                    duration=duration,
-                    groups=generated_groups,
-                    style=style,
-                    accent=accent_color,
-                    position=position,
-                ),
-            )
         if authored_host:
             (project / "index.html").write_text(
                 _prepare_authored_html(
@@ -527,12 +444,11 @@ async def render_captions(
         return {
             "renderer": "hyperframes",
             "runtime_version": "0.7.106",
-            "style": "authored" if (authored_caption or authored_host) else style,
+            "style": "authored",
             "playbook": playbook_data.get("id") or playbook,
             "docker": os.getenv("HYPERFRAMES_DOCKER", "").lower() in {"1", "true", "yes"},
             "accent_color": accent_color, "position": position,
-            "word_count": len(normalized),
-            "group_count": len(generated_groups) if generated_groups else len(_index_groups(normalized, cues=cues)),
+            "word_count": len(normalized), "group_count": len(_index_groups(normalized, cues=cues)),
             "layer_count": len(overlay_layers),
             "workspace": str(project) if os.getenv("HYPERFRAMES_KEEP", "").lower() in {"1", "true", "yes"} else None,
         }

@@ -204,4 +204,3 @@ metadata:
 - 用整曲歌词纸写某一段 prompt
 - 把 concat 预览当成片，或对单段生成片转写字幕
 - 把「歌必须 karaoke / 必须标题 / 禁止逐字」写成这条工作流的法
-- 只传 registry 组件名、不写 `caption_html`，让服务灌词

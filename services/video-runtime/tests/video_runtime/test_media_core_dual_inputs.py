@@ -140,4 +140,43 @@ class DestAndStepSchemaTest(unittest.TestCase):
         self.assertIn("caption_html", skill.instructions)
         self.assertIn("media.hyperframes_caption", skill.instructions)
         self.assertIn("video_skill_load", skill.instructions)
-        self.assertIn("不要只报一个 registry 组件名", skill.instructions)
+        self.assertNotIn("不要只报一个 registry 组件名", skill.instructions)
+
+
+class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
+    async def _run(self, parameters: dict, completed: dict | None = None):
+        plugin = MediaCorePlugin()
+        return await plugin.capability_handlers()["media.hyperframes_caption"](
+            _envelope("media.hyperframes_caption"),
+            {
+                "build": {"id": "build-1"},
+                "step": {
+                    "step_id": "final-video",
+                    "capability": "media.hyperframes_caption",
+                    "output_artifact_id": "final",
+                    "output_artifact_type": "final_video",
+                    "depends_on": ["transcription"],
+                    "parameters": parameters,
+                },
+                "completed_artifacts": completed or {},
+            },
+        )
+
+    async def test_caption_html_does_not_require_transcript_words(self):
+        caption = AsyncMock(return_value={"result_url": "https://cdn.example/captioned.mp4"})
+        with patch("app.utils.media_service_client.hyperframes_caption", caption):
+            result = await self._run({
+                "video_url": "https://cdn.example/v.mp4",
+                "caption_html": "<!doctype html><html></html>",
+            })
+        caption.assert_awaited_once()
+        payload = caption.await_args.kwargs
+        self.assertEqual(payload["caption_html"], "<!doctype html><html></html>")
+        self.assertEqual(payload["words"], [])
+        self.assertEqual(payload["cues"], [])
+        self.assertNotIn("style", caption.await_args.kwargs)
+        self.assertEqual(result.uri, "https://cdn.example/captioned.mp4")
+
+    async def test_missing_html_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "caption_html or composition_html"):
+            await self._run({"video_url": "https://cdn.example/v.mp4"})

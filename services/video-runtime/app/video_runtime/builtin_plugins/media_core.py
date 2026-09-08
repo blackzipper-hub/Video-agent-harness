@@ -141,6 +141,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             artifact_types: list[str],
             parameter: str,
             *,
+            required: bool = True,
             multiple: bool = False,
             description: str = "",
         ) -> MediaCapabilityInputContract:
@@ -148,6 +149,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                 role=role,
                 artifact_types=artifact_types,
                 parameter=parameter,
+                required=required,
                 multiple=multiple,
                 description=description,
             )
@@ -201,10 +203,10 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.hyperframes_caption",
-                description="Render dynamic HyperFrames captions over a selected video.",
+                description="Render authored HyperFrames caption HTML over a selected video.",
                 inputs=[
                     source("video", ["video"], "video_step"),
-                    source("transcript", ["transcript"], "transcription_step"),
+                    source("transcript", ["transcript"], "transcription_step", required=False),
                 ],
                 output_artifact_type="video",
                 replaces_input_role="video",
@@ -529,10 +531,23 @@ class MediaCorePlugin(BaseVideoPlugin):
                 url=parameters.get("video_url") or parameters.get("uri"),
                 label="video_step or video_url",
             )
-            transcription_step = parameters.get("transcription_step")
-            transcription = completed.get(str(transcription_step or ""))
             caption_html = parameters.get("caption_html")
             composition_html = parameters.get("composition_html")
+            authored_caption = caption_html.strip() if isinstance(caption_html, str) else ""
+            authored_host = composition_html.strip() if isinstance(composition_html, str) else ""
+            if not authored_caption and not authored_host:
+                raise ValueError(
+                    "media.hyperframes_caption requires caption_html or composition_html"
+                )
+            transcription_step = parameters.get("transcription_step")
+            if not transcription_step:
+                for dep in step.get("depends_on") or []:
+                    candidate = completed.get(str(dep))
+                    metadata = (candidate.metadata or {}) if candidate is not None else {}
+                    if metadata.get("words") or metadata.get("segments"):
+                        transcription_step = dep
+                        break
+            transcription = completed.get(str(transcription_step or ""))
             words = list(parameters.get("words") or [])
             cues = list(parameters.get("cues") or parameters.get("segments") or [])
             if transcription is not None:
@@ -543,22 +558,17 @@ class MediaCorePlugin(BaseVideoPlugin):
                 raise ValueError(
                     f"required media output is unavailable: {transcription_step}"
                 )
-            if not words and not cues:
-                raise ValueError(
-                    "media.hyperframes_caption requires a timestamped transcript"
-                )
             result = await msc.hyperframes_caption(
                 video_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 words=words,
                 cues=cues,
-                style=str(parameters.get("style") or "caption-highlight"),
                 accent_color=str(parameters.get("accent_color") or "#ff1745"),
                 position=str(parameters.get("position") or "bottom-safe"),
                 playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,
                 layers=parameters.get("layers") if isinstance(parameters.get("layers"), list) else None,
-                caption_html=caption_html if isinstance(caption_html, str) else None,
-                composition_html=composition_html if isinstance(composition_html, str) else None,
+                caption_html=authored_caption or None,
+                composition_html=authored_host or None,
             )
             result = {**result, "uri": result.get("result_url")}
         elif capability == "media.lipsync":

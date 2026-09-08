@@ -391,7 +391,6 @@ class WorkflowPlanBuilder:
                     "target_duration_seconds": self.spec.target_duration_seconds,
                 }
                 wp = self.spec.workflow_parameters or {}
-                caption["style"] = str(wp.get("caption_style") or wp.get("style") or "caption-highlight")
                 if wp.get("caption_html"):
                     caption["caption_html"] = wp["caption_html"]
                 if wp.get("composition_html"):
