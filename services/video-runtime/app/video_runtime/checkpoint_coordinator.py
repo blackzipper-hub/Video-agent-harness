@@ -146,6 +146,8 @@ def checkpoint_prompt(
         "From video_workflow_load, call video_skill_load for every returned "
         "skillDependencies entry and read every referenced bundled resource required by "
         "the Workflow before resolving the checkpoint.",
+        "Then call video_plan_patch_capability_list before proposing tasks. Copy each "
+        "capability's parameters_schema; do not invent keys.",
         *instructions,
         "Do not ask the user for confirmation unless the checkpoint explicitly says so.",
         "Checkpoint payload:",

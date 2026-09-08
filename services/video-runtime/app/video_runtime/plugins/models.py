@@ -37,9 +37,9 @@ class PluginContributions(BaseModel):
     styles: list[str] = Field(default_factory=list)
     validators: list[str] = Field(default_factory=list)
     media_operators: list[str] = Field(default_factory=list)
-    # Capabilities that an Agent may append as a workflow-independent PlanPatch.
-    # This allow-list is separate from execution registration: merely installing
-    # a capability never makes it dynamically composable.
+    # Capabilities that an Agent may append as a PlanPatch. Separate from
+    # execution registration: installing a capability never makes it addable
+    # on every Workflow.
     plan_patch_capabilities: list[str] = Field(default_factory=list)
 
 

@@ -646,15 +646,12 @@ async def list_workflows(
 
 @router.get("/plan-patch-capabilities")
 @router.get("/media-capabilities", include_in_schema=False)
-async def list_media_capabilities(
+async def list_plan_patch_capabilities(
     _identity_value: Annotated[tuple[str, str | None], Depends(_identity)],
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
-    """List Workflow-independent edit operations contributed by Media Plugins."""
-    return {"data": [
-        item.model_dump(mode="json", by_alias=True)
-        for item in build_runtime.plan_patch_capability_catalog()
-    ]}
+    """List enabled capabilities with parameters_schema for PlanPatch."""
+    return {"data": build_runtime.skills.capabilities.prompt_view()}
 
 
 @router.get("/workflows/{workflow_id}")

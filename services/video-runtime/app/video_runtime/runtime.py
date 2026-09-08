@@ -45,6 +45,7 @@ from .security import CapabilityGrant, CapabilityGrantSigner
 from .skills import VideoSkillRuntime, default_video_skill_runtime
 from app.orchestration.skills import SkillContext, SkillResolutionRequest
 from app.domain.skills.service import make_skill_lock
+from app.capabilities.models import canonical_capability_id
 
 
 _CHECKPOINT_METADATA_KEYS = {
@@ -338,7 +339,9 @@ class PluginBuildStepExecutor:
         completed_replacements: dict[str, MediaArtifactVersion],
         idempotency_key: str,
     ) -> MediaArtifactVersion:
-        capability = str(source.metadata.get("rebuild_capability") or "").strip()
+        capability = canonical_capability_id(
+            str(source.metadata.get("rebuild_capability") or "").strip()
+        )
         if not capability:
             raise ValueError(f"artifact has no rebuild_capability: {source.id}")
         entry = self.capabilities.describe(capability)
@@ -392,7 +395,8 @@ class PluginBuildStepExecutor:
     ) -> MediaArtifactVersion:
         if not step.capability:
             raise ValueError(f"build step has no capability: {step.step_id}")
-        entry = self.capabilities.describe(step.capability)
+        capability = canonical_capability_id(step.capability)
+        entry = self.capabilities.describe(capability)
         loaded = self.capabilities.gateway.plugins.get(entry.plugin_id)
         permissions = loaded.manifest.permissions
         grant = CapabilityGrant(
@@ -400,8 +404,8 @@ class PluginBuildStepExecutor:
             session_id=build.session_id or "system-recovery",
             user_id=build.user_id or "system-recovery",
             plugin_id=entry.plugin_id,
-            capability=step.capability,
-            allowed_capabilities=[step.capability],
+            capability=capability,
+            allowed_capabilities=[capability],
             allowed_domains=list(permissions.network_domains),
             max_cost_usd=permissions.max_cost_usd,
             timeout_seconds=int(step.parameters.get("timeout_seconds") or 3600),
@@ -417,7 +421,7 @@ class PluginBuildStepExecutor:
             project_id=grant.project_id,
             session_id=grant.session_id,
             user_id=grant.user_id,
-            capability=step.capability,
+            capability=capability,
             payload={
                 "build": build.model_dump(mode="json"),
                 "step": step.model_dump(mode="json"),
@@ -1952,10 +1956,10 @@ class VideoBuildRuntime:
                             + ", ".join(unsupported_types)
                         )
                 allowed = workflow.allowed_capabilities if workflow is not None else None
-                # PlanPatch capabilities are explicitly opted into by installed
-                # plugins and form the Harness-wide dynamic edit surface.  They
-                # must remain composable across Workflows; the Workflow allow-list
-                # continues to constrain only Workflow-specific generation work.
+                # Plugins opt capabilities into PlanPatch separately from
+                # execution registration. Those ids are unioned into every Workflow
+                # allow-list so add_tasks can schedule them; generation capabilities
+                # stay constrained by the Workflow itself.
                 dynamic_capabilities = frozenset(
                     item.capability for item in self.plan_patch_capability_catalog()
                 )

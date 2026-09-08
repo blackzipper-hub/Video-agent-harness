@@ -10,8 +10,8 @@ import type {
   ChangePreviewRequest, ExportRequest, ExportResult, ProjectSnapshot, RebuildRequest,
   RequestIdentity,
   EditPreviewRequest,
-  MediaArtifactSummary, PlanPatchCapabilityContract, PlanPatchPreviewRequest,
-  WorkflowSummary, WorkflowDetail,   SkillDetail,
+  MediaArtifactSummary, CapabilityPromptView, PlanPatchPreviewRequest,
+  WorkflowSummary, WorkflowDetail, SkillDetail,
   SkillResourceDetail, PlanCheckpoint, CheckpointResolutionRequest,
 } from '@cuti-ai/video-runtime'
 import * as videoTools from '../src/index.ts'
@@ -73,15 +73,18 @@ class FakeVideoRuntime extends VideoRuntime {
       logicalId: 'video:final', type: 'final_video', title: 'Final video', summary: 'ready',
     }])
   }
-  listPlanPatchCapabilities(): Promise<PlanPatchCapabilityContract[]> {
+  listPlanPatchCapabilities(): Promise<CapabilityPromptView[]> {
     return Promise.resolve([{
-      capability: 'media.transcribe', description: 'Transcribe video',
-      inputs: [{
-        role: 'video', artifact_types: ['video'], parameter: 'video_step',
-        required: true, multiple: false, description: '',
-      }],
-      output_artifact_type: 'transcript', estimated_cost: 0.01,
-      skill_id: 'subtitle-authoring', parameters_schema: {},
+      id: 'media.audio_cut',
+      accepted_aliases: ['media-audio-cut'],
+      description: 'Cut a music window and reference clips',
+      required_inputs: [],
+      optional_references: ['music', 'audiomap'],
+      output: 'audio_cut',
+      executor: 'local.service',
+      parameters_schema: { type: 'object', properties: { audio_url: { type: 'string' } } },
+      trust_level: 'trusted',
+      enabled: true,
     }])
   }
   previewPlanPatch(request: PlanPatchPreviewRequest): Promise<BuildPlanSnapshot> {
@@ -147,7 +150,7 @@ describe('video tool composition', () => {
       'video_workflow_list', 'video_workflow_load', 'video_skill_load',
       'video_skill_read_resource',
       'video_project_create', 'video_project_plan', 'video_project_build',
-      'video_project_open', 'video_project_inspect', 'video_artifact_list',
+      'video_project_open', 'video_project_inspect',       'video_artifact_list',
       'video_plan_patch_capability_list', 'video_change_preview', 'video_edit_preview',
       'video_plan_patch_preview', 'video_rebuild_apply',
       'video_build_status', 'video_checkpoint_inspect', 'video_checkpoint_resolve',
@@ -180,6 +183,10 @@ describe('video tool composition', () => {
           title: 'Short drama', language: 'zh-CN', target_duration_seconds: 5,
           aspect_ratio: '16:9', resolution: '1080p', workflow_id: 'workflow-short-drama',
           style_id: 'cuti.cinematic', characters: [],
+          language_contract: {
+            ui_locale: 'zh-CN', content_language: 'zh-CN', spoken_language: 'zh-CN',
+            subtitle_language: 'zh-CN', provider_prompt_language: 'auto',
+          },
           shots: [{
             id: 'shot-1', order: 1, duration_seconds: 5, beat: 'Opening',
             visual_prompt: 'An actor enters', narration: null, character_ids: [],
@@ -251,5 +258,19 @@ describe('video tool composition', () => {
     expect(workflowText).toContain('- reference.md')
     expect(workflowText.indexOf('RESOURCE OWNER (mandatory): demo-workflow'))
       .toBeLessThan(workflowText.indexOf('Call video_skill_load("helper-skill").'))
+
+    const capabilities = await ctx.tools.execute({
+      callId: CallId('video-call-6'), name: 'video_plan_patch_capability_list',
+      arguments: {}, signal: new AbortController().signal,
+    })
+    expect(capabilities.isError).toBe(false)
+    expect(capabilities.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('media.audio_cut'),
+    })]))
+    expect(capabilities.content).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('parameters_schema'),
+    })]))
   })
 })

@@ -478,7 +478,8 @@ def _initial_video_build_prompt(
             "video_skill_load once for every returned skillDependencies entry. Read markdown "
             "links to bundled files and required paths under references/. Helper Skills stay in context; "
             "do not copy them into activated_skill_ids unless the user or a "
-            "project lock already activated them."
+            "project lock already activated them. Then call video_plan_patch_capability_list "
+            "before proposing tasks. Copy each capability's parameters_schema; do not invent keys."
         ),
     ]
     if workflow_id:

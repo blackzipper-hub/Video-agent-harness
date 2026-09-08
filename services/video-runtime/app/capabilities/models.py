@@ -3,6 +3,10 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+HIDDEN_FROM_PROMPT = frozenset({
+    "media.audio_trim",
+})
+
 CAPABILITY_ALIASES = {
     "atomic-text": "atomic.text.generate",
     "atomic-image": "atomic.image.generate",
@@ -15,12 +19,19 @@ CAPABILITY_ALIASES = {
     "media-transcribe": "media.transcribe",
     "subtitle-compose": "subtitle.compose",
     "media-subtitle-burn": "media.subtitle_burn",
+    "media.subtitle.compose": "subtitle.compose",
+    "media.subtitle.burn": "media.subtitle_burn",
     "media-hyperframes-caption": "media.hyperframes_caption",
     "ark-wavespeed-protocol-bridge": "api.ark_protocol.generate",
     "suno-generate": "suno.generate",
     "generate-research": "research.generate",
     "media-audio-cut": "media.audio_cut",
+    "media-audio-analyze": "media.audio_analyze",
 }
+
+
+def canonical_capability_id(capability_id: str) -> str:
+    return CAPABILITY_ALIASES.get(capability_id, capability_id)
 
 
 class CapabilityInputs(BaseModel):
@@ -105,7 +116,8 @@ class CapabilityRegistry:
             "parameters_schema": item.parameters_schema,
             "trust_level": item.trust_level,
             "enabled": item.enabled,
-        } for item in self.list(include_disabled=True) if item.enabled]
+        } for item in self.list(include_disabled=True)
+          if item.enabled and item.id not in HIDDEN_FROM_PROMPT]
 
 
 def default_terminal_events(output_type: str) -> list[str]:

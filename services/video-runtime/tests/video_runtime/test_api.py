@@ -109,10 +109,18 @@ class VideoRuntimeApiTest(unittest.TestCase):
             "/api/video/plan-patch-capabilities", headers=self.headers,
         )
         self.assertEqual(capabilities.status_code, 200)
-        capability_ids = {item["capability"] for item in capabilities.json()["data"]}
+        capability_ids = {item["id"] for item in capabilities.json()["data"]}
         self.assertTrue({
             "media.transcribe", "subtitle.compose", "media.subtitle_burn",
+            "media.audio_analyze", "media.audio_cut", "media.mix_audio",
+            "atomic.image.generate", "suno.generate",
         } <= capability_ids)
+        self.assertNotIn("media.audio.trim", capability_ids)
+        self.assertNotIn("media.audio.analyze", capability_ids)
+        self.assertNotIn("media.audio_trim", capability_ids)
+        cut = next(item for item in capabilities.json()["data"] if item["id"] == "media.audio_cut")
+        self.assertIn("parameters_schema", cut)
+        self.assertIn("segments", cut["parameters_schema"].get("properties", {}))
 
         preview = self.client.post(
             f"/api/video/projects/{project['projectId']}/plan-patches/preview",

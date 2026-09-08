@@ -226,6 +226,8 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("video_checkpoint_resolve", prompt)
         self.assertIn("skillDependencies", prompt)
         self.assertIn("video_skill_load", prompt)
+        self.assertIn("video_plan_patch_capability_list", prompt)
+        self.assertIn("parameters_schema", prompt)
         self.assertIn('"duration": 58', prompt)
         self.assertNotIn("chain-of-thought", checkpoint_prompt(checkpoint).lower())
 

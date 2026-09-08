@@ -8,20 +8,15 @@ contributions:
     - runtime.artifact.persist
     - media.tts
     - media.extract_frame
-    - media.audio.analyze
     - media.audio_analyze
-    - media.audio.cut
     - media.audio_cut
-    - media.audio.trim
     - media.probe
     - media.transcribe
     - media.timeline.compose
     - media.concat
     - media.mix_audio
     - subtitle.compose
-    - media.subtitle.compose
     - media.subtitle_burn
-    - media.subtitle.burn
     - media.hyperframes_caption
     - media.lipsync
   media_operators:
@@ -36,8 +31,8 @@ contributions:
     - media.concat
     - media.mix_audio
     - media.lipsync
-    - media.audio.analyze
-    - media.audio.trim
+    - media.audio_analyze
+    - media.audio_cut
     - media.probe
     - media.tts
 permissions:

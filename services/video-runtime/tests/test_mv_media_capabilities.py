@@ -503,7 +503,11 @@ def test_mv_skill_files_and_workflow_contract():
     assert params["workflow_mode"] == "mv"
     assert "content_category" not in params
     skill_text = Path(__file__).resolve().parents[1] / "skills/external/mv/SKILL.md"
+    description = skill_text.read_text(encoding="utf-8").split("---", 2)[1]
     assert "content_category" not in skill_text.read_text(encoding="utf-8")
+    assert "research.generate" in description
+    assert "media.audio_cut" in description
+    assert "media.hyperframes_caption" in description
     assert spec.skill_dependencies == ()
 
 

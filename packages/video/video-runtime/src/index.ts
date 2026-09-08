@@ -17,7 +17,7 @@ import type {
   RequestIdentity,
   EditPreviewRequest,
   MediaArtifactSummary,
-  PlanPatchCapabilityContract,
+  CapabilityPromptView,
   PlanPatchPreviewRequest,
   WorkflowSummary,
   WorkflowDetail,
@@ -51,7 +51,7 @@ export abstract class VideoRuntime extends Service {
   abstract previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview>
   abstract previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract listArtifacts(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<MediaArtifactSummary[]>
-  abstract listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<PlanPatchCapabilityContract[]>
+  abstract listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<CapabilityPromptView[]>
   abstract previewPlanPatch(request: PlanPatchPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract planProject(request: BuildPlanRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>
   abstract startBuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>

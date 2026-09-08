@@ -6,6 +6,7 @@ from typing import Any
 
 from .execution import CapabilityExecutionGateway
 from .security import CapabilityExecutionEnvelope
+from app.capabilities.models import canonical_capability_id
 
 
 CapabilityOperation = Callable[[CapabilityExecutionEnvelope, dict[str, Any]], Awaitable[Any]]
@@ -30,7 +31,7 @@ class RuntimeCapabilityRegistry:
         return self._gateway
 
     def describe(self, capability: str) -> RegisteredCapability:
-        entry = self._handlers.get(capability)
+        entry = self._handlers.get(canonical_capability_id(capability))
         if entry is None:
             raise LookupError(f"capability is not registered: {capability}")
         return entry
@@ -45,7 +46,7 @@ class RuntimeCapabilityRegistry:
         if capability in self._handlers:
             raise ValueError(f"capability is already registered: {capability}")
         loaded = self._gateway.plugins.get(plugin_id)
-        if capability not in loaded.manifest.contributions.capabilities:
+        if canonical_capability_id(capability) not in loaded.manifest.contributions.capabilities:
             raise ValueError(f"plugin does not declare capability: {capability}")
         entry = RegisteredCapability(plugin_id, capability, operation)
         self._handlers[capability] = entry

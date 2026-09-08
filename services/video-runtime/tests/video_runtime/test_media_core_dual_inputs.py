@@ -103,6 +103,58 @@ class MediaCoreDualInputTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["video_url"], "https://cdn.example/v.mp4")
         self.assertEqual(payload["audio_url"], "https://cdn.example/a.mp3")
 
+    async def test_audio_cut_uses_audiomap_recommendation_when_window_omitted(self):
+        gateway = AsyncMock(return_value={
+            "uri": "https://cdn.example/cut.mp3",
+            "result_url": "https://cdn.example/cut.mp3",
+        })
+        audiomap = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="music-analysis",
+            type="audiomap",
+            uri="",
+            metadata={
+                "plan_step_id": "music-analysis",
+                "audio_url": "https://cdn.example/song.mp3",
+                "smart_clip": {"recommended": {"start_sec": 12.5, "end_sec": 42.5}},
+            },
+        ).model_dump(mode="json")
+        with patch("app.chat.v2.host_gateway.HostGateway.media_audio_cut", gateway):
+            await self._run(
+                "media.audio_cut",
+                {},
+                {"music-analysis": audiomap},
+            )
+        payload = gateway.await_args.args[0]
+        self.assertEqual(payload["audio_url"], "https://cdn.example/song.mp3")
+        self.assertEqual(
+            payload["analysis"]["smart_clip"]["recommended"]["start_sec"],
+            12.5,
+        )
+        self.assertIsNone(payload["start_sec"])
+        self.assertIsNone(payload["duration"])
+
+    async def test_mix_prefers_audio_cut_master(self):
+        gateway = AsyncMock(return_value={"uri": "https://cdn.example/mixed.mp4"})
+        cut = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="music-cut",
+            type="audio_cut",
+            uri="https://cdn.example/cut-uri.mp3",
+            metadata={
+                "plan_step_id": "music-cut",
+                "master": {"audio_url": "https://cdn.example/cut-master.mp3"},
+            },
+        ).model_dump(mode="json")
+        with patch("app.chat.v2.host_gateway.HostGateway.media_mix_audio", gateway):
+            await self._run(
+                "media.mix_audio",
+                {"video_url": "https://cdn.example/v.mp4"},
+                {"music-cut": cut},
+            )
+        payload = gateway.await_args.args[0]
+        self.assertEqual(payload["audio_url"], "https://cdn.example/cut-master.mp3")
+
 
 def _schema(capability_id: str) -> dict:
     return next(item.parameters_schema for item in platform_capabilities() if item.id == capability_id)

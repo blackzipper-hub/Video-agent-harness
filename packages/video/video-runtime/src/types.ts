@@ -160,6 +160,19 @@ export interface MediaArtifactSummary {
   summary: string
 }
 
+export interface CapabilityPromptView {
+  id: string
+  accepted_aliases: string[]
+  description: string
+  required_inputs: string[]
+  optional_references: string[]
+  output: string
+  executor: string
+  parameters_schema: Record<string, JsonValue>
+  trust_level: string
+  enabled: boolean
+}
+
 export interface PlanPatchCapabilityInputContract {
   role: string
   artifact_types: string[]

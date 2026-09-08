@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.orchestration.workflow_compiler.registry import WorkflowSpec
+from app.capabilities.models import canonical_capability_id
 from app.video_runtime.plan_utils import BuildPlanValidationError, topological_steps
 from app.video_runtime.models import MediaArtifactVersion, ValidationResult, VideoSpec
 from app.video_runtime.plugins import PluginContext, VideoPluginRegistry
@@ -499,7 +500,7 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
                 if (
                     item.action == "create"
                     and item.capability
-                    and item.capability not in executable_capabilities
+                    and canonical_capability_id(item.capability) not in executable_capabilities
                 )
             })
             self.assertEqual(

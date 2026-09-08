@@ -577,6 +577,12 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("media.transcribe", catalog)
         self.assertIn("subtitle.compose", catalog)
         self.assertIn("media.subtitle_burn", catalog)
+        self.assertIn("media.audio_analyze", catalog)
+        self.assertIn("media.audio_cut", catalog)
+        self.assertNotIn("media.audio.trim", catalog)
+        self.assertNotIn("media.audio.analyze", catalog)
+        self.assertEqual(catalog["media.audio_cut"].output_artifact_type, "audio_cut")
+        self.assertIn("segments", catalog["media.audio_cut"].parameters_schema.get("properties", {}))
 
         plan = await runtime.preview_plan_patch(
             project_id=project.id,

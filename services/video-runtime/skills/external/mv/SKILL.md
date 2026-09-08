@@ -1,8 +1,13 @@
 ---
 name: mv
 description: >-
-  Workflow: MV / 歌曲卡点 / 角色唱这首歌。听歌切段、分段出画、拼接、叠回原曲、词上成片。
+  Workflow: MV / 歌曲卡点 / 角色唱这首歌。
+  参考调研 → 听歌分析并切窗切段 → 定妆出图 → 分段出画 → 拼接 → 叠回原曲 → 词上成片。
+  能力顺序：research.generate、suno.generate、media.audio_analyze、media.audio_cut、
+  atomic.image.generate、api.provider.generate、media.concat、media.mix_audio、
+  media.hyperframes_caption。
   触发词：MV、歌曲、卡点、角色唱这首歌、beat sync、music video、$mv.
+  短剧对白片用 short-drama-workflow；产品广告用 product-ad-video。
 metadata:
   kind: workflow
   version: "2.6.0"

@@ -391,25 +391,13 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_plan_patch_capability_list',
-    description: 'List Harness-wide Artifact transformation capabilities contributed by installed plugins. These capabilities are independent of the generation Workflow and may be appended to selected Artifacts at any time. Load a returned skill_id before planning that capability.',
+    description: 'List enabled capabilities with parameters_schema. Call this after loading the Workflow and before proposing PlanPatch tasks. Copy each capability\'s parameters_schema; do not invent keys. add_tasks must still be allowed on the current Workflow.',
     parameters: {},
     output: {
       schema: { type: 'array', items: { type: 'object', additionalProperties: true } },
       render: (_args, value) => [{
         type: 'text',
-        text: value.map((item) => {
-          const inputs = Array.isArray(item.inputs)
-            ? item.inputs.map((input) => {
-              if (typeof input !== 'object' || input === null || Array.isArray(input)) return 'invalid-input'
-              const role = String(input.role ?? '')
-              const artifactTypes = Array.isArray(input.artifact_types)
-                ? input.artifact_types.map(type => String(type)).join('|')
-                : ''
-              return `${role}:${artifactTypes}`
-            }).join(', ')
-            : ''
-          return `${String(item.capability)} [${inputs || 'no artifact input'}] -> ${String(item.output_artifact_type)}${item.replaces_input_role ? `; replaces ${String(item.replaces_input_role)}` : ''}${item.skill_id ? `; load skill ${String(item.skill_id)}` : ''} — ${String(item.description)}`
-        }).join('\n'),
+        text: JSON.stringify(value, null, 2),
       }],
     },
     execute: (_args, exec) => ctx.videoRuntime.listPlanPatchCapabilities(

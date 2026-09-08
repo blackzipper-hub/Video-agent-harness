@@ -19,7 +19,7 @@ import type {
   RequestIdentity,
   EditPreviewRequest,
   MediaArtifactSummary,
-  PlanPatchCapabilityContract,
+  CapabilityPromptView,
   PlanPatchPreviewRequest,
   WorkflowSummary,
   WorkflowDetail,
@@ -135,7 +135,7 @@ export class HttpVideoRuntime extends VideoRuntime {
     return this.request(`/api/video/projects/${encodeURIComponent(projectId)}/artifacts`, identity, { signal })
   }
 
-  listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<PlanPatchCapabilityContract[]> {
+  listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<CapabilityPromptView[]> {
     return this.request('/api/video/plan-patch-capabilities', identity, { signal })
   }
 

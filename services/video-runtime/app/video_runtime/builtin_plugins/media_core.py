@@ -107,20 +107,15 @@ class MediaCorePlugin(BaseVideoPlugin):
         "runtime.artifact.persist",
         "media.tts",
         "media.extract_frame",
-        "media.audio.analyze",
         "media.audio_analyze",
-        "media.audio.cut",
         "media.audio_cut",
-        "media.audio.trim",
         "media.probe",
         "media.transcribe",
         "media.timeline.compose",
         "media.concat",
         "media.mix_audio",
         "subtitle.compose",
-        "media.subtitle.compose",
         "media.subtitle_burn",
-        "media.subtitle.burn",
         "media.hyperframes_caption",
         "media.lipsync",
     )
@@ -129,11 +124,10 @@ class MediaCorePlugin(BaseVideoPlugin):
         return {capability: self._execute for capability in self.CAPABILITIES}
 
     def media_capability_contracts(self) -> list[MediaCapabilityContract]:
-        """Describe workflow-free edits that an Agent may append to any project.
+        """Describe media operations this plugin may contribute to a PlanPatch.
 
-        These are deliberately owned by the Media Plugin instead of a generation
-        Workflow. Installing another Media Plugin can therefore extend the edit
-        surface without changing every Workflow compiler.
+        Generation capabilities live on the atomic-providers plugin and stay off
+        this list. PlanPatch can add these tasks while a Workflow is running.
         """
 
         def source(
@@ -153,6 +147,15 @@ class MediaCorePlugin(BaseVideoPlugin):
                 multiple=multiple,
                 description=description,
             )
+
+        def platform(capability_id: str):
+            from app.capabilities.manifests.platform import platform_capabilities
+
+            return next(item for item in platform_capabilities() if item.id == capability_id)
+
+        analyze = platform("media.audio_analyze")
+        cut = platform("media.audio_cut")
+        mix = platform("media.mix_audio")
 
         return [
             MediaCapabilityContract(
@@ -228,14 +231,15 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.mix_audio",
-                description="Replace or overlay the audio of a selected video.",
+                description=mix.description,
                 inputs=[
                     source("video", ["video"], "video_step"),
-                    source("audio", ["audio"], "audio_step"),
+                    source("audio", ["audio", "music", "audio_cut"], "audio_step"),
                 ],
                 output_artifact_type="video",
                 replaces_input_role="video",
                 estimated_cost=0.01,
+                parameters_schema=dict(mix.parameters_schema),
             ),
             MediaCapabilityContract(
                 capability="media.lipsync",
@@ -249,16 +253,21 @@ class MediaCorePlugin(BaseVideoPlugin):
                 estimated_cost=0.35,
             ),
             MediaCapabilityContract(
-                capability="media.audio.analyze",
-                description="Analyze timing, beats, lyrics, and structure of selected audio.",
-                inputs=[source("audio", ["audio"], "audio_step")],
-                output_artifact_type="audio_analysis",
+                capability="media.audio_analyze",
+                description=analyze.description,
+                inputs=[source("audio", ["audio", "music"], "audio_step")],
+                output_artifact_type=analyze.output_type,
+                parameters_schema=dict(analyze.parameters_schema),
             ),
             MediaCapabilityContract(
-                capability="media.audio.trim",
-                description="Trim a selected audio Artifact without regenerating it.",
-                inputs=[source("audio", ["audio"], "audio_step")],
-                output_artifact_type="audio",
+                capability="media.audio_cut",
+                description=cut.description,
+                inputs=[
+                    source("audio", ["audio", "music"], "audio_step"),
+                    source("analysis", ["audiomap"], "analysis_step", required=False),
+                ],
+                output_artifact_type=cut.output_type,
+                parameters_schema=dict(cut.parameters_schema),
             ),
             MediaCapabilityContract(
                 capability="media.probe",
@@ -327,18 +336,22 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability in {"media.audio.analyze", "media.audio_analyze"}:
             from app.chat.v2.host_gateway import HostGateway
-            audio_url = self._url_from_step_or_direct(
+            music_meta = self._collect_artifact_music_metadata(completed)
+            audio_url = self._collect_artifact_audio_url(
                 completed,
                 step_id=parameters.get("audio_step"),
                 url=parameters.get("audio_url") or parameters.get("uri"),
-                label="audio_step or audio_url",
             )
+            if not audio_url:
+                raise ValueError("required media output is unavailable: audio_step or audio_url")
             result = await HostGateway().media_audio_analyze({
                 "audio_url": audio_url,
                 "target_duration_sec": parameters.get("target_duration_sec"),
-                "clip_id": parameters.get("clip_id"),
-                "generated_lyrics": parameters.get("generated_lyrics"),
-                "filename": parameters.get("filename"),
+                "clip_id": parameters.get("clip_id") or music_meta.get("clip_id"),
+                "generated_lyrics": (
+                    parameters.get("generated_lyrics") or music_meta.get("lyrics")
+                ),
+                "filename": parameters.get("filename") or music_meta.get("filename"),
                 "user_input": parameters.get("user_input"),
                 "transcribe": parameters.get("transcribe", True),
                 "transcription": parameters.get("transcription"),
@@ -346,67 +359,25 @@ class MediaCorePlugin(BaseVideoPlugin):
             })
         elif capability in {"media.audio.cut", "media.audio_cut"}:
             from app.chat.v2.host_gateway import HostGateway
-            audio_url = self._url_from_step_or_direct(
+            analysis = self._collect_artifact_audiomap(completed, parameters)
+            audio_url = self._collect_artifact_audio_url(
                 completed,
                 step_id=parameters.get("audio_step"),
-                url=parameters.get("audio_url") or parameters.get("uri"),
-                label="audio_step or audio_url",
+                url=parameters.get("audio_url") or parameters.get("uri")
+                or (analysis or {}).get("audio_url"),
             )
-            analysis: dict[str, Any] = {}
-            analysis_step = parameters.get("analysis_step")
-            if analysis_step:
-                item = completed.get(str(analysis_step))
-                if item is None:
-                    raise ValueError(f"required media output is unavailable: {analysis_step}")
-                analysis = dict(item.metadata or {})
+            if not audio_url:
+                raise ValueError(
+                    "media.audio_cut requires audio_url, an analysis artifact, or a music artifact"
+                )
             result = await HostGateway().media_audio_cut({
                 "audio_url": audio_url,
-                "analysis": analysis,
+                "analysis": analysis or {},
                 "start_sec": parameters.get("start_sec", parameters.get("start")),
                 "duration": parameters.get("duration", parameters.get("duration_sec")),
                 "max_segment_sec": parameters.get("max_segment_sec"),
                 "segments": parameters.get("segments"),
                 "transcription": parameters.get("transcription"),
-                "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
-            })
-        elif capability == "media.audio.trim":
-            from app.chat.v2.host_gateway import HostGateway
-            audio_url = self._url_from_step_or_direct(
-                completed,
-                step_id=parameters.get("audio_step"),
-                url=parameters.get("audio_url") or parameters.get("uri"),
-                label="audio_step or audio_url",
-            )
-            start = parameters.get("start", parameters.get("start_sec"))
-            duration = parameters.get("duration", parameters.get("duration_sec"))
-            analysis_step = parameters.get("analysis_step")
-            if analysis_step:
-                analysis = completed.get(str(analysis_step))
-                if analysis is None:
-                    raise ValueError(f"required media output is unavailable: {analysis_step}")
-                if parameters.get("use_master_window"):
-                    master = analysis.metadata.get("master") or {}
-                    start = master.get("start_sec", 0)
-                    duration = master.get("duration_sec")
-                    if duration is None and master.get("end_sec") is not None:
-                        duration = float(master["end_sec"]) - float(start or 0)
-                else:
-                    segments = analysis.metadata.get("segments") or []
-                    index = int(parameters.get("segment_index") or 0)
-                    if index >= len(segments):
-                        raise ValueError(f"audio analysis has no segment {index}")
-                    segment = segments[index]
-                    start = segment.get("start_sec", segment.get("start"))
-                    duration = segment.get("duration_sec", segment.get("duration"))
-            result = await HostGateway().media_audio_trim({
-                "audio_url": audio_url,
-                "start": start or 0,
-                "duration": duration,
-                **{
-                    key: parameters[key]
-                    for key in ("fade_in_sec", "fade_out_sec")
-                    if key in parameters
-                },
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })
         elif capability == "media.probe":
@@ -472,12 +443,14 @@ class MediaCorePlugin(BaseVideoPlugin):
                 url=parameters.get("video_url") or parameters.get("uri"),
                 label="video_step or video_url",
             )
-            audio_url = self._url_from_step_or_direct(
+            audio_url = self._collect_artifact_audio_url(
                 completed,
                 step_id=parameters.get("audio_step"),
                 url=parameters.get("audio_url") or parameters.get("music_url"),
-                label="audio_step or audio_url",
+                prefer_cut=True,
             )
+            if not audio_url:
+                raise ValueError("required media output is unavailable: audio_step or audio_url")
             result = await HostGateway().media_mix_audio({
                 "video_url": video_url, "audio_url": audio_url,
                 "mode": parameters.get("mode", "replace"),
@@ -626,6 +599,87 @@ class MediaCorePlugin(BaseVideoPlugin):
         if artifact is None or not artifact.uri:
             raise ValueError(f"required media output is unavailable: {step_id}")
         return artifact
+
+    @staticmethod
+    def _collect_artifact_audiomap(
+        completed: dict[str, MediaArtifactVersion],
+        parameters: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        analysis = parameters.get("analysis") or parameters.get("audiomap")
+        if isinstance(analysis, dict) and analysis:
+            return analysis
+        analysis_step = parameters.get("analysis_step")
+        if analysis_step:
+            item = completed.get(str(analysis_step))
+            if item is None:
+                raise ValueError(f"required media output is unavailable: {analysis_step}")
+            return dict(item.metadata or {})
+        typed = [
+            artifact for artifact in completed.values()
+            if str(artifact.type or "").lower() == "audiomap"
+        ]
+        for artifact in typed or list(completed.values()):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if metadata.get("smart_clip") or metadata.get("sections"):
+                return dict(metadata)
+        return None
+
+    @staticmethod
+    def _collect_artifact_music_metadata(
+        completed: dict[str, MediaArtifactVersion],
+    ) -> dict[str, Any]:
+        for artifact in completed.values():
+            kind = str(artifact.type or "").lower()
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            uri = artifact.uri if isinstance(artifact.uri, str) else ""
+            if kind not in {"music", "audio"} and not uri.lower().endswith(
+                (".mp3", ".wav", ".m4a", ".aac", ".flac")
+            ):
+                continue
+            return dict(metadata)
+        return {}
+
+    @classmethod
+    def _collect_artifact_audio_url(
+        cls,
+        completed: dict[str, MediaArtifactVersion],
+        *,
+        step_id: Any = None,
+        url: Any = None,
+        prefer_cut: bool = False,
+    ) -> str | None:
+        direct = str(url or "").strip()
+        if direct:
+            return direct
+        if str(step_id or "").strip():
+            return str(cls._required(completed, step_id).uri)
+        if prefer_cut:
+            for artifact in completed.values():
+                if str(artifact.type or "").lower() != "audio_cut":
+                    continue
+                metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+                master = metadata.get("master")
+                master_url = master.get("audio_url") if isinstance(master, dict) else None
+                for candidate in (master_url, artifact.uri, metadata.get("audio_url")):
+                    if isinstance(candidate, str) and candidate.strip():
+                        return candidate.strip()
+        for artifact in completed.values():
+            kind = str(artifact.type or "").lower()
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            candidates: list[str] = []
+            if isinstance(artifact.uri, str) and artifact.uri.strip():
+                candidates.append(artifact.uri.strip())
+            for key in ("audio_url", "music_url", "url", "uri", "result_url"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidates.append(value.strip())
+            for candidate in candidates:
+                lower = candidate.lower()
+                if kind in {"music", "audio"} or any(
+                    lower.endswith(ext) for ext in (".mp3", ".wav", ".m4a", ".aac", ".flac")
+                ):
+                    return candidate
+        return None
 
     @classmethod
     def _url_from_step_or_direct(

@@ -425,6 +425,28 @@ class TestDestMvCapabilityIds(unittest.TestCase):
             "chirp-v5-5",
         )
         self.assertEqual(registry.get("media.audio_cut").service_target, "media_audio_cut")
+        self.assertNotEqual(registry.canonical_id("media.audio.trim"), "media.audio_cut")
+        self.assertNotIn(
+            "media.audio_trim",
+            {item["id"] for item in registry.prompt_view()},
+        )
+
+    def test_media_core_plugin_lists_each_capability_once(self) -> None:
+        import yaml
+
+        manifest = yaml.safe_load(
+            (Path(__file__).resolve().parents[2] / "plugins" / "cuti-media-core" / "video-plugin.yaml")
+            .read_text(encoding="utf-8")
+        )
+        capabilities = manifest["contributions"]["capabilities"]
+        plan_patch = manifest["contributions"]["plan_patch_capabilities"]
+        self.assertEqual(capabilities, list(dict.fromkeys(capabilities)))
+        self.assertEqual(plan_patch, list(dict.fromkeys(plan_patch)))
+        self.assertNotIn("media.audio.analyze", capabilities)
+        self.assertNotIn("media.audio.cut", capabilities)
+        self.assertNotIn("media.subtitle.compose", capabilities)
+        self.assertNotIn("media.subtitle.burn", capabilities)
+        self.assertTrue(set(plan_patch) <= set(capabilities))
 
 
 DEST_SUNO_READS = (

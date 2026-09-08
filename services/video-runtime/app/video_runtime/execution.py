@@ -7,6 +7,7 @@ from typing import Any
 
 from .plugins import PluginContext, VideoPluginRegistry
 from .security import CapabilityExecutionEnvelope, CapabilityGrantSigner
+from app.capabilities.models import canonical_capability_id
 
 
 AuditSink = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -61,7 +62,7 @@ class CapabilityExecutionGateway:
         )
         loaded = self._plugins.get(plugin_id)
         declared = set(loaded.manifest.contributions.capabilities)
-        if capability not in declared:
+        if canonical_capability_id(capability) not in declared:
             raise PermissionError(f"plugin does not declare capability: {capability}")
         granted_domains = set(envelope.grant.allowed_domains)
         declared_domains = set(loaded.manifest.permissions.network_domains)
