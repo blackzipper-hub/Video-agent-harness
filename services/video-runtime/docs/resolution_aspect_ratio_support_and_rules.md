@@ -42,7 +42,7 @@
 
 - **现状**：前端若写死「16:9/1:1/9:16」「480p/720p/1080p」，加新工具或新档位时要改前端。
 - **建议**：**由后端按「当前选中的 image_tool / video_tool」返回该工具支持的 (aspect_ratio, resolution) 可选列表**，前端只做展示与回传。
-  - 接口形态示例：`GET /api/options/capabilities?image_tool=nano_banana_2&video_tool=pollo_seedance` → 返回 `{ "aspect_ratios": ["16:9","1:1","9:16"], "resolutions": ["480p","720p","1080p"], "warnings": [] }`。
+  - 接口形态示例：按当前选中的 `image_tool` / `video_tool` 返回 `{ "aspect_ratios": ["16:9","1:1","9:16"], "resolutions": ["480p","720p","1080p"], "warnings": [] }`。
   - 若某组合不被当前视频工具支持（如 Sora 2 无 1:1），可返回 `warnings` 或在该工具下隐藏 1:1，或保留选项但提交时后端做映射（当前即 480p→720p 等）。
   - **通用性**：新增 image/video tool 时，只需在后端维护一张「工具 → 支持的 aspect_ratio / resolution」表（或从现有 tool 的 convert_* 逻辑里推导），前端无需改选项结构，只根据接口收缩/置灰选项即可。
 

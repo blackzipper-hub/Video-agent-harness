@@ -229,6 +229,14 @@ class LocalJsonVideoProjectRepository(InMemoryVideoProjectRepository):
         )
         self._persist()
 
+    async def replace_operation_result(
+        self, project_id: str, operation: str, idempotency_key: str, result_id: str,
+    ) -> None:
+        await super().replace_operation_result(
+            project_id, operation, idempotency_key, result_id,
+        )
+        self._persist()
+
     async def remember_compatibility_run(
         self, *, user_id: str, idempotency_key: str,
         project_id: str, session_id: str,

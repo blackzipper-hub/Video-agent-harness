@@ -9,6 +9,8 @@ ingress:
   sslRedirect: false
   certificateArn: arn:aws:acm:ap-southeast-2:699475938168:certificate/35b92a6f-1b52-4cd9-9843-4246bb5d9b1b
   hosts: []
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=1200
 
 nodeSelector:
   workload-type: agent

@@ -23,9 +23,7 @@ def configured_skill_roots() -> list[Path]:
     service_root = Path(__file__).resolve().parents[2]
     return [
         *(service_root / "skills" / scope for scope in ("system", "builtin", "external")),
-        service_root / "kit" / "skills" / "creative",
         service_root / "kit" / "skills" / "stages",
-        service_root / "app" / "services" / "agent" / "video_edit" / "skills",
     ]
 
 

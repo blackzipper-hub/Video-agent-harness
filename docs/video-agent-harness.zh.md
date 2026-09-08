@@ -28,7 +28,7 @@ Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Sessi
 
 `video_project_create`、`video_project_plan` 与 `video_project_build` 增加首次构建路径，但不会增加第二套 Agent Loop。DeepSeek 生成与 Provider 无关的 `VideoSpec`；Workflow Plugin 把它编译为与增量和导出任务共用的持久化 `BuildPlan`。计划包含稳定步骤身份、Capability、依赖、幂等键、输出产物身份和预计成本。
 
-内置 `cuti.seedance-story` 工作流会生成剧本、角色、分镜、角色参考图、关键帧、视频片段、真实尾帧、时间线、旁白、BGM、字幕和最终视频产物。每个成功步骤立即保存为 draft，服务重启后可直接复用。镜头按依赖串行：每段真实尾帧成为下一镜头的严格首帧输入。只有全部媒体与校验步骤通过后，活动 ProjectVersion 才会切换。
+可选 Workflow Skill（`seedance2`、`mv`、`short-drama-workflow`、`product-ad-video`、`cuti-product-workflow`、`cuti-scenario-product-workflow`、`libtv-product-workflow`）把 `VideoSpec` 编译成这份 `BuildPlan`。每个成功步骤立即保存为 draft，服务重启后可直接复用。只有全部媒体与校验步骤通过后，活动 ProjectVersion 才会切换。
 
 `cuti.atomic-providers` 复用 Cuti 的图片、音乐与 Seedance Provider；`cuti.media-core` 复用 Cuti 的 TTS、Media Service 与 FFmpeg 操作；`cuti.continuity-validator` 始终检查时间线和媒体结构，并探测最终视频是否可解码、时长及音轨，也可选择启用 Cuti 已有的 VLM 视频一致性校验。对已经组装完成的不可变版本，MP4 导出是持久化零拷贝导出；格式转换仍作为 Export Build 执行。
 
@@ -40,7 +40,7 @@ Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Sessi
 
 只包含说明的 Skill 仍可单独安装。只有当 Skill 提供可执行代码、Provider、校验、迁移或其他运行时生命周期行为时，才需要成为插件 bundle。
 
-整个进程只拥有一个 `VideoSkillRuntime`，统一处理说明型 Skill、Director Skill、可执行 Capability Skill 和 Workflow Skill。它发现已导入 Cuti 的 system、builtin、external、creative、stage 和 video-edit 根目录，通过同一个 `SkillCatalog` 预先校验元数据并按需读取正文和可执行契约。Workflow Registry 校验 pipeline 权限、Capability 名称和 Skill 依赖，再由 `cuti.skill-workflows` 将声明暴露为 Workflow Plugin。BFF 将这份 Catalog 提供给现有 Cuti Skill 前端，接收 `workflow_id` 与 `activated_skill_ids`，在 Video Runtime 中持久化长期 `ProjectSkillLock`，并在安全 ZIP 安装后统一重载 Runtime。Build 保存前，Runtime 会统一解析所选 Workflow、Workflow 依赖、显式启用的 Skill、每步 Director Skill、项目锁定 Skill 和 Capability 绑定 Skill。每个 `BuildStep` 冻结 Skill 身份、版本、完整文件哈希、角色、Hook 和实际指令，并在制作进度中展示解析到的 Skill 名称；Provider 提示词使用这份冻结上下文，Artifact 同时记录来源。必需 Skill 缺失或停用时会明确失败，不会退回固定目录读取。`/api/video/workflows` 提供最终生效的 Workflow 目录。
+整个进程只拥有一个 `VideoSkillRuntime`，统一处理说明型 Skill、Director Skill、可执行 Capability Skill 和 Workflow Skill。它发现 `skills/system`、`skills/builtin`、`skills/external` 和 `kit/skills/stages`，通过同一个 `SkillCatalog` 预先校验元数据并按需读取正文和可执行契约。Workflow Registry 校验 pipeline 权限、Capability 名称和 Skill 依赖，再由 `cuti.skill-workflows` 将声明暴露为 Workflow Plugin。BFF 将这份 Catalog 提供给现有 Cuti Skill 前端，接收 `workflow_id` 与 `activated_skill_ids`，在 Video Runtime 中持久化长期 `ProjectSkillLock`，并在安全 ZIP 安装后统一重载 Runtime。Build 保存前，Runtime 会统一解析所选 Workflow、Workflow 依赖、显式启用的 Skill、每步 Director Skill、项目锁定 Skill 和 Capability 绑定 Skill。每个 `BuildStep` 冻结 Skill 身份、版本、完整文件哈希、角色、Hook 和实际指令，并在制作进度中展示解析到的 Skill 名称；Provider 提示词使用这份冻结上下文，Artifact 同时记录来源。必需 Skill 缺失或停用时会明确失败，不会退回固定目录读取。`/api/video/workflows` 提供最终生效的 Workflow 目录。
 
 ## 执行授权
 

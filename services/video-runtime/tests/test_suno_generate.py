@@ -3,13 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 
 from app.chat.v2.capability_loader import build_registry
-from app.chat.v2.executors import CapabilityExecutor
-from app.chat.v2.models import AgentRun, Task
 from app.chat.v2.skill_catalog import SkillCatalog
 from app.chat.v2.workflows import is_workflow_skill
 from app.integrations.providers.suno_bridge import generate_suno_native
@@ -179,42 +176,3 @@ async def test_generate_suno_native_simple_mode_requires_prompt(suno_native_mock
 async def test_generate_suno_native_custom_mode_requires_lyrics(suno_native_mocks):
     with pytest.raises(ValueError, match="custom_mode=true requires lyrics"):
         await generate_suno_native({"custom_mode": True})
-
-
-@pytest.mark.asyncio
-async def test_executor_suno_generate_returns_music_uri(monkeypatch):
-    async def _fake(profile):
-        assert profile["custom_mode"] is True
-        return {
-            "audio_url": "http://localhost/files/out.mp3",
-            "uri": "http://localhost/files/out.mp3",
-            "title": "Out",
-            "summary": "Suno generated music via chirp-v5-5",
-        }
-
-    monkeypatch.setattr(
-        "app.integrations.providers.suno_bridge.generate_suno_native",
-        _fake,
-    )
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="suno",
-        capability_id="suno.generate", objective="sing",
-        parameters={
-            "custom_mode": True,
-            "lyrics": "[Chorus - lift]\nGo\n[End]",
-            "tags": "Male baritone. Indie rock.",
-        },
-    )
-    result = await executor._run_local_service(
-        run, task, [], f"idem-{uuid4()}",
-        registry.get("suno.generate"),
-    )
-    assert result.status == "completed"
-    assert result.artifact["uri"].endswith("out.mp3")
-    assert result.artifact["title"] == "Out"

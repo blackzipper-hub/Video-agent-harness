@@ -8,25 +8,7 @@ CAPABILITY_ALIASES = {
     "atomic-image": "atomic.image.generate",
     "atomic-music": "atomic.music.generate",
     "atomic-video": "atomic.video.generate",
-    "generate-story": "story.generate",
-    "generate-image": "image.generate",
-    "generate-music": "music.generate",
-    "generate-video": "video.generate",
-    "generate-video-pipeline": "video.pipeline.generate",
-    "generate-video-direct": "video_gen.generate",
-    "edit-video": "video.edit",
-    "video-edit": "video.edit",
     "suggest-actions": "actions.suggest",
-    "generate-outline": "outline.generate",
-    "generate-characters": "character.generate",
-    "generate-scenes": "scene.generate",
-    "generate-shots": "shot.generate",
-    "generate-keyframe": "keyframe.generate",
-    "generate-shot-videos": "shot.video.generate",
-    "regenerate-keyframes": "keyframe.regenerate",
-    "regenerate-characters": "character.regenerate",
-    "regenerate-shot-videos": "shot.video.regenerate",
-    "assemble-video": "video.assemble",
     "api-provider-bridge": "api.provider.generate",
     "media-concat": "media.concat",
     "media-extract-frame": "media.extract_frame",
@@ -35,7 +17,6 @@ CAPABILITY_ALIASES = {
     "media-subtitle-burn": "media.subtitle_burn",
     "media-hyperframes-caption": "media.hyperframes_caption",
     "ark-wavespeed-protocol-bridge": "api.ark_protocol.generate",
-    "open-montage-tools": "open_montage.tool.invoke",
     "suno-generate": "suno.generate",
     "generate-research": "research.generate",
     "media-audio-cut": "media.audio_cut",
@@ -130,29 +111,22 @@ class CapabilityRegistry:
 def default_terminal_events(output_type: str) -> list[str]:
     return {
         "text": ["story_agent_generated"],
-        "story": ["story_agent_generated"],
         "image": ["image_agent_generated"],
         "music": ["music_agent_generated"],
         "video": ["video_agent_generated", "video_generated", "final_video_generated"],
-        "keyframe": ["keyframes_generated", "keyframe_regenerated", "image_agent_generated"],
-        "character": ["characters_generated", "character_regenerated", "image_agent_generated"],
-        "outline": ["story_outline_generated"],
-        "scene": ["scenes_generated"],
-        "shot": ["storyboard_detail_generated"],
         "action_suggestions": ["actions_suggested"],
         "transcript": ["transcript_generated"],
         "subtitle": ["subtitle_generated"],
+        "research": ["research_generated"],
     }.get(output_type, [f"{output_type}_generated"])
 
 
 def default_capabilities() -> list[CapabilityManifest]:
-    """Load platform, provider, and legacy manifests independently of Skills."""
+    """Load platform and provider manifests independently of Skills."""
     from app.capabilities.manifests.platform import platform_capabilities
     from app.integrations.providers.manifests import provider_capabilities
-    from app.legacy.video_pipeline.capability import legacy_video_pipeline_capability
 
     return [
         *platform_capabilities(),
         *provider_capabilities(),
-        legacy_video_pipeline_capability(),
     ]

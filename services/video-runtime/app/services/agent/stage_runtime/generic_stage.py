@@ -10,7 +10,6 @@ from pydantic import BaseModel, ValidationError
 
 from app.services.agent.stage_runtime.deep_agent_factory import create_stage_deep_agent
 from app.services.agent.stage_runtime.paths import (
-    narrative_skills_paths,
     virtual_skills_stage,
 )
 from app.services.agent.stage_runtime.workspace import (
@@ -169,11 +168,7 @@ async def run_stage_deep_agent(
         f"Do not stop after only reading. "
         f"{system_extra}"
     ).strip()
-    skill_paths = (
-        narrative_skills_paths(stage, content_category=content_category)
-        if stage in {"script", "scene", "outline"}
-        else [virtual_skills_stage(stage)]
-    )
+    skill_paths = [virtual_skills_stage(stage)]
     agent = create_stage_deep_agent(
         model=llm,
         tools=tools,

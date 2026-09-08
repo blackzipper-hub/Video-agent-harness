@@ -35,6 +35,7 @@ class FakeDeepSeekClient:
         self.prompts: list[tuple[str, str]] = []
         self.missing_sessions: set[str] = set()
         self.session_count = 0
+        self.history_calls = 0
 
     async def list_sessions(self) -> list[dict]:
         return [{"sessionId": session_id} for session_id in self.events]
@@ -66,6 +67,7 @@ class FakeDeepSeekClient:
         ]
 
     async def history(self, session_id: str, **_options) -> dict:
+        self.history_calls += 1
         if session_id in self.missing_sessions:
             raise DeepSeekHarnessError(
                 f'session.history failed: session-not-found: session "{session_id}" not found',
@@ -201,6 +203,21 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertEqual(response.json()["data"][0]["id"], created["id"])
         self.assertEqual(response.json()["data"][0]["thread_id"], created["thread_id"])
 
+    def test_list_runs_does_not_load_deepseek_history(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "Make a trailer", "idempotency_key": "list-no-history"},
+        ).json()["data"]
+        before = self.deepseek.history_calls
+        listed = self.client.get("/chat-v1/service/v2/runs").json()["data"]
+        self.assertEqual(self.deepseek.history_calls, before)
+        self.assertEqual(listed[0]["id"], created["id"])
+        snapshot = self.client.get(f"/chat-v1/service/v2/runs/{created['id']}").json()["data"]
+        listed = self.client.get("/chat-v1/service/v2/runs").json()["data"][0]
+        self.assertEqual(listed["last_response"], snapshot["run"]["last_response"])
+        self.assertTrue(snapshot["events"])
+        self.assertEqual(snapshot["messages"][-1]["content"], "Project opened")
+
     def test_orphaned_create_route_gets_a_fresh_deepseek_session(self) -> None:
         replacement = FakeDeepSeekClient()
         replacement.events["orphaned-route-session"] = [{
@@ -274,7 +291,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         catalog = self.client.get("/chat-v1/service/v2/skills")
         self.assertEqual(catalog.status_code, 200, catalog.text)
         names = {item["name"] for item in catalog.json()["data"]}
-        self.assertIn("character-director", names)
+        self.assertIn("product-voiceover-narration", names)
         self.assertNotIn("cuti.atomic-providers", names)
 
         created = self.client.post(
@@ -283,36 +300,36 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                 "objective": "Make a Skill-driven trailer",
                 "idempotency_key": "skill-selection-1",
                 "workflow_id": "product-ad-video",
-                "activated_skill_ids": ["character-director"],
+                "activated_skill_ids": ["product-voiceover-narration"],
             },
         ).json()["data"]
         prompt = self.deepseek.prompts[-1][1]
         self.assertIn('"product-ad-video"', prompt)
         self.assertIn("Call video_workflow_load", prompt)
-        self.assertIn('VideoSpec.activated_skill_ids exactly to ["character-director"]', prompt)
+        self.assertIn('VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]', prompt)
         self.assertNotIn("$product-ad-video", prompt)
 
         lock_response = self.client.post(
             f"/chat-v1/service/studio/projects/{created['thread_id']}"
-            "/skills/character-director/enable",
+            "/skills/product-voiceover-narration/enable",
             json={"enabled": True},
         )
         self.assertEqual(lock_response.status_code, 200, lock_response.text)
         lock = lock_response.json()["data"]
         self.assertEqual(lock["project_id"], created["project_id"])
-        self.assertEqual(lock["skill_id"], "character-director")
+        self.assertEqual(lock["skill_id"], "product-voiceover-narration")
         self.assertTrue(lock["enabled"])
         listed = self.client.get(
             f"/chat-v1/service/studio/projects/{created['thread_id']}/skills",
         ).json()["data"]
-        self.assertEqual([item["skill_id"] for item in listed], ["character-director"])
+        self.assertEqual([item["skill_id"] for item in listed], ["product-voiceover-narration"])
 
         self.client.post(
             f"/chat-v1/service/v2/runs/{created['id']}/messages",
             json={"content": "Make the hero warmer", "idempotency_key": "skill-edit-1"},
         )
         self.assertIn(
-            'VideoSpec.activated_skill_ids exactly to ["character-director"]',
+            'VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]',
             self.deepseek.prompts[-1][1],
         )
 
@@ -604,6 +621,30 @@ Keep the requested visual tone consistent.
         run = created.json()["data"]
         self.assertEqual(run["workflow_id"], "mv")
         self.assertEqual(run["activated_skill_ids"], [])
+
+    def test_staged_project_intent_prompt_states_brief_job(self):
+        from unittest.mock import patch
+        from app.video_runtime.deepseek_bff import _initial_video_build_prompt
+
+        with patch.dict("os.environ", {
+            "VIDEO_STAGED_PLANNING_ENABLED": "true",
+            "VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED": "true",
+        }):
+            prompt = _initial_video_build_prompt(
+                objective="做个mv 30s $mv",
+                project_id="p1",
+                base_project_version_id="v1",
+                idempotency_key="k1",
+                user_option=None,
+                input_files=[],
+                workflow_id="mv",
+                activated_skill_ids=[],
+            )
+        self.assertIn("containing only known goals and constraints", prompt)
+        self.assertIn("Shots, captions, and timing wait for media that does not exist yet", prompt)
+        self.assertNotIn("or other details that depend on media not generated yet", prompt)
+        self.assertNotIn("brief is the requested film", prompt)
+        self.assertNotIn("Example: user asked", prompt)
 
     def test_create_persists_independent_ui_and_content_languages(self):
         created = self.client.post(

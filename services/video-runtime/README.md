@@ -39,11 +39,11 @@ During execution, `POST /api/video/projects/{project_id}/builds/{build_id}/check
 
 `video-plugin.yaml` declares provider, workflow, style, validator, and media contributions plus dependencies and permissions. `VIDEO_PLUGIN_PATHS` may replace the bundled `plugins` root with platform-separated directories whose immediate child directories contain manifests. A plugin may extend `BaseVideoPlugin`; its `capability_handlers()` maps declared capability ids to executable handlers. Trusted built-ins can load in-process. An untrusted plugin declares `sandbox_runtime` (image, entrypoint, and timeout); the runtime never imports its module and executes the bundle through `services/sandbox-worker` with the signed grant's limits.
 
-`VIDEO_SKILL_PATHS` may replace the process-wide Skill roots. Without it, one `VideoSkillRuntime` discovers the bundled system, built-in, external, creative, stage, and video-edit Skills. Its shared catalog validates executable contracts and Workflow declarations, freezes the Director and helper Skill context on each planned Build step, and registers Workflow contributions through `cuti.skill-workflows`. `GET /api/video/workflows` returns manifest and effective Skill workflows.
+`VIDEO_SKILL_PATHS` may replace the process-wide Skill roots. Without it, one `VideoSkillRuntime` discovers the bundled system, built-in, external, and stage-director Skills. Its shared catalog validates executable contracts and Workflow declarations, freezes helper Skill context on each planned Build step, and registers Workflow contributions through `cuti.skill-workflows`. `GET /api/video/workflows` returns manifest and effective Skill workflows.
 
-Every selectable Workflow must expose a named dedicated compiler contract. Unknown Skill modes and Workflow plugins without an explicit runtime description are reported as unavailable; there is no generic/default Workflow compiler fallback. Original Cuti Workflow instruction bodies are preserved while staged-planning metadata is added to frontmatter.
+Every selectable Workflow must expose a named dedicated compiler contract. Unknown Skill modes and Workflow plugins without an explicit runtime description are reported as unavailable; there is no generic/default Workflow compiler fallback.
 
-The built-in adapters reuse Cuti's text, image, music, video, TTS, FFmpeg, subtitle, and lipsync operations. `cuti.seedance-story`, `cuti.music-video`, and `cuti.lipsync-music-video` compile provider-neutral `VideoSpec` values; `cuti.style-presets` applies installed prompt defaults before compilation. Production identity uses either the standalone service bearer token or the combined application's Cuti JWT adapter, and fails closed when neither is configured.
+The built-in adapters reuse Cuti's text, image, music, video, TTS, FFmpeg, subtitle, and lipsync operations. Selectable workflows (`mv`, `seedance2`, `short-drama-workflow`, `product-ad-video`, and the product-workflow variants) compile provider-neutral `VideoSpec` values; `cuti.style-presets` applies installed prompt defaults before compilation. Production identity uses either the standalone service bearer token or the combined application's Cuti JWT adapter, and fails closed when neither is configured.
 
 Every new `ProjectIntent` and `VideoSpec` persists one language contract with independent UI, user-visible content, spoken, subtitle, and provider-prompt languages. The BFF injects that contract into initial planning, follow-up edits, and automatic checkpoint turns; Runtime-generated user artifacts record the contract and reject clear text-language mismatches. Legacy documents with only `language` receive matching defaults for all content fields.
 
@@ -53,7 +53,7 @@ Scene-reference isolation is checked both at the provider boundary and against r
 
 ## Compatibility API
 
-`app.main:app` retains the imported Cuti HTTP surface for Video Studio clients, but `VIDEO_AGENT_BACKEND` accepts only `deepseek`. Product startup translates the V2 chat and thread-oriented Studio routes to native Session RPC and calls `VideoBuildRuntime`; it does not mount the imported DeepAgents/LangGraph planner. Imported media services resolve their prompt Skills through the same process-owned catalog.
+Studio talks to `app.video_runtime.standalone:app`. The `/chat-v1/service` mount is a DeepSeek BFF, not the retired LangGraph planner.
 
 If a pasted Create-Space URL names a DeepSeek Session whose Project binding is absent from the restored Runtime store, the BFF creates a fresh Session and returns its new `thread_id`; it never attaches a new Project to an unbound historical Session.
 
@@ -65,4 +65,4 @@ Checkpoint delivery reconciles consumed Session messages with completed turns. A
 python -m unittest discover -s tests/video_runtime -v
 ```
 
-The broader imported Cuti suite retains its original dependencies and service requirements.
+Additional pytest coverage lives under `tests/` for capabilities, media tools, and the DeepSeek BFF.

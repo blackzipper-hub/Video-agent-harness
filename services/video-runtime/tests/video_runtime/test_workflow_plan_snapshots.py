@@ -423,11 +423,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             else:
                 with self.assertRaises(LookupError):
                     await self._compile(workflow_id)
-        if "open-montage" in views:
-            self.assertEqual(
-                views["open-montage"]["missingCapabilities"],
-                ["open_montage.tool.invoke"],
-            )
 
     async def test_every_available_workflow_completes_with_provider_mock(self) -> None:
         runtime = VideoBuildRuntime(skill_runtime=self.skills)

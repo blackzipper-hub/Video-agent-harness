@@ -1,1 +1,0 @@
-DROP SCHEMA IF EXISTS cuti_videochat_v2 CASCADE;

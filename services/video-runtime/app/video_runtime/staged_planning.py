@@ -448,7 +448,8 @@ def compile_continuous_plan_initial(
             "Inspect the current project snapshot and the loaded Workflow contract. "
             "Submit the next tasks and their dependencies. Each task completion or "
             "failure can trigger another planning turn while other work continues. "
-            "Do not invent creative details that depend on unavailable Artifacts."
+            "The loaded Workflow supplies creative choices the user left open. "
+            "Bind shot timing and media references to artifacts that already exist."
         ),
         planning_mode="agentic",
     )

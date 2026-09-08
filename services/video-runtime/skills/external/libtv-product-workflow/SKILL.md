@@ -44,12 +44,10 @@ metadata:
       - actions.suggest
       - atomic.text.generate
       - atomic.music.generate
-      - music.generate
       - api.provider.generate
       - api.ark_protocol.generate
       - media.concat
       - media.extract_frame
-      - open_montage.tool.invoke
 ---
 
 # LibTV Product Workflow

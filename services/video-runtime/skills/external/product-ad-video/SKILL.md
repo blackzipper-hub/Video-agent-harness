@@ -48,8 +48,6 @@ metadata:
       - atomic.image.generate
       - atomic.music.generate
       - atomic.video.generate
-      - image.generate
-      - music.generate
       - api.provider.generate
       - api.ark_protocol.generate
       - media.concat

@@ -273,3 +273,21 @@ class VideoRuntimeApiTest(unittest.TestCase):
             sum(event["type"] == "project.session_bound" for event in events),
             1,
         )
+
+    def test_event_tail_skips_historical_project_events(self) -> None:
+        project = self.client.post(
+            "/api/video/projects",
+            headers=self.headers,
+            json={"title": "Tail", "sessionId": "session-1"},
+        ).json()["data"]
+        project_id = project["projectId"]
+        history = self.client.get(
+            f"/api/video/projects/{project_id}/events",
+            headers=self.headers,
+        ).json()["data"]
+        self.assertGreater(len(history), 0)
+        tailed = self.client.get(
+            f"/api/video/projects/{project_id}/events?tail=1",
+            headers=self.headers,
+        ).json()["data"]
+        self.assertEqual(tailed, [])

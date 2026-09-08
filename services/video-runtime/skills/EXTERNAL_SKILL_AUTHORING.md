@@ -14,7 +14,7 @@ upstream-compatible so install/reload is true hot update.
 | Instruction-only | none | no | Creative workflows that **compose** existing capabilities or run bundled scripts |
 | Executable | `executor: sandbox.run` | yes (on install/reload) | Vendor logic / scripts that must hot-load **as authored by the Skill author** |
 
-External Skills **must** use `sandbox.run` if they ship an executable contract. Trusted `.system` Skills may use `local.service` / `video-agent.delegate`.
+External Skills **must** use `sandbox.run` if they ship an executable contract. Trusted `.system` Skills may use `local.service`.
 
 Upstream instruction-only Skills (like stock `seedance2` calling `scripts/seedance.py` + Ark) must keep working via **platform interception** (env keys, host bridge, script runner), not by rewriting their `SKILL.md`.
 

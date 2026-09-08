@@ -39,11 +39,11 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 
 `video-plugin.yaml` 声明 Provider、Workflow、Style、Validator 和 Media 贡献，以及依赖与权限。`VIDEO_PLUGIN_PATHS` 可以用平台分隔的目录替换内置 `plugins` 根目录，这些目录的直接子目录包含 manifest。插件可以继承 `BaseVideoPlugin`；其 `capability_handlers()` 将声明的 Capability id 映射到可执行 Handler。受信任的内置插件可以进程内加载；不受信任的插件通过 `sandbox_runtime` 声明镜像、入口和超时，运行时不会导入它的模块，而是带着签名 Grant 的限制交给 `services/sandbox-worker` 执行。
 
-`VIDEO_SKILL_PATHS` 可以替换进程级 Skill 根目录。未配置时，单一 `VideoSkillRuntime` 会发现内置 system、builtin、external、creative、stage 和 video-edit Skill。共享 Catalog 校验可执行契约和 Workflow 声明，在每个已规划 Build 步骤上冻结 Director 与辅助 Skill 上下文，并通过 `cuti.skill-workflows` 注册 Workflow 贡献。`GET /api/video/workflows` 同时返回 manifest 工作流与最终生效的 Skill 工作流。
+`VIDEO_SKILL_PATHS` 可以替换进程级 Skill 根目录。未配置时，单一 `VideoSkillRuntime` 会发现内置 system、builtin、external 和 stage-director Skill。共享 Catalog 校验可执行契约和 Workflow 声明，在每个已规划 Build 步骤上冻结辅助 Skill 上下文，并通过 `cuti.skill-workflows` 注册 Workflow 贡献。`GET /api/video/workflows` 同时返回 manifest 工作流与最终生效的 Skill 工作流。
 
-每个可选 Workflow 都必须公开一个具名的专用编译器契约。未知 Skill mode、或没有显式 Runtime 描述的 Workflow 插件会显示为不可用；系统不存在通用／默认 Workflow 编译器回退。原版 Cuti Workflow 的正文保持不变，只在 frontmatter 中补充分阶段规划元数据。
+每个可选 Workflow 都必须公开一个具名的专用编译器契约。未知 Skill mode、或没有显式 Runtime 描述的 Workflow 插件会显示为不可用；系统不存在通用／默认 Workflow 编译器回退。
 
-内置适配器复用 Cuti 的文本、图片、音乐、视频、TTS、FFmpeg、字幕与 Lipsync 操作。`cuti.seedance-story`、`cuti.music-video` 和 `cuti.lipsync-music-video` 编译与 Provider 无关的 `VideoSpec`；`cuti.style-presets` 在编译前应用已安装的提示词默认值。生产身份可以使用独立 Runtime 的服务 Bearer Token，或组合应用中的 Cuti JWT 适配器；两者均未配置时默认拒绝请求。
+内置适配器复用 Cuti 的文本、图片、音乐、视频、TTS、FFmpeg、字幕与 Lipsync 操作。可选工作流（`mv`、`seedance2`、`short-drama-workflow`、`product-ad-video` 以及 product-workflow 变体）编译与 Provider 无关的 `VideoSpec`；`cuti.style-presets` 在编译前应用已安装的提示词默认值。生产身份可以使用独立 Runtime 的服务 Bearer Token，或组合应用中的 Cuti JWT 适配器；两者均未配置时默认拒绝请求。
 
 每个新的 `ProjectIntent` 和 `VideoSpec` 都持久化一份语言契约，分别记录界面、用户可见内容、对白或旁白、字幕和 Provider 提示词语言。BFF 会把该契约注入首次规划、后续编辑和自动检查点回合；Runtime 生成的用户产物会记录契约，并拒绝明确的文本语言不匹配。只有 `language` 字段的旧文档会为所有内容字段补上相同语言的默认值。
 
@@ -53,7 +53,7 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 
 ## 兼容 API
 
-`app.main:app` 保留供 Video Studio 客户端使用的 Cuti HTTP 接口，但 `VIDEO_AGENT_BACKEND` 只接受 `deepseek`。产品启动会把 V2 聊天和基于 thread 的 Studio 路由转换为原生 Session RPC，并调用 `VideoBuildRuntime`；不会挂载导入的 DeepAgents／LangGraph Planner。导入的媒体服务也通过同一个进程级 Catalog 解析提示词 Skill。
+Studio 对接 `app.video_runtime.standalone:app`。`/chat-v1/service` 挂载的是 DeepSeek BFF，不是已下线的 LangGraph Planner。
 
 如果粘贴的 Create Space URL 指向一个仍存在于 DeepSeek、但在恢复后的 Runtime 中已没有 Project 绑定的 Session，BFF 会创建全新 Session 并返回新的 `thread_id`，不会把新 Project 接到未绑定的历史 Session 上。
 
@@ -65,4 +65,4 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 python -m unittest discover -s tests/video_runtime -v
 ```
 
-更大范围的 Cuti 测试仍需要原有依赖与外部服务。
+`tests/` 下还有 Capability、媒体工具和 DeepSeek BFF 的 pytest 覆盖。

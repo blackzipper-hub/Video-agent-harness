@@ -40,7 +40,6 @@ def is_our_cdn_url(url: str) -> bool:
         return False
 from PIL import Image
 from app.config import settings
-from app.crud.video.video_generation import update_video_generation_version_video_url
 from app.exceptions import BusinessException, BusinessExceptionCode
 from app.utils import media_service_client as msc
 
@@ -57,7 +56,7 @@ class S3Utils:
             self.s3_client = None
             self._local_dir = os.path.abspath(getattr(settings, "LOCAL_STORAGE_DIR", "./data/uploads"))
             os.makedirs(self._local_dir, exist_ok=True)
-            # 对外 URL 前缀：{PUBLIC_BASE_URL}/files —— 与 main.py 的 /files 静态挂载一致
+            # 对外 URL 前缀：{PUBLIC_BASE_URL}/files —— 与 standalone 的 /files 静态挂载一致
             self.cdn_domain = f"{_local_public_base()}/files"
             logger.info(f"🗂️ 存储后端=local，落地目录={self._local_dir}，URL 前缀={self.cdn_domain}")
         else:
@@ -424,7 +423,6 @@ class S3Utils:
         target_duration: Optional[float] = None,
         strip_audio: bool = True,
         watermark: bool = False,
-        update_version_uuid: Optional[str] = None,
     ) -> str:
         """Persist a clean canonical video, returning first-party URLs unchanged.
 
@@ -452,8 +450,6 @@ class S3Utils:
             strip_audio=strip_audio,
             watermark=watermark,
         )
-        if update_version_uuid:
-            await update_video_generation_version_video_url(update_version_uuid, new_cdn_url)
         return new_cdn_url
 
     async def download_and_upload_audio_to_s3(

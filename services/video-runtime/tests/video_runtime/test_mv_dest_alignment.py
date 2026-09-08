@@ -1,7 +1,6 @@
-"""Byte-compare dest $mv helper bodies; MV SKILL.md names DeepSeek tools on purpose."""
+"""MV compiler alignment: helper Skills plus DeepSeek-named tools."""
 from __future__ import annotations
 
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -13,56 +12,6 @@ from app.video_runtime.plugins import PluginContext, VideoPluginRegistry
 from app.video_runtime.skill_workflows import load_workflow_skills
 from app.video_runtime.skills import VideoSkillRuntime
 from app.video_runtime.workflow_plans import SUPPORTED_WORKFLOW_MODES
-
-
-DEST_REF = "origin/archive/pre-harness-dev"
-REPO = Path(__file__).resolve().parents[4]
-RUNTIME_SKILLS = Path(__file__).resolve().parents[2] / "skills" / "external"
-
-
-def _dest_file(path: str) -> bytes:
-    return subprocess.check_output(
-        ["git", "-C", str(REPO), "show", f"{DEST_REF}:{path}"],
-    )
-
-
-def _dest_ref_available() -> bool:
-    return subprocess.run(
-        ["git", "-C", str(REPO), "cat-file", "-e", f"{DEST_REF}^{{commit}}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    ).returncode == 0
-
-
-class TestDestMvSkillCopy(unittest.TestCase):
-    def test_copied_skills_match_dest_archive_bytes(self) -> None:
-        if not _dest_ref_available():
-            self.skipTest(f"optional archive ref is not present: {DEST_REF}")
-        pairs = (
-            (
-                "services/agent/skills/external/mv/reference.md",
-                RUNTIME_SKILLS / "mv" / "reference.md",
-            ),
-            (
-                "services/agent/skills/external/h3/SKILL.md",
-                RUNTIME_SKILLS / "h3" / "SKILL.md",
-            ),
-            (
-                "services/agent/skills/builtin/research/video-research/SKILL.md",
-                Path(__file__).resolve().parents[2] / "skills" / "builtin" / "research" / "video-research" / "SKILL.md",
-            ),
-            (
-                "services/agent/skills/external/suno-song/SKILL.md",
-                RUNTIME_SKILLS / "suno-song" / "SKILL.md",
-            ),
-        )
-        for dest_path, local in pairs:
-            self.assertEqual(
-                _dest_file(dest_path),
-                local.read_bytes(),
-                f"{local} drifted from dest {dest_path}",
-            )
 
 
 class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):

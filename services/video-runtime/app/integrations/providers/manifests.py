@@ -27,15 +27,4 @@ def provider_capabilities() -> list[CapabilityManifest]:
             terminal_events=default_terminal_events("video"),
             parameters_schema={"type": "object", "required": ["body"], "properties": {"body": {"type": "object"}, "wait": {"type": "boolean"}, "poll_interval": {"type": "number"}}, "additionalProperties": False},
         ),
-        CapabilityManifest(
-            id="open_montage.tool.invoke",
-            description="Invoke an Open Montage media tool through the platform integration.",
-            executor="local.service",
-            service_target="open_montage_tool_invoke",
-            skill_name="open-montage-tools",
-            inputs=CapabilityInputs(optional=["video", "image", "audio"]),
-            output_type="video",
-            terminal_events=default_terminal_events("video"),
-            parameters_schema={"type": "object", "required": ["tool"], "properties": {"tool": {"type": "string"}, "inputs": {"type": "object"}, "run_id": {"type": "string"}}, "additionalProperties": False},
-        ),
     ]

@@ -44,7 +44,7 @@ async def test_failed_request_records_requested_tokens():
     repo = Repo()
     callback = V2TokenUsageCallback(
         repo, run_id="run-1", scope="stage", task_id="task-1",
-        capability_id="outline.generate", attempt=2,
+        capability_id="atomic.text.generate", attempt=2,
     )
     await callback.on_llm_error(
         RuntimeError("Rate limit: Used 1916083, Requested 110114"), run_id="call-2",

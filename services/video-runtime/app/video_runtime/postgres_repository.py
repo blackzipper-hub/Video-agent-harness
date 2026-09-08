@@ -12,7 +12,7 @@ from .models import (
     ProjectSkillLock, ProjectVersion, RebuildPlan, RebuildPlanItem, ValidationResult,
     VideoSpecRevision, now, uid,
 )
-from .repository import PlanRevisionConflict, ProjectVersionConflict, VideoSpecRevisionConflict
+from .repository import PlanRevisionConflict, ProjectVersionConflict, SidebarRun, VideoSpecRevisionConflict
 
 
 class PostgresVideoProjectRepository:
@@ -95,12 +95,65 @@ class PostgresVideoProjectRepository:
             raise LookupError("project not found")
         return Project(**dict(row))
 
-    async def list_projects(self, user_id: str) -> list[Project]:
-        rows = await self.pool.fetch(
-            f"SELECT * FROM {self.schema}.projects WHERE user_id=$1 ORDER BY updated_at DESC",
-            user_id,
-        )
+    async def list_projects(self, user_id: str, *, limit: int | None = None) -> list[Project]:
+        if limit is None:
+            rows = await self.pool.fetch(
+                f"SELECT * FROM {self.schema}.projects WHERE user_id=$1 ORDER BY updated_at DESC",
+                user_id,
+            )
+        else:
+            rows = await self.pool.fetch(
+                f"""SELECT * FROM {self.schema}.projects
+                WHERE user_id=$1 ORDER BY updated_at DESC LIMIT $2""",
+                user_id, limit,
+            )
         return [Project(**dict(row)) for row in rows]
+
+    async def list_sidebar_runs(self, user_id: str, *, limit: int = 50) -> list[SidebarRun]:
+        rows = await self.pool.fetch(
+            f"""SELECT
+                  project.id, project.user_id, project.title, project.status,
+                  project.current_version_id, project.created_at, project.updated_at,
+                  binding.session_id,
+                  latest_build.status AS latest_build_status,
+                  ctx.result_id AS context_json
+                FROM {self.schema}.projects project
+                JOIN LATERAL (
+                  SELECT session_id
+                  FROM {self.schema}.project_session_bindings
+                  WHERE project_id=project.id AND user_id=$1
+                  ORDER BY created_at DESC
+                  LIMIT 1
+                ) binding ON true
+                LEFT JOIN LATERAL (
+                  SELECT status
+                  FROM {self.schema}.builds
+                  WHERE project_id=project.id
+                  ORDER BY created_at DESC
+                  LIMIT 1
+                ) latest_build ON true
+                LEFT JOIN {self.schema}.operation_idempotency ctx
+                  ON ctx.project_id=project.id
+                 AND ctx.operation='compat-run-context'
+                 AND ctx.idempotency_key='initial'
+                WHERE project.user_id=$1
+                ORDER BY project.updated_at DESC
+                LIMIT $2""",
+            user_id, limit,
+        )
+        return [
+            SidebarRun(
+                project=Project(
+                    id=row["id"], user_id=row["user_id"], title=row["title"],
+                    status=row["status"], current_version_id=row["current_version_id"] or "",
+                    created_at=row["created_at"], updated_at=row["updated_at"],
+                ),
+                session_id=row["session_id"],
+                latest_build_status=row["latest_build_status"],
+                context_json=row["context_json"],
+            )
+            for row in rows
+        ]
 
     async def list_all_projects(self) -> list[Project]:
         rows = await self.pool.fetch(
@@ -115,9 +168,27 @@ class PostgresVideoProjectRepository:
     async def list_project_versions(self, project_id: str) -> list[ProjectVersion]:
         async with self.pool.acquire() as connection:
             rows = await connection.fetch(
-                f"SELECT id FROM {self.schema}.project_versions WHERE project_id=$1 ORDER BY created_at", project_id,
+                f"""SELECT * FROM {self.schema}.project_versions
+                WHERE project_id=$1 ORDER BY created_at""",
+                project_id,
             )
-            return [await self._get_version(connection, row["id"]) for row in rows]
+            selected = await connection.fetch(
+                f"""SELECT selected.project_version_id, selected.artifact_id, selected.artifact_version_id
+                FROM {self.schema}.project_version_artifacts selected
+                JOIN {self.schema}.project_versions version
+                  ON version.id=selected.project_version_id
+                WHERE version.project_id=$1""",
+                project_id,
+            )
+        grouped: dict[str, dict[str, str]] = {}
+        for item in selected:
+            grouped.setdefault(item["project_version_id"], {})[
+                item["artifact_id"]
+            ] = item["artifact_version_id"]
+        return [
+            ProjectVersion(**dict(row), selections=grouped.get(row["id"], {}))
+            for row in rows
+        ]
 
     async def bind_session(self, binding: ProjectSessionBinding) -> ProjectSessionBinding:
         project = await self.get_project(binding.project_id)
@@ -248,6 +319,21 @@ class PostgresVideoProjectRepository:
             f"""INSERT INTO {self.schema}.operation_idempotency
             (project_id,operation,idempotency_key,result_id) VALUES($1,$2,$3,$4)
             ON CONFLICT(project_id,operation,idempotency_key) DO NOTHING""",
+            project_id, operation, idempotency_key, result_id,
+        )
+
+    async def replace_operation_result(
+        self,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        result_id: str,
+    ) -> None:
+        await self.pool.execute(
+            f"""INSERT INTO {self.schema}.operation_idempotency
+            (project_id,operation,idempotency_key,result_id) VALUES($1,$2,$3,$4)
+            ON CONFLICT(project_id,operation,idempotency_key) DO UPDATE SET
+              result_id=EXCLUDED.result_id""",
             project_id, operation, idempotency_key, result_id,
         )
 
@@ -452,6 +538,21 @@ class PostgresVideoProjectRepository:
         )
         return [self._plan_revision(row) for row in rows]
 
+    async def list_plan_revisions_for_plans(
+        self, plan_ids: list[str],
+    ) -> dict[str, list[BuildPlanRevision]]:
+        grouped: dict[str, list[BuildPlanRevision]] = {plan_id: [] for plan_id in plan_ids}
+        if not plan_ids:
+            return grouped
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.build_plan_revisions
+            WHERE plan_id=ANY($1::text[]) ORDER BY plan_id, revision""",
+            plan_ids,
+        )
+        for row in rows:
+            grouped.setdefault(row["plan_id"], []).append(self._plan_revision(row))
+        return grouped
+
     async def submit_build(
         self, *, project_id: str, plan_id: str, base_version_id: str,
         idempotency_key: str, session_id: str | None = None, user_id: str | None = None,
@@ -517,14 +618,23 @@ class PostgresVideoProjectRepository:
             f"SELECT * FROM {self.schema}.build_steps WHERE project_id=$1 AND build_id=$2 ORDER BY created_at,id",
             project_id, build_id,
         )
-        values = []
+        return [self._step(row) for row in rows]
+
+    async def list_build_steps_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[BuildStep]]:
+        grouped: dict[str, list[BuildStep]] = {build_id: [] for build_id in build_ids}
+        if not build_ids:
+            return grouped
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.build_steps
+            WHERE project_id=$1 AND build_id=ANY($2::text[])
+            ORDER BY created_at,id""",
+            project_id, build_ids,
+        )
         for row in rows:
-            item = dict(row)
-            for key in ("resolved_skills", "skill_context"):
-                if isinstance(item.get(key), str):
-                    item[key] = json.loads(item[key])
-            values.append(BuildStep(**item))
-        return values
+            grouped.setdefault(row["build_id"], []).append(self._step(row))
+        return grouped
 
     async def list_validation_results(
         self, project_id: str, build_id: str,
@@ -534,14 +644,23 @@ class PostgresVideoProjectRepository:
             f"SELECT * FROM {self.schema}.validation_results WHERE project_id=$1 AND build_id=$2 ORDER BY created_at",
             project_id, build_id,
         )
-        results = []
+        return [self._validation(row) for row in rows]
+
+    async def list_validation_results_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[ValidationResult]]:
+        grouped: dict[str, list[ValidationResult]] = {build_id: [] for build_id in build_ids}
+        if not build_ids:
+            return grouped
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.validation_results
+            WHERE project_id=$1 AND build_id=ANY($2::text[])
+            ORDER BY created_at""",
+            project_id, build_ids,
+        )
         for row in rows:
-            values = dict(row)
-            for key in ("issues", "metadata"):
-                if isinstance(values.get(key), str):
-                    values[key] = json.loads(values[key])
-            results.append(ValidationResult(**values))
-        return results
+            grouped.setdefault(row["build_id"], []).append(self._validation(row))
+        return grouped
 
     async def claim_build_step(self, project_id: str, build_id: str, step_id: str) -> BuildStep | None:
         """Admit a pending step with the same row lock used by cancellation."""
@@ -817,6 +936,22 @@ class PostgresVideoProjectRepository:
             project_id, build_id,
         )
         return [self._checkpoint(row) for row in rows]
+
+    async def list_build_checkpoints_for_builds(
+        self, project_id: str, build_ids: list[str],
+    ) -> dict[str, list[PlanCheckpoint]]:
+        grouped: dict[str, list[PlanCheckpoint]] = {build_id: [] for build_id in build_ids}
+        if not build_ids:
+            return grouped
+        rows = await self.pool.fetch(
+            f"""SELECT * FROM {self.schema}.plan_checkpoints
+            WHERE project_id=$1 AND build_id=ANY($2::text[])
+            ORDER BY created_at""",
+            project_id, build_ids,
+        )
+        for row in rows:
+            grouped.setdefault(row["build_id"], []).append(self._checkpoint(row))
+        return grouped
 
     async def list_planning_checkpoints(self) -> list[PlanCheckpoint]:
         async with self.pool.acquire() as connection:
@@ -1478,6 +1613,14 @@ class PostgresVideoProjectRepository:
             })
         return export
 
+    async def latest_event_sequence(self, project_id: str) -> int:
+        await self.get_project(project_id)
+        value = await self.pool.fetchval(
+            f"SELECT COALESCE(MAX(sequence), 0) FROM {self.schema}.project_events WHERE project_id=$1",
+            project_id,
+        )
+        return int(value or 0)
+
     async def list_events(self, project_id: str, after: int = 0) -> list[ProjectEvent]:
         await self.get_project(project_id)
         rows = await self.pool.fetch(
@@ -1672,6 +1815,22 @@ class PostgresVideoProjectRepository:
         raw = dict(row)
         values = {key: raw[key] for key in Build.model_fields if key in raw}
         return Build(**values)
+
+    @staticmethod
+    def _step(row) -> BuildStep:
+        item = dict(row)
+        for key in ("resolved_skills", "skill_context"):
+            if isinstance(item.get(key), str):
+                item[key] = json.loads(item[key])
+        return BuildStep(**item)
+
+    @staticmethod
+    def _validation(row) -> ValidationResult:
+        values = dict(row)
+        for key in ("issues", "metadata"):
+            if isinstance(values.get(key), str):
+                values[key] = json.loads(values[key])
+        return ValidationResult(**values)
 
     @staticmethod
     def _spec_revision(row) -> VideoSpecRevision:

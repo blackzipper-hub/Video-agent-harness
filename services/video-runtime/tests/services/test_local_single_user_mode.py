@@ -2,7 +2,6 @@
 import pytest
 
 from app.services.auth_service import AuthService
-from app.chat.services.auth_service import AuthService as ChatAuthService
 from app.config import settings
 from app.exceptions import BusinessException
 
@@ -46,15 +45,6 @@ async def test_invalid_token_still_raises_when_local_mode_off(auth, monkeypatch)
     monkeypatch.setattr(settings, "LOCAL_SINGLE_USER_MODE", False, raising=False)
     with pytest.raises(BusinessException):
         await auth.get_current_user(token="invalid-remote-token")
-
-
-@pytest.mark.asyncio
-async def test_chat_invalid_token_returns_default_user_in_local_mode(monkeypatch):
-    """进程内 Chat 路由也应忽略本地模式下的无效 Cookie。"""
-    monkeypatch.setenv("LOCAL_SINGLE_USER_MODE", "true")
-    monkeypatch.setenv("CUTI_SERVICE_DEFAULT_USER_ID", DEFAULT_UID)
-    uid = await ChatAuthService().get_current_user(token="invalid-remote-token")
-    assert uid == DEFAULT_UID
 
 
 @pytest.mark.asyncio

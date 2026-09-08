@@ -13,7 +13,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.services.agent.utils.prompt_utils import (
     apply_language_suffix_to_system_message_in_messages,
 )
-from app.services.agent.image.image_state_utils import _url_from_human_message
 
 
 def test_apply_language_suffix_preserves_multimodal_content_list():
@@ -37,26 +36,29 @@ def test_apply_language_suffix_preserves_multimodal_content_list():
     assert msg.content[2].get("type") == "image_url"
     assert msg.content[3].get("type") == "text"
 
-    urls = _url_from_human_message(msg)
+    urls = [
+        block["image_url"]["url"]
+        for block in msg.content
+        if block.get("type") == "image_url"
+    ]
     assert len(urls) == 2
     assert urls[0] == "https://cdn.example.com/img1.webp"
     assert urls[1] == "https://cdn.example.com/img2.webp"
 
-    # 语言要求应追加在最后一个 text 块末尾
+    # HumanMessage multimodal content must stay a list; language suffix is System-only.
     last_text = msg.content[3]["text"]
-    assert "<language_requirements>" in last_text
-    assert "zh" in last_text
+    assert "<language_requirements>" not in last_text
+    assert last_text.endswith("</batch_shots_info>")
 
 
 def test_apply_language_suffix_string_content_unchanged_behavior():
-    """content 为 str 时行为与原先一致（仍追加语言后缀）。"""
+    """HumanMessage string content is left unchanged."""
     messages = [HumanMessage(content="Generate keyframe prompts.")]
     apply_language_suffix_to_system_message_in_messages(messages, detected_language="en")
 
     assert len(messages) == 1
     assert isinstance(messages[0].content, str)
-    assert "<language_requirements>" in messages[0].content
-    assert "en" in messages[0].content
+    assert messages[0].content == "Generate keyframe prompts."
 
 
 def test_apply_language_suffix_system_message_list():

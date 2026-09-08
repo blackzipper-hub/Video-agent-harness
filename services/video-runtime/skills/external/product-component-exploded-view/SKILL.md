@@ -8,14 +8,11 @@ metadata:
   roles: [guidance, stage_supervisor]
   scope:
     type: stage
-  selectors:
+    selectors:
     capabilities:
       - atomic.video.generate
       - api.provider.generate
       - api.ark_protocol.generate
-      - shot.video.generate
-      - video.generate
-      - video_gen.generate
   hooks: [before_stage, after_stage]
   effect:
     category: product_component_visualization

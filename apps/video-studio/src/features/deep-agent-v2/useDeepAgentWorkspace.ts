@@ -123,11 +123,7 @@ export function useDeepAgentWorkspace({
     hydrateControllerRef.current = controller
     dispatch({ type: 'HYDRATING', runId })
     try {
-      const [snapshot, messages, events] = await Promise.all([
-        deepAgentV2Client.getRun(runId, controller.signal),
-        deepAgentV2Client.getMessages(runId, controller.signal),
-        deepAgentV2Client.getEventLog(runId, controller.signal),
-      ])
+      const snapshot = await deepAgentV2Client.getRun(runId, controller.signal)
       if (controller.signal.aborted || selectedRunIdRef.current !== runId) return
       persistThreadId(runId, snapshot.run.thread_id)
       setPendingThreadId(null)
@@ -138,7 +134,13 @@ export function useDeepAgentWorkspace({
         : readSequence(runId)
       cursorRef.current = hydratedSequence
       localStorage.setItem(sequenceKey(runId), String(hydratedSequence))
-      dispatch({ type: 'HYDRATE', runId, snapshot, messages, events })
+      dispatch({
+        type: 'HYDRATE',
+        runId,
+        snapshot,
+        messages: snapshot.messages ?? [],
+        events: snapshot.events ?? [],
+      })
     } catch (_error) {
       if (controller.signal.aborted) return
       dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailed') } })

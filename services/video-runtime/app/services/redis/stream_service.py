@@ -11,47 +11,39 @@ from ...utils.asyncpg_utils import utc_isoformat
 
 logger = logging.getLogger(__name__)
 
-# 从base_agent导入事件类型（实际使用的是MessageType）
-from ...services.agent.base_agent import MessageType
-from ...models.task_status import TaskStatus, BillingStatus
+from ...models.task_status import TaskStatus
 
-# Generated事件（需要持久化的里程碑事件）
-# 这些事件表示任务的重要阶段完成，需要保存到Redis Stream用于刷新后恢复
+# Milestone events persisted on Redis Stream for refresh recovery.
 GENERATED_EVENTS = {
-    # 视频代理事件
-    MessageType.STORY_OUTLINE_GENERATED.value,      # 故事大纲生成完成
-    MessageType.STORYBOARD_DETAIL_GENERATED.value,    # 详细分镜生成完成
-    MessageType.KEYFRAMES_GENERATED.value,             # 关键帧生成完成
-    MessageType.KEYFRAMES_REFLECTION_COMPLETED.value,  # 关键帧反思完成
-    MessageType.NARRATIONS_GENERATED.value,           # 旁白生成完成
-    MessageType.AUDIO_EFFECTS_GENERATED.value,       # 音效生成完成
-    MessageType.VIDEO_SEGMENTS_GENERATED.value,       # 视频片段生成完成
-    MessageType.VIDEO_SEGMENTS_ASSEMBLED.value,       # 视频片段合并完成
-    MessageType.VIDEO_COMPLETED.value,                # 视频完成
-    MessageType.CHARACTERS_DESIGNED.value,            # 角色设计完成
-    MessageType.MUSIC_GENERATED.value,                # 音乐生成完成（视频代理）
-    MessageType.SCENES_GENERATED.value,               # 场景生成完成
-    MessageType.VIDEO_LIPSYNC_COMPLETED.value,        # 唇形同步完成
-    MessageType.VIDEO_ANALYSIS.value,                 # 视频分析完成
-    MessageType.WORKFLOW_STATE.value,                 # 底部进度 path（刷新恢复）
-
-    # 其他代理事件
-    MessageType.STORY_AGENT_GENERATED.value,          # 故事代理生成完成
-    MessageType.MUSIC_AGENT_GENERATED.value,          # 音乐代理生成完成
-    MessageType.IMAGE_AGENT_GENERATED.value,          # 图像代理生成完成
-    MessageType.VIDEO_AGENT_GENERATED.value,          # 视频直生代理生成完成（结构化多视频）
+    "story_outline_generated",
+    "storyboard_detail_generated",
+    "keyframes_generated",
+    "keyframes_reflection_completed",
+    "narrations_generated",
+    "audio_effects_generated",
+    "video_segments_generated",
+    "video_segments_assembled",
+    "video_completed",
+    "characters_designed",
+    "music_generated",
+    "scenes_generated",
+    "video_lipsync_completed",
+    "video_analysis",
+    "workflow_state",
+    "story_agent_generated",
+    "music_agent_generated",
+    "image_agent_generated",
+    "video_agent_generated",
 }
 
-# Progress事件（中间状态，可跳过）
-# 这些事件是进度更新，刷新后不需要恢复，可以跳过
 PROGRESS_EVENTS = {
-    MessageType.KEYFRAME_GENERATION_PROGRESS.value,   # 关键帧生成进度
-    MessageType.KEYFRAME_REFLECTION_PROGRESS.value,   # 关键帧反思进度
-    MessageType.VIDEO_GENERATION_PROGRESS.value,      # 视频生成进度
-    MessageType.VIDEO_SEGMENTS_PROGRESS.value,        # 视频片段处理进度
-    MessageType.MUSIC_GENERATION_PROGRESS.value,      # 音乐生成进度
-    MessageType.VIDEO_LIPSYNC_PROGRESS.value,        # 唇形同步处理进度
-    MessageType.VIDEO_GEN_PROGRESS.value,            # 视频直生代理逐个视频进度
+    "keyframe_generation_progress",
+    "keyframe_reflection_progress",
+    "video_generation_progress",
+    "video_segments_progress",
+    "music_generation_progress",
+    "video_lipsync_progress",
+    "video_gen_progress",
 }
 
 
@@ -274,7 +266,7 @@ class RedisStreamService:
         await self.redis.expire(status_key, 300)
     
     async def get_task_status(self, run_id: str) -> Optional[dict]:
-        """获取任务状态（仅 Redis，无 DB 回源）。需要「先 Redis 再 DB」时请用 crud.conversation.async_get_task_status_cached。"""
+        """Get task status from Redis only."""
         status_key = f"{self.task_status_prefix}{run_id}"
         data = await self.redis.hgetall(status_key)
         

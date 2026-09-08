@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from .repository import ProjectVersionConflict
 import hashlib
 import hmac
 import json
@@ -22,6 +21,7 @@ from .api import get_runtime
 from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
+from .repository import ProjectVersionConflict, SidebarRun
 from .upload_security import sign_uploaded_file as _sign_uploaded_file
 from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
 from app.chat.utils.file_utils import process_uploaded_files
@@ -269,6 +269,9 @@ _CREATE_PROMPT_MARKER = "CUTI_VIDEO_CREATE_V1"
 _CHECKPOINT_PROMPT_MARKER = "CUTI_VIDEO_CHECKPOINT_V1"
 _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
+_LIST_RUNS_LIMIT = 50
+_LIST_PREVIEW_MAX = 500
+_UNSET = object()
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
 _UI_DEFAULTS_SEPARATOR = (
     "\n\nUI defaults (creation controls) and inputs. "
@@ -428,8 +431,8 @@ def _initial_video_build_prompt(
             "reference_asset_ids. Do not copy media URLs into VideoSpec and never invent an asset id."
         ),
         (
-            "Create a ProjectIntent containing only known goals and constraints. Do not invent "
-            "shots, captions, timing, or other details that depend on media not generated yet."
+            "Create a ProjectIntent containing only known goals and constraints. "
+            "Shots, captions, and timing wait for media that does not exist yet."
             if staged else
             "Turn the visible user request and creation controls into one complete, valid VideoSpec."
         ),
@@ -582,6 +585,83 @@ def _status(events: list[dict[str, Any]]) -> str:
     return "completed"
 
 
+def _status_from_build(status: str | None) -> str:
+    return {
+        "queued": "running",
+        "running": "running",
+        "waiting_agent": "running",
+        "waiting_external": "waiting_external",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }.get(status or "", "planning")
+
+
+def _decode_run_context(encoded: str | None) -> dict[str, Any]:
+    if not encoded:
+        return {}
+    try:
+        parsed = json.loads(encoded)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _list_preview(result: dict[str, Any]) -> dict[str, str]:
+    return {
+        "last_response": str(result.get("last_response") or "")[:_LIST_PREVIEW_MAX],
+        "status": str(result.get("status") or "planning"),
+        "objective": str(result.get("objective") or "")[:_LIST_PREVIEW_MAX],
+    }
+
+
+async def _persist_list_preview(
+    runtime: VideoBuildRuntime,
+    project_id: str,
+    context: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    preview = _list_preview(result)
+    if context.get("list_preview") == preview:
+        return
+    updated = {**context, "list_preview": preview}
+    await runtime.repo.replace_operation_result(
+        project_id,
+        _RUN_CONTEXT_OPERATION,
+        _RUN_CONTEXT_KEY,
+        json.dumps(updated, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _run_from_sidebar(row: SidebarRun) -> dict[str, Any]:
+    context = _decode_run_context(row.context_json)
+    preview = context.get("list_preview") if isinstance(context.get("list_preview"), dict) else {}
+    language_values = context.get("language_contract") if isinstance(context.get("language_contract"), dict) else {}
+    output_language = normalize_output_language(
+        str(language_values.get("content_language") or "")
+    ) or "en"
+    status = str(preview.get("status") or "") or _status_from_build(row.latest_build_status)
+    return {
+        "id": row.project.id,
+        "thread_id": row.session_id,
+        "project_id": row.project.id,
+        "title": row.project.title,
+        "objective": str(preview.get("objective") or row.project.title),
+        "status": status,
+        "current_revision": 0,
+        "last_response": str(preview.get("last_response") or ""),
+        "output_language": output_language,
+        "language_contract": language_values or None,
+        "user_option": context.get("user_option"),
+        "input_files": context.get("input_files", []),
+        "workflow_id": context.get("workflow_id"),
+        "activated_skill_ids": context.get("activated_skill_ids", []),
+        "skill_locks": [],
+        "created_at": row.project.created_at.isoformat(),
+        "updated_at": row.project.updated_at.isoformat(),
+    }
+
+
 def _messages(project_id: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     for event in events:
@@ -653,6 +733,9 @@ async def _run_with_context(
     project,
     session_id: str,
     events: list[dict[str, Any]],
+    *,
+    persist_preview: bool = True,
+    latest_build_status: Any = _UNSET,
 ) -> dict[str, Any]:
     context = await _load_run_context(runtime, project.id)
     result = _run(project, session_id, events, context)
@@ -666,11 +749,15 @@ async def _run_with_context(
     ), None)
     if locked_workflow:
         result["workflow_id"] = locked_workflow
-    builds = await runtime.repo.list_builds(project.id)
-    if builds:
-        latest = max(builds, key=lambda item: item.created_at)
-        if latest.status == "cancelled":
-            result["status"] = "cancelled"
+    if latest_build_status is _UNSET:
+        builds = await runtime.repo.list_builds(project.id)
+        latest_build_status = (
+            max(builds, key=lambda item: item.created_at).status if builds else None
+        )
+    if latest_build_status == "cancelled":
+        result["status"] = "cancelled"
+    if persist_preview:
+        await _persist_list_preview(runtime, project.id, context, result)
     return result
 
 
@@ -782,19 +869,24 @@ async def _snapshot(
     session_id: str,
 ) -> dict[str, Any]:
     project = await runtime.repo.get_project(project.id)
-    events = await _history(dsh, session_id)
-    artifacts = await runtime.repo.current_artifacts(project.id)
-    version = await runtime.repo.get_project_version(project.current_version_id)
+    events, artifacts, version, builds = await asyncio.gather(
+        _history(dsh, session_id),
+        runtime.repo.current_artifacts(project.id),
+        runtime.repo.get_project_version(project.current_version_id),
+        runtime.repo.list_builds(project.id),
+    )
     messages = _messages(project.id, events)
-    builds = await runtime.repo.list_builds(project.id)
     runtime_tasks: list[dict[str, Any]] = []
     status_map = {
         "pending": "ready", "completed": "succeeded",
         "running": "running", "waiting_external": "waiting_external",
         "failed": "failed", "cancelled": "cancelled",
     }
+    steps_by_build = await runtime.repo.list_build_steps_for_builds(
+        project.id, [item.id for item in builds[:3]],
+    )
     for build in builds[:3]:
-        for step in await runtime.repo.list_build_steps(project.id, build.id):
+        for step in steps_by_build.get(build.id, []):
             runtime_tasks.append({
                 "id": step.id,
                 "run_id": project.id,
@@ -818,8 +910,12 @@ async def _snapshot(
                     item.model_dump(mode="json") for item in step.resolved_skills
                 ],
             })
+    latest_build_status = builds[0].status if builds else None
     return {
-        "run": await _run_with_context(runtime, project, session_id, events),
+        "run": await _run_with_context(
+            runtime, project, session_id, events,
+            latest_build_status=latest_build_status,
+        ),
         "revisions": [],
         "tasks": runtime_tasks,
         "artifacts": [{
@@ -835,6 +931,10 @@ async def _snapshot(
             "updated_at": project.updated_at.isoformat(),
         } for item in artifacts if version.selections.get(item.artifact_id) == item.id],
         "messages": messages,
+        "events": [
+            mapped for item in events
+            if (mapped := _compat_event(project.id, item)) is not None
+        ],
         "last_event_sequence": max((item.get("seq", -1) + 1 for item in events), default=0),
     }
 
@@ -923,23 +1023,11 @@ async def create_run(
 async def list_runs(
     user_id: Annotated[str, Depends(identity)],
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
-    dsh: Annotated[DeepSeekHarnessClient, Depends(get_deepseek_client)],
 ) -> dict[str, Any]:
-    rows = []
-    for project in await runtime.repo.list_projects(user_id):
-        try:
-            binding = await runtime.repo.latest_session_binding(project.id, user_id)
-        except LookupError:
-            continue
-        try:
-            history = await _history(dsh, binding.session_id)
-        except HTTPException as exc:
-            if exc.status_code != 502 or "session-not-found" not in str(exc.detail):
-                raise
-            history = []
-        rows.append(await _run_with_context(
-            runtime, project, binding.session_id, history,
-        ))
+    rows = [
+        _run_from_sidebar(item)
+        for item in await runtime.repo.list_sidebar_runs(user_id, limit=_LIST_RUNS_LIMIT)
+    ]
     return success(rows)
 
 

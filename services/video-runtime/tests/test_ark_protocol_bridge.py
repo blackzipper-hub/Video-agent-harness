@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.chat.v2.ark_protocol_bridge import (
+from app.integrations.providers.ark_protocol_bridge import (
     ark_create_body_to_profile,
     should_enable_ark_http_bridge,
     wavespeed_result_to_ark_status,
@@ -74,7 +74,7 @@ def test_protocol_bridge_skill_registers():
 
 @pytest.mark.asyncio
 async def test_create_and_get_ark_task_uses_mocked_wavespeed(monkeypatch):
-    from app.chat.v2 import ark_protocol_bridge as bridge
+    from app.integrations.providers import ark_protocol_bridge as bridge
 
     async def fake_generate(profile, fallbacks_json=None):
         assert profile["provider"] == "wavespeed"

@@ -40,7 +40,6 @@ metadata:
       - api.ark_protocol.generate
       - media.concat
       - media.extract_frame
-      - open_montage.tool.invoke
       - media.audio_analyze
       - media.audio_cut
       - media.mix_audio

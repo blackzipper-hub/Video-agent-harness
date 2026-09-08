@@ -68,7 +68,7 @@ async def test_real_video_tool_execution_first_gpt_ainvoke_mock_400_then_real_op
         pytest.skip("OPENAI_API_KEY")
 
     mod = _load_matrix_helpers()
-    entry = PROMPTS_CONFIG[PromptName.VIDEO_VIDEO_GENERATION_TOOL_EXECUTION]
+    entry = PROMPTS_CONFIG[PromptName.VIDEO_CONSISTENCY_CHECK]
 
     system_text = await mod._system_text_from_tool_template(
         "video/video_generation/video_video_generation_tool_execution",
@@ -130,7 +130,7 @@ async def test_real_video_tool_execution_gpt_always_bad_request_then_gemini3(dev
         pytest.skip("GOOGLE_API_KEY")
 
     mod = _load_matrix_helpers()
-    entry = PROMPTS_CONFIG[PromptName.VIDEO_VIDEO_GENERATION_TOOL_EXECUTION]
+    entry = PROMPTS_CONFIG[PromptName.VIDEO_CONSISTENCY_CHECK]
 
     system_text = await mod._system_text_from_tool_template(
         "video/video_generation/video_video_generation_tool_execution",

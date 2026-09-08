@@ -254,7 +254,7 @@ async def process_uploaded_files(files: List) -> tuple:
     """
     处理上传的文件，上传到 S3 并返回结构化对象列表（与 Cuti-VideoAgent 一致）。
     """
-    from app.chat.models.video_state import AudioFileUserInput, ImageUserInput, VideoFileUserInput
+    from app.models.video_state import AudioFileUserInput, ImageUserInput, VideoFileUserInput
     from app.chat.utils.s3_utils import s3_utils
 
     images = []

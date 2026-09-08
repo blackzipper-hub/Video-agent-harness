@@ -750,7 +750,17 @@ export function DeepAgentArtifacts({
     setRuntimeWorkspace(null)
     setWorkspaceLoading(true)
     let active = true
+    let inFlight = false
+    let queued = false
+    let debounceTimer: number | undefined
     const load = async () => {
+      if (!active) return
+      if (inFlight) {
+        queued = true
+        return
+      }
+      inFlight = true
+      setWorkspaceLoading(true)
       try {
         const next = await videoRuntimeClient.workspace(projectId)
         if (active) {
@@ -762,12 +772,22 @@ export function DeepAgentArtifacts({
           setWorkspaceError(tRef.current('da.runtime.requestFailed'))
         }
       } finally {
+        inFlight = false
         if (active) setWorkspaceLoading(false)
+        if (active && queued) {
+          queued = false
+          void load()
+        }
       }
     }
+    const scheduleLoad = () => {
+      window.clearTimeout(debounceTimer)
+      debounceTimer = window.setTimeout(() => void load(), 400)
+    }
     void load()
-    const events = new EventSource(`/api/video/projects/${encodeURIComponent(projectId)}/events`)
-    const refreshFromEvent = () => void load()
+    const events = new EventSource(
+      `/api/video/projects/${encodeURIComponent(projectId)}/events?tail=1`,
+    )
     const eventNames = [
       'build.queued', 'build.status', 'build.step_status', 'artifact.committed',
       'artifact.selected', 'project.version_committed', 'project.version_restored',
@@ -775,12 +795,13 @@ export function DeepAgentArtifacts({
       'build.checkpoint.planning', 'build.checkpoint.resolved', 'build.checkpoint.failed',
       'video_spec.revised', 'plan.revised',
     ]
-    eventNames.forEach(name => events.addEventListener(name, refreshFromEvent))
+    eventNames.forEach(name => events.addEventListener(name, scheduleLoad))
     const interval = window.setInterval(() => void load(), 10000)
     return () => {
       active = false
+      window.clearTimeout(debounceTimer)
       window.clearInterval(interval)
-      eventNames.forEach(name => events.removeEventListener(name, refreshFromEvent))
+      eventNames.forEach(name => events.removeEventListener(name, scheduleLoad))
       events.close()
     }
   }, [projectId])

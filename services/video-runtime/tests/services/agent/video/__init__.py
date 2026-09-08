@@ -1,1 +1,0 @@
-# Video agent services tests

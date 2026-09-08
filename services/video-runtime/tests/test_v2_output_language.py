@@ -12,11 +12,6 @@ from app.chat.v2.language import (
     video_language_instruction,
 )
 import pytest
-from app.chat.v2.models import AgentRun, PlannedTask, RunSnapshot
-from app.orchestration.context import ContextAssembler
-from app.capabilities.models import CapabilityRegistry
-from app.chat.v2.models import PlanPatch
-from app.orchestration.task_runtime.harness import DynamicHarness
 from app.chat.v2.skill_catalog import SkillCatalog
 
 
@@ -127,44 +122,3 @@ def test_language_skills_are_discoverable_as_run_scoped_skills():
     discovered = {item.name: item for item in catalog.discover()}
     assert discovered["language-zh"].metadata["scope"]["type"] == "run"
     assert discovered["language-en"].metadata["scope"]["type"] == "run"
-
-
-def test_context_assembler_injects_chinese_output_contract():
-    run = AgentRun(
-        thread_id="thread-1",
-        project_id="project-1",
-        user_id="user-1",
-        objective="生成广告",
-        idempotency_key="request-1",
-        output_language="zh",
-    )
-    context = ContextAssembler().assemble(RunSnapshot(run=run))
-    assert "Simplified Chinese" in context
-
-
-def test_harness_adds_language_contract_when_stage_has_no_matching_skill():
-    run = AgentRun(
-        thread_id="thread-1",
-        project_id="project-1",
-        user_id="user-1",
-        objective="生成字幕",
-        idempotency_key="request-1",
-        output_language="zh",
-    )
-    class EmptyResolver:
-        def resolve(self, _request):
-            return None
-
-    harness = DynamicHarness.__new__(DynamicHarness)
-    harness.capabilities = CapabilityRegistry()
-    harness.skill_resolver = EmptyResolver()
-    patch = harness._resolve_stage_skills(
-        run,
-        PlanPatch(add_tasks=[
-            PlannedTask(capability_id="subtitle.compose", objective="Compose captions")
-        ]),
-    )
-    context = patch.add_tasks[0].skill_context
-    assert context is not None
-    assert context.applied_skills == []
-    assert context.instructions == output_language_instruction("zh")

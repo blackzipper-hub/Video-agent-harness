@@ -9,9 +9,8 @@ import pytest
 
 from app.capabilities.models import CapabilityRegistry
 from app.chat.v2.capability_loader import build_registry
-from app.chat.v2.executors import CapabilityExecutor
 from app.chat.v2.host_gateway import HostGateway, HostGatewayError
-from app.chat.v2.models import AgentRun, ArtifactVersion, Task
+from app.chat.v2.models import ArtifactVersion
 from app.chat.v2.mv_audio import (
     reference_clips_for_cut,
 )
@@ -366,167 +365,6 @@ async def test_mix_requires_both_urls():
         await HostGateway().media_mix_audio({"video_url": "http://x/v.mp4"})
 
 
-# ─── executor local.service wiring ───────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_executor_audio_analyze_from_selected_music(monkeypatch):
-    async def _info(_url):
-        return {"duration": 162.0}
-
-    monkeypatch.setattr("app.utils.media_service_client.audio_info", _info)
-    transcribe_calls, _ = _patch_v1_listen(monkeypatch)
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="analyze",
-        capability_id="media.audio_analyze", objective="analyze",
-        parameters={"target_duration_sec": 30},
-    )
-    music = ArtifactVersion(
-        id=str(uuid4()),
-        artifact_id=str(uuid4()),
-        project_id="p",
-        type="music",
-        version=1,
-        produced_by_task_id="t-music",
-        title="song",
-        summary="",
-        uri="http://localhost/files/song.mp3",
-        metadata={"lyrics": "倒数三秒灯光熄灭", "clip_id": "clip-from-suno"},
-    )
-    result = await executor._run_local_service(
-        run, task, [music], "idem-analyze",
-        registry.get("media.audio_analyze"),
-    )
-    assert result.status == "completed"
-    assert transcribe_calls[0]["suno_clip_id"] == "clip-from-suno"
-    assert transcribe_calls[0]["generated_lyrics"] == "倒数三秒灯光熄灭"
-    assert result.artifact["metadata"]["smart_clip"]["recommended"]["start_sec"] == pytest.approx(32.46)
-    assert "master" not in result.artifact["metadata"]
-
-
-@pytest.mark.asyncio
-async def test_executor_audio_cut_from_parameters(monkeypatch):
-    async def _trim(audio_url, start, duration, run_id):
-        assert start == 15.0
-        assert duration == 15.0
-        return {"result_url": "http://localhost/files/seg.mp3"}
-
-    monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="cut",
-        capability_id="media.audio_cut", objective="cut",
-        parameters={
-            "audio_url": "http://localhost/files/song.mp3",
-            "start_sec": 15,
-            "duration": 15,
-        },
-    )
-    result = await executor._run_local_service(
-        run, task, [], "idem-cut",
-        registry.get("media.audio_cut"),
-    )
-    assert result.artifact["uri"].endswith("seg.mp3")
-
-
-@pytest.mark.asyncio
-async def test_executor_audio_cut_forwards_director_segments(monkeypatch):
-    calls = []
-
-    async def _trim(audio_url, start, duration, run_id):
-        calls.append((start, duration))
-        return {"result_url": f"http://localhost/files/seg_{len(calls)}.mp3"}
-
-    monkeypatch.setattr("app.utils.media_service_client.audio_trim", _trim)
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="cut",
-        capability_id="media.audio_cut", objective="cut",
-        parameters={
-            "audio_url": "http://localhost/files/song.mp3",
-            "start_sec": 0,
-            "duration": 30,
-            "segments": [
-                {"start_sec": 0, "duration": 8},
-                {"start_sec": 8, "duration": 15},
-                {"start_sec": 23, "duration": 7},
-            ],
-        },
-    )
-    result = await executor._run_local_service(
-        run, task, [], "idem-cut-segs",
-        registry.get("media.audio_cut"),
-    )
-    assert calls == [(0.0, 30.0), (0.0, 8.0), (8.0, 15.0), (23.0, 7.0)]
-    assert [s["duration_sec"] for s in result.artifact["metadata"]["segments"]] == [
-        8.0, 15.0, 7.0,
-    ]
-
-
-@pytest.mark.asyncio
-async def test_executor_audio_cut_requires_audio_url():
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="cut",
-        capability_id="media.audio_cut", objective="cut",
-        parameters={"start_sec": 0, "duration": 10},
-    )
-    with pytest.raises(ValueError, match="audio_url"):
-        await executor._run_local_service(
-            run, task, [], "idem",
-            registry.get("media.audio_cut"),
-        )
-
-
-@pytest.mark.asyncio
-async def test_executor_mix_audio_from_selected_artifacts(monkeypatch):
-    async def _add(video_url, audio_segments, run_id):
-        assert video_url.endswith("clip.mp4")
-        assert audio_segments[0]["audio_url"].endswith("song.mp3")
-        return {"result_url": "http://localhost/files/final.mp4"}
-
-    monkeypatch.setattr("app.utils.media_service_client.video_add_audio", _add)
-    registry = build_registry(include_platform=True)
-    executor = CapabilityExecutor(object(), registry)
-    run = AgentRun(
-        thread_id="t1", project_id="p1", user_id="u1",
-        objective="mv", idempotency_key="k1",
-    )
-    task = Task(
-        run_id=run.id, revision=1, client_key="mix",
-        capability_id="media.mix_audio", objective="mix",
-        parameters={"mode": "replace"},
-    )
-    result = await executor._run_local_service(
-        run, task, [_video(), _music()], "idem-mix",
-        registry.get("media.mix_audio"),
-    )
-    assert result.artifact["uri"].endswith("final.mp4")
-    assert result.artifact["metadata"]["mode"] == "replace"
-
-
-@pytest.mark.asyncio
 async def test_executor_analyze_cut_mix_pipeline(monkeypatch):
     """Simulate MV spine: analyze → one cut → mix master."""
     async def _info(_url):
@@ -574,81 +412,6 @@ async def test_executor_analyze_cut_mix_pipeline(monkeypatch):
     assert final["uri"].endswith("mv-final.mp4")
     assert len(trims) == cut["segment_count"] + 1
     assert sum(d for _, d in trims[1:]) == pytest.approx(30.0)
-
-
-# ─── artifact audio collection ───────────────────────────────────────────────
-
-
-def test_collect_audio_from_extension_when_type_generic():
-    selected = [
-        ArtifactVersion(
-            id="1", artifact_id="a", project_id="p", type="file", version=1,
-            produced_by_task_id="t", title="x", summary="",
-            uri="http://localhost/files/track.wav", metadata={},
-        )
-    ]
-    assert CapabilityExecutor._collect_artifact_audio_url(selected).endswith(".wav")
-
-
-def test_collect_audio_from_metadata_music_url():
-    selected = [
-        ArtifactVersion(
-            id="1", artifact_id="a", project_id="p", type="music", version=1,
-            produced_by_task_id="t", title="x", summary="",
-            uri="", metadata={"music_url": "http://localhost/files/meta.mp3"},
-        )
-    ]
-    assert CapabilityExecutor._collect_artifact_audio_url(selected).endswith("meta.mp3")
-
-
-def test_collect_audio_returns_none_for_video_only():
-    assert CapabilityExecutor._collect_artifact_audio_url([_video()]) is None
-
-
-def test_collect_audiomap_ignores_audio_cut():
-    cut = ArtifactVersion(
-        id="v-cut", artifact_id="a", project_id="p", type="audio_cut", version=1,
-        produced_by_task_id="t-cut", title="cut", summary="",
-        uri="http://localhost/files/master.mp3",
-        metadata={
-            "master": {"audio_url": "http://localhost/files/master.mp3"},
-            "segments": [{"audio_url": "http://localhost/files/seg.mp3"}],
-        },
-    )
-    audiomap = ArtifactVersion(
-        id="v-map", artifact_id="b", project_id="p", type="audiomap", version=1,
-        produced_by_task_id="t-map", title="map", summary="",
-        uri="http://localhost/files/song.mp3",
-        metadata={"smart_clip": {"recommended": {"start_sec": 12.0}}, "sections": []},
-    )
-    found = CapabilityExecutor._collect_artifact_audiomap([cut, audiomap])
-    assert found is not None
-    assert found["smart_clip"]["recommended"]["start_sec"] == pytest.approx(12.0)
-    assert CapabilityExecutor._collect_artifact_audiomap([cut]) is None
-
-
-def test_collect_mix_prefers_audio_cut_master_over_music():
-    music = _music("http://localhost/files/full-song.mp3")
-    cut = ArtifactVersion(
-        id="v-cut", artifact_id="a", project_id="p", type="audio_cut", version=1,
-        produced_by_task_id="t-cut", title="cut", summary="",
-        uri="http://localhost/files/full-song.mp3",
-        metadata={
-            "master": {"audio_url": "http://localhost/files/master-window.mp3"},
-        },
-    )
-    url = CapabilityExecutor._collect_artifact_audio_url(
-        [music, cut], prefer_cut=True,
-    )
-    assert url.endswith("master-window.mp3")
-
-
-def test_analyze_and_cut_have_distinct_output_types():
-    registry = build_registry(include_platform=True)
-    assert registry.get("media.audio_analyze").output_type == "audiomap"
-    assert registry.get("media.audio_cut").output_type == "audio_cut"
-    assert "audio_cut" in registry.get("api.provider.generate").inputs.optional
-    assert "music" in registry.get("api.provider.generate").inputs.optional
 
 
 # ─── skill / workflow / registry ─────────────────────────────────────────────
@@ -722,7 +485,7 @@ def test_mv_skill_files_and_workflow_contract():
     assert "suno.generate" in (spec.allowed_capabilities or ())
     assert "atomic.music.generate" not in spec.pipeline
     assert "atomic.music.generate" not in (spec.allowed_capabilities or ())
-    assert "open_montage.tool.invoke" in (spec.allowed_capabilities or ())
+    assert "open_montage.tool.invoke" not in (spec.allowed_capabilities or ())
     assert "media.extract_frame" in (spec.allowed_capabilities or ())
     assert "api.ark_protocol.generate" in (spec.allowed_capabilities or ())
     for cap in (
