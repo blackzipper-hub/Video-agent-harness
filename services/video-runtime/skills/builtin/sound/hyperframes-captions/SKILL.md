@@ -5,7 +5,7 @@ description: 成片上叠词和标题。转写后由你写 HyperFrames HTML，�
 
 # HyperFrames Captions
 
-成片已经有了。你要做的是**在画面上叠字**：唱词、对白、标题、花字。不是另做一条片子，也不要只填一个 style 名字让服务去灌词。
+成片已经有了。你要做的是**在画面上叠字**：唱词、对白、标题、花字。不是另做一条片子。
 
 **你不是模板填充器。** 字长什么样由你写进 HTML。判断就是流程。
 
@@ -33,4 +33,4 @@ description: 成片上叠词和标题。转写后由你写 HyperFrames HTML，�
 2. 字是给人读的，不要把主体挡到看不清。
 3. registry 里的 `caption-*` 是起点，打开再改。海报级大字（一层 200px 背景词）不要原样灌整段歌词。
 4. 缺 Node / Chrome / GSAP / CLI 就把报错原样端上来，不要偷偷改成静态字幕。
-5. 必须写出完整 HTML 放进 `caption_html`。不要只报一个 registry 组件名让服务灌词。
+5. 必须写出完整 HTML 放进 `caption_html`。

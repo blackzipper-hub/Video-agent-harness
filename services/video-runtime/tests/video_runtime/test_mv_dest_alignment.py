@@ -113,7 +113,7 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id["mixed-video"].parameters["mode"], "replace")
         self.assertEqual(by_id["transcription"].capability, "media.transcribe")
         self.assertEqual(by_id["final-video"].capability, "media.hyperframes_caption")
-        self.assertEqual(by_id["final-video"].parameters["style"], "caption-highlight")
+        self.assertNotIn("style", by_id["final-video"].parameters)
 
     async def test_look_generate_uses_uploaded_identity(self) -> None:
         identity = MediaArtifactVersion(
@@ -161,7 +161,7 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             ["character-hero-reference", "source-1"],
         )
 
-    async def test_captions_keep_original_style_path_and_allow_html_override(self) -> None:
+    async def test_captions_pass_through_caption_html(self) -> None:
         spec = VideoSpec.model_validate({
             "title": "dest mv captions",
             "target_duration_seconds": 5,
@@ -193,12 +193,9 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
             by_id["final-video"].parameters["caption_html"],
             "<!doctype html><html></html>",
         )
-        self.assertEqual(
-            by_id["final-video"].parameters["style"],
-            "caption-highlight",
-        )
+        self.assertNotIn("style", by_id["final-video"].parameters)
 
-    async def test_captions_do_not_require_html(self) -> None:
+    async def test_compiler_caption_step_does_not_invent_style(self) -> None:
         spec = VideoSpec.model_validate({
             "title": "dest mv original captions",
             "target_duration_seconds": 5,
@@ -223,7 +220,7 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
         by_id = {item.step_id: item for item in plan.items}
         self.assertEqual(by_id["transcription"].capability, "media.transcribe")
         self.assertEqual(by_id["final-video"].capability, "media.hyperframes_caption")
-        self.assertEqual(by_id["final-video"].parameters["style"], "caption-highlight")
+        self.assertNotIn("style", by_id["final-video"].parameters)
         self.assertNotIn("caption_html", by_id["final-video"].parameters)
 
     async def test_dest_tool_fields_land_on_the_matching_step(self) -> None:

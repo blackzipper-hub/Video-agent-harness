@@ -40,6 +40,8 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: dshm
+              mountPath: /dev/shm
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}
@@ -64,3 +66,7 @@ spec:
         - name: workspace
           emptyDir:
             sizeLimit: {{ .Values.workspace.sizeLimit }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.shm.sizeLimit | default "2Gi" }}

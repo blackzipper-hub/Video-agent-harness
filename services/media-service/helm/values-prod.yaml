@@ -39,6 +39,10 @@ env:
   WORKSPACE_TTL_HOURS: "2"
   AWS_REGION: ap-southeast-2
   WATERMARK_IMAGE_PATH: assets/watermark.png
+  HYPERFRAMES_CLI: /opt/hyperframes/node_modules/.bin/hyperframes
+  HYPERFRAMES_NODE_BIN: /usr/local/bin
+  HYPERFRAMES_CJK_FONT: /usr/share/fonts/truetype/cuti/NotoSansSC-VF.ttf
+  HYPERFRAMES_DOCKER: "false"
 
 nodeSelector:
   workload: media-processing

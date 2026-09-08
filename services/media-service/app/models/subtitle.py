@@ -65,40 +65,22 @@ class OverlayLayer(BaseModel):
         return self
 
 
-HYPERFRAMES_CAPTION_STYLES = Literal[
-    "caption-highlight",
-    "caption-pill-karaoke",
-    "caption-editorial-emphasis",
-    "caption-glitch-rgb",
-    "caption-kinetic-slam",
-    "caption-neon-glow",
-    "caption-neon-accent",
-    "caption-clip-wipe",
-    "caption-gradient-fill",
-    "caption-matrix-decode",
-    "caption-emoji-pop",
-    "caption-parallax-layers",
-    "caption-particle-burst",
-    "caption-texture",
-    "caption-weight-shift",
-]
-
-
 class HyperframesCaptionRequest(RunIdMixin):
     video_url: str
     words: list[dict] = Field(default_factory=list)
     cues: list[dict] = Field(default_factory=list)
-    # Intent-level contract used by Cuti workflows. The media adapter turns this
-    # style plus transcript timing into renderable composition HTML. Advanced
-    # agents may still provide authored HTML to override the generated caption
-    # composition.
-    style: HYPERFRAMES_CAPTION_STYLES = "caption-highlight"
     accent_color: str = Field(default="#ff1745", pattern=r"^#[0-9A-Fa-f]{6}$")
     position: Literal["bottom-safe", "lower-middle", "center"] = "bottom-safe"
     playbook: Optional[str] = Field(default=None, max_length=80)
     layers: list[OverlayLayer] = Field(default_factory=list, max_length=12)
     caption_html: Optional[str] = Field(default=None, max_length=500_000)
     composition_html: Optional[str] = Field(default=None, max_length=500_000)
+
+    @model_validator(mode="after")
+    def require_authored_html(self):
+        if not (self.caption_html or "").strip() and not (self.composition_html or "").strip():
+            raise ValueError("caption_html or composition_html is required")
+        return self
 
 
 class HyperframesCaptionResponse(MediaResult):
