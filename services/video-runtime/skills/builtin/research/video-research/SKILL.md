@@ -74,11 +74,11 @@ Extract before searching — searching without this produces generic results:
 - **Platform**: Where will this live?
 - **Duration hint**: Short (15-30s), medium (30-90s), long (90s+)?
 - **Delivery shape**: What kind of finished piece this is, from the brief.
-- **Locked elements**: anything already committed — a song, a named subject, a
-  product, a script, the person or animal on screen, the person who sings. These are brief
-  facts. References must work *with* them, not against them. If the brief only says
-  "based on the image" and does not name what is visible, stop; this capability
-  cannot see pixels. Get visible facts first, then search.
+- **Locked elements**: anything already committed — a song, a subject, a
+  product, a script, what is on screen. These are brief facts. References
+  must work *with* them, not against them. This capability searches from text
+  only; it cannot see pixels. If media is in the brief but unnamed, write the
+  visible facts first, then search.
 
 ### Step 2: Visual reference mining
 
@@ -246,8 +246,8 @@ and do not pick the winner yourself unless the user asks you to.
   account for still-led approaches rather than ignoring the constraint.
 - **Skipping audio** — video lives and dies by sound. A mood board with no sound
   direction is incomplete, even when the track is already chosen.
-- **Fighting the locked elements** — a direction that works against the user's song,
-  character, product, or the person already in the brief is not a direction.
+- **Fighting the locked elements** — a direction that works against what the
+  brief already committed is not a direction.
 - **Researching past the point of use** — stop once 3 directions are grounded.
 
 ## Never
@@ -259,4 +259,4 @@ and do not pick the winner yourself unless the user asks you to.
 - Propose a direction needing footage or capability the user lacks without saying so
 - Schedule generation tasks or pick the winning direction unasked
 - Invent a URL, title, or play count to fill a slot
-- Treat "based on the uploaded image" as a subject; name the locked visible facts first
+- Search without a named subject; write the locked facts first

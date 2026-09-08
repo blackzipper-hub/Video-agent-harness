@@ -8,8 +8,9 @@ def provider_capabilities() -> list[CapabilityManifest]:
         CapabilityManifest(
             id="api.provider.generate",
             description=(
-                "Generate video. Set model to minimax-h3 (MV H3) or "
-                "doubao-seedance-2-0 / seedance-2.5. Do not put MiniMax or H3 in provider."
+                "Generate video. Set model to the generator id "
+                "(minimax-h3, doubao-seedance-2-0, seedance-2.5). "
+                "provider is the HTTP backend and may be omitted."
             ),
             executor="local.service",
             service_target="api_provider_generate",
@@ -33,17 +34,16 @@ def provider_capabilities() -> list[CapabilityManifest]:
                             "seedance-2.0",
                         ],
                         "description": (
-                            "Which generator. MV H3: minimax-h3 (also h3). "
-                            "Seedance: doubao-seedance-2-0 or seedance-2.5. "
-                            "Not a vendor brand name."
+                            "Generator id. H3: minimax-h3 (also h3). "
+                            "Seedance: doubao-seedance-2-0 or seedance-2.5."
                         ),
                     },
                     "provider": {
                         "type": "string",
                         "enum": ["wavespeed", "ark"],
                         "description": (
-                            "HTTP backend only. Omit this. Do not put MiniMax, H3, "
-                            "Hailuo, or Seedance here — those go in model."
+                            "HTTP backend. Optional. Enum: wavespeed, ark. "
+                            "Generator ids belong in model."
                         ),
                     },
                     "duration": {"type": "integer"},
@@ -54,8 +54,8 @@ def provider_capabilities() -> list[CapabilityManifest]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Identity and setting references. Include uploaded sources "
-                            "that lock identity, not only a generated sheet."
+                            "References for this shot. Include sources that lock the "
+                            "subject, plus setting sheets this shot uses."
                         ),
                     },
                     "videos": {"type": "array", "items": {"type": "string"}},

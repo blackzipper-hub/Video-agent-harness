@@ -452,9 +452,11 @@ def test_mv_skill_files_and_workflow_contract():
     # length: cut from 0 when it is close, smart_clip.recommended when it is not.
     assert "audio_duration_sec" in text
     assert "smart_clip.recommended" in text
-    # Cast is a brief contract: on-screen person and sung voice are locked once.
+    # Cast locks what is visible once; sung voice follows that lock.
     assert "## 班子" in text
-    assert "画面上的人" in text
+    assert "身份" in text
+    assert "reference_from_steps" in text
+    assert "depends_on" in text
     assert "唱的人" in text
     assert "vocal_gender" in text
     assert "tags" in text

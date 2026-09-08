@@ -5,7 +5,7 @@ description: >-
   触发词：H3、Hailuo H3、minimax-h3、$h3.
 metadata:
   kind: instruction
-  version: "1.3.0"
+  version: "1.3.1"
   short-description: MiniMax H3 generate contract
 ---
 
@@ -15,7 +15,7 @@ metadata:
 
 ## 调用
 
-- `images`：必填。这一镜用得上的身份/场/物参考。有用户上传的源、又要锁住源里的主体，源和设定图都带上；不要只给定妆一张。上一镜的画面如果要用，当参考，不是开场锁帧。`depends_on` 只排队，不代替 `images` / `reference_from_steps`。
+- `images`：必填。这一镜要送进模型的参考。上一镜的画面如果要用，当参考，不是开场锁帧。`depends_on` 只排队。
 - `audios`：该段 2–15s 参考音频。不能只给音频
 - `duration`：4–15 **整数秒**
 - `resolution`：`768p` 或 `2k`（不要写 1080p）
@@ -24,4 +24,4 @@ metadata:
 ## Never
 
 - 只传音频不传图
-- 有上传源要锁身份时，只传生成设定图、丢掉源
+- 这一镜要用的参考还在，却不放进 `images`
