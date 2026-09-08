@@ -196,6 +196,39 @@ def _bind_shared_video_references(
         item.depends_on = list(dict.fromkeys([*item.depends_on, *dependency_refs]))
 
 
+def uploaded_source_must_be_declared(item: RebuildPlanItem) -> None:
+    """Reject image tasks that depend on an upload but never declare it as media.
+
+    ``depends_on`` only orders the DAG. Identity sheets must pass the source
+    through ``reference_from_steps`` or ``images``; otherwise the provider can
+    run as text-to-image while the prompt still says "keep the subject".
+    """
+    if item.action != "create" or item.capability != "atomic.image.generate":
+        return
+    source_deps = [
+        str(dep) for dep in item.depends_on if str(dep).startswith("source-")
+    ]
+    if not source_deps:
+        return
+    params = item.parameters if isinstance(item.parameters, dict) else {}
+    declared: list[str] = []
+    for key in (
+        "reference_from_steps", "character_reference_from_steps",
+        "images", "image_urls", "reference_images",
+    ):
+        value = params.get(key)
+        if isinstance(value, list):
+            declared.extend(str(entry) for entry in value if entry)
+        elif isinstance(value, str) and value.strip():
+            declared.append(value.strip())
+    if not declared:
+        raise ValueError(
+            f"PlanPatch task {item.step_id} depends on uploaded source media but "
+            "did not set reference_from_steps or images; depends_on only schedules "
+            "the task"
+        )
+
+
 def _bounded_checkpoint_value(value: Any, *, limit: int = 16_000) -> Any:
     """Keep planner inputs useful while preventing an Artifact from flooding a prompt."""
     encoded = json.dumps(value, ensure_ascii=False, default=str)
@@ -1903,6 +1936,7 @@ class VideoBuildRuntime:
                     _bind_shared_video_references(
                         [*base_plan.items, *normalized_steps], [proposed],
                     )
+                    uploaded_source_must_be_declared(proposed)
                     if schema:
                         validator = validator_for(schema)(schema)
                         try:

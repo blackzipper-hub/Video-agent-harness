@@ -19,6 +19,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+# Magician-facing `model` chooses H3 vs Seedance. `provider` is only the HTTP
+# backend (ark | wavespeed). Vendor strings like "minimax" are not backends.
+_HTTP_BACKENDS = {"ark", "wavespeed", "wavespeed-seedance-2", "auto"}
 DEFAULT_ARK_MODEL = "doubao-seedance-2-0-260128"
 DEFAULT_FALLBACKS = {
     "ark": "wavespeed",
@@ -668,13 +671,17 @@ async def generate_video(
     on_remote_submitted: RemoteSubmittedCallback | None = None,
 ) -> dict[str, Any]:
     profile = normalize_video_profile(profile)
-    requested = str(profile.get("provider") or profile.get("model") or "ark")
-    # If model looks like doubao-*, treat provider as ark unless explicitly set.
-    provider_hint = str(profile.get("provider") or "ark")
-    if not profile.get("provider") and str(profile.get("model") or "").startswith("doubao"):
-        provider_hint = "ark"
-    if not profile.get("provider") and _model_family(str(profile.get("model") or "")) == "minimax_h3":
-        provider_hint = "wavespeed"
+    model = str(profile.get("model") or "").strip()
+    provider_hint = str(profile.get("provider") or "").strip().lower()
+    if provider_hint not in _HTTP_BACKENDS:
+        provider_hint = ""
+    if not provider_hint:
+        if model.startswith("doubao"):
+            provider_hint = "ark"
+        elif model and _model_family(model) == "minimax_h3":
+            provider_hint = "wavespeed"
+        else:
+            provider_hint = "ark"
     provider = resolve_provider(provider_hint, fallbacks_json=fallbacks_json)
     logger.info(
         "api-provider-bridge: requested=%s resolved=%s model=%s",

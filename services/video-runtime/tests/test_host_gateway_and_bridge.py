@@ -128,6 +128,29 @@ def test_resolve_provider_maps_seedance_shorthand_to_wavespeed(monkeypatch):
     assert resolve_provider("seedance", fallbacks_json="{}") == "wavespeed"
 
 
+@pytest.mark.asyncio
+async def test_generate_video_ignores_vendor_provider_when_model_is_h3(monkeypatch):
+    from app.chat.v2 import provider_bridge as bridge
+
+    captured = {}
+
+    async def _fake_wavespeed(profile, _callback=None):
+        captured.update(profile)
+        return {"uri": "https://cdn/h3.mp4", "model_family": "minimax_h3"}
+
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.setenv("WAVESPEED_API_KEY", "wavespeed-key")
+    monkeypatch.setattr(bridge, "_wavespeed_generate", _fake_wavespeed)
+    result = await bridge.generate_video({
+        "provider": "minimax",
+        "model": "minimax-h3",
+        "prompt": "a dancer",
+        "duration": 8,
+    })
+    assert captured["model"] == "minimax-h3"
+    assert result["model_family"] == "minimax_h3"
+
+
 def test_create_time_insufficient_credits_requires_user_action():
     error = _classify_wavespeed_failure(
         'Seedance task create failed: 400, {"message":"Insufficient credits"}',

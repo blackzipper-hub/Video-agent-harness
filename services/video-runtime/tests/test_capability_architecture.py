@@ -42,3 +42,32 @@ def test_provider_capabilities_have_dedicated_sources():
         "video.assemble",
     }
     assert dest_ids.isdisjoint({item.id for item in all_items})
+
+
+def test_provider_generate_schema_rejects_vendor_backend_and_requires_model():
+    import pytest
+    from jsonschema import ValidationError
+    from jsonschema.validators import validator_for
+
+    schema = next(
+        item.parameters_schema
+        for item in provider_capabilities()
+        if item.id == "api.provider.generate"
+    )
+    validator = validator_for(schema)(schema)
+    validator.validate({"prompt": "a dancer", "model": "minimax-h3"})
+    validator.validate({
+        "prompt": "a dancer", "model": "minimax-h3", "provider": "wavespeed",
+    })
+    image = next(
+        item.parameters_schema
+        for item in platform_capabilities()
+        if item.id == "atomic.image.generate"
+    )
+    assert "reference_from_steps" in image["properties"]
+    with pytest.raises(ValidationError, match="minimax"):
+        validator.validate({
+            "prompt": "a dancer", "model": "minimax-h3", "provider": "minimax",
+        })
+    with pytest.raises(ValidationError):
+        validator.validate({"prompt": "a dancer"})

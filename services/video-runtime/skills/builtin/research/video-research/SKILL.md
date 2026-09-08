@@ -74,9 +74,11 @@ Extract before searching — searching without this produces generic results:
 - **Platform**: Where will this live?
 - **Duration hint**: Short (15-30s), medium (30-90s), long (90s+)?
 - **Delivery shape**: What kind of finished piece this is, from the brief.
-- **Locked elements**: anything already committed — a song, a character image, a
-  product, a script, the person on screen, the person who sings. These are brief
-  facts. References must work *with* them, not against them.
+- **Locked elements**: anything already committed — a song, a named subject, a
+  product, a script, the person or animal on screen, the person who sings. These are brief
+  facts. References must work *with* them, not against them. If the brief only says
+  "based on the image" and does not name what is visible, stop; this capability
+  cannot see pixels. Get visible facts first, then search.
 
 ### Step 2: Visual reference mining
 
@@ -257,3 +259,4 @@ and do not pick the winner yourself unless the user asks you to.
 - Propose a direction needing footage or capability the user lacks without saying so
 - Schedule generation tasks or pick the winning direction unasked
 - Invent a URL, title, or play count to fill a slot
+- Treat "based on the uploaded image" as a subject; name the locked visible facts first
