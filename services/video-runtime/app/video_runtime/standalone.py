@@ -19,6 +19,8 @@ os.environ.setdefault("LOCAL_STORAGE_DIR", "./data/uploads")
 # local-storage URLs must point back to this service instead of the removed
 # legacy backend. Deployments on another origin can still override the value.
 os.environ.setdefault("PUBLIC_BASE_URL", "http://127.0.0.1:8001")
+os.environ.setdefault("VIDEO_STAGED_PLANNING_ENABLED", "true")
+os.environ.setdefault("VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED", "true")
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

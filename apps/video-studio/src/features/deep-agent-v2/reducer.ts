@@ -371,6 +371,13 @@ export function deepAgentReducer(
           ]),
           suggestions: suggestionsFromSnapshot(snapshot),
           isHydrating: false,
+          // A terminal server snapshot is authoritative. A message request can
+          // still be unwinding locally after the user presses Stop; keeping its
+          // optimistic sending flag would make the composer silently reject the
+          // very message that is meant to resume the task.
+          isSending: ['completed', 'failed', 'cancelled'].includes(snapshot.run.status)
+            ? false
+            : state.isSending,
           notice: snapshot.run.status === 'waiting_input'
             ? (
               waitingInputNoticeFromEvents(
@@ -409,6 +416,9 @@ export function deepAgentReducer(
       const next = applyEvent(state, action.event)
       return {
         ...next,
+        isSending: next.snapshot && ['completed', 'failed', 'cancelled'].includes(next.snapshot.run.status)
+          ? false
+          : next.isSending,
         traceEvents: mergeTraceEvents([...state.traceEvents, action.event]),
         lastSequence: Math.max(state.lastSequence, action.event.sequence),
         seenEventIds: [...state.seenEventIds, action.event.id].slice(-1000),

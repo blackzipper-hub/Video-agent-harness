@@ -55,6 +55,7 @@ async def test_transcribe_video_normalizes_openai_timestamps(monkeypatch):
     class FakeTranscriptions:
         async def create(self, **kwargs):
             assert kwargs["model"] == "whisper-1"
+            assert kwargs["prompt"] == "Hello world"
             assert kwargs["timestamp_granularities"] == ["word", "segment"]
             return {
                 "text": "Hello world",
@@ -80,6 +81,7 @@ async def test_transcribe_video_normalizes_openai_timestamps(monkeypatch):
     result = await service.transcribe_video(
         "https://example.test/video.mp4",
         run_id="subtitle-test",
+        prompt="Hello world",
     )
 
     assert result["language"] == "en"
@@ -87,6 +89,15 @@ async def test_transcribe_video_normalizes_openai_timestamps(monkeypatch):
     assert len(result["words"]) == 2
     assert result["timing_source"] == "word_timestamps"
     assert result["audio_bytes"] == 5
+
+
+def test_rejects_collapsed_hallucinated_word_timestamps():
+    from app.services.subtitle_transcription_service import validate_transcription
+    with pytest.raises(ValueError, match="Unreliable transcription"):
+        validate_transcription({"words": [
+            {"word": word, "start": 6.84, "end": 6.84}
+            for word in "请不吝点赞订阅转发打赏"
+        ]})
 
 
 @pytest.mark.parametrize(

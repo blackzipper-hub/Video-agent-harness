@@ -1,5 +1,7 @@
 # Cuti 媒体服务
 
+Windows 本地字幕依赖 Node.js、FFmpeg 和 HyperFrames。执行仓库中的 `scripts/setup-video-captions.ps1` 安装固定版本的 CLI、GSAP 和渲染浏览器。服务自动发现 `.runtime-deps/hyperframes` 中的安装，通过 Node 启动 JavaScript 入口，并支持 Windows 中文字体及 Chrome/Edge 路径；可使用 `HYPERFRAMES_*` 环境变量覆盖自动发现结果。
+
 [English](README.md) | 中文
 
 Cuti 平台的媒体处理微服务，负责 FFmpeg 视频与音频处理、图片缩放和 S3 文件管理，并为每个任务隔离工作目录。

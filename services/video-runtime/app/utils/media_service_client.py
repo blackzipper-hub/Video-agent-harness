@@ -75,7 +75,11 @@ async def _post(endpoint: str, payload: dict) -> dict:
         if resp.status_code in _RETRYABLE_STATUS:
             logger.warning(f"📡 MSC !! {endpoint}  {resp.status_code}  {elapsed_ms:.0f}ms (retryable)")
             raise _RetryableMediaServiceError(
-                httpx.HTTPStatusError(f"{resp.status_code}", request=resp.request, response=resp)
+                httpx.HTTPStatusError(
+                    f"Media service {endpoint} returned HTTP {resp.status_code}; "
+                    "check MEDIA_SERVICE_URL and media service availability",
+                    request=resp.request, response=resp,
+                )
             )
         resp.raise_for_status()
         data = resp.json()

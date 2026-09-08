@@ -344,6 +344,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
                     "video_step": {"type": "string"},
                     "language": {"type": "string"},
                     "model": {"type": "string"},
+                    "prompt": {"type": "string", "description": "Known lyrics or names to guide audio recognition; never a substitute for listening."},
                     "run_id": {"type": "string"},
                 },
                 "additionalProperties": False,

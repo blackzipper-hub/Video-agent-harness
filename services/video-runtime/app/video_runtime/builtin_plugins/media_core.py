@@ -174,7 +174,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.transcribe",
-                description="Transcribe the complete selected video into timestamped speech.",
+                description="Transcribe the selected video into timestamped speech. For songs, pass known lyrics in parameters.prompt to guide recognition; unreliable word timing is rejected before subtitle rendering.",
                 inputs=[source("video", ["video"], "video_step")],
                 output_artifact_type="transcript",
                 estimated_cost=0.01,
@@ -434,6 +434,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 language=parameters.get("language"),
                 model=parameters.get("model"),
+                prompt=parameters.get("prompt"),
             )
         elif capability == "media.timeline.compose":
             items, cursor = [], 0.0

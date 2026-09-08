@@ -45,70 +45,9 @@ class ImageType(str, Enum):
 # ---------------------------------------------------------------------------
 # 参考图结构化信息
 # ---------------------------------------------------------------------------
-class RefImageRole(str, Enum):
-    """参考图角色类型"""
-    CHARACTER = "character"
-    SHEET = "sheet"
-    FIRST_FRAME = "first_frame"
-
-
-class RefImageInfo(BaseModel):
-    """单张参考图的结构化信息"""
-    url: str = Field(description="图片 URL（干净，无内部 tag）")
-    role: RefImageRole = Field(description="图片角色：角色参考图 / Reference Sheet / 首帧")
-    label: Optional[str] = Field(default=None, description="标签（角色名、'Reference Sheet (溢出角色)' 等）")
-
-
-# ---------------------------------------------------------------------------
-# 关键帧 prompt 结果
-# ---------------------------------------------------------------------------
-class KeyframePromptResult(BaseModel):
-    """单个关键帧 prompt 生成结果"""
-    shot_number: int = Field(description="镜头编号")
-    t2i_prompt: str = Field(description="生成的关键帧提示词（使用本镜头内 image 1, image 2 等引用）")
-    frame_index: int = Field(default=0, description="帧索引：0=首帧, -1=尾帧")
-
-    ref_images: List[RefImageInfo] = Field(
-        default_factory=list,
-        description="本镜头参考图列表（含角色图、拼接表、首帧等），顺序与 prompt 中 image 1, image 2 对应"
-    )
-
-    final_prompt: Optional[str] = Field(
-        default=None,
-        description="最终执行的 prompt（resolve 阶段设置，可能含 Reference Sheet 引导语前缀）"
-    )
-
-    user_regenerate_instruction: Optional[str] = Field(
-        default=None,
-        description="再生时用户自然语言修改说明；与 t2i_prompt 在 tool execution 模板中分开展示",
-    )
-
-    # -- computed properties --------------------------------------------------
-    @property
-    def has_reference_sheet(self) -> bool:
-        return any(img.role == RefImageRole.SHEET for img in self.ref_images)
-
-    @property
-    def sheet_index(self) -> Optional[int]:
-        for i, img in enumerate(self.ref_images):
-            if img.role == RefImageRole.SHEET:
-                return i
-        return None
-
-    @property
-    def all_ref_urls(self) -> List[str]:
-        """所有参考图 URL（传给模型）"""
-        return [img.url for img in self.ref_images]
-
-    @property
-    def display_ref_urls(self) -> List[str]:
-        """展示给前端的参考图 URL（排除 Reference Sheet）"""
-        return [img.url for img in self.ref_images if img.role != RefImageRole.SHEET]
-
-
-class BatchKeyframePromptResult(BaseModel):
-    """批量关键帧prompt生成结果包装类"""
-    prompts: List[KeyframePromptResult] = Field(description="批量关键帧prompt生成结果列表")
+from app.schemas.keyframe_prompt import (
+    RefImageRole, RefImageInfo, KeyframePromptResult, BatchKeyframePromptResult,
+)
 
 
 # 仅用于 LLM 结构化输出的精简 schema（不含 ref_images、final_prompt 等后端填充字段）

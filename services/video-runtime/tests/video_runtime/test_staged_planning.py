@@ -14,7 +14,10 @@ from app.video_runtime.models import (
 from app.video_runtime.repository import PlanRevisionConflict
 from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator, checkpoint_prompt
 from app.video_runtime.models import PlanCheckpoint
-from app.video_runtime.runtime import _checkpoint_artifact_summary, _implicit_artifact_inputs
+from app.video_runtime.runtime import (
+    _bind_shared_video_references, _checkpoint_artifact_summary,
+    _implicit_artifact_inputs, _parameter_step_references,
+)
 from app.video_runtime.staged_planning import (
     append_continuous_plan_patch,
     append_phase,
@@ -69,6 +72,51 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             ),
             [image_id, audio_id],
         )
+
+    def test_reference_step_selectors_become_dag_dependencies(self) -> None:
+        self.assertCountEqual(
+            _parameter_step_references(
+                {
+                    "character_reference_from_steps": ["character"],
+                    "start_image_from_step": "tail",
+                },
+                {"character", "tail"},
+            ),
+            ["character", "tail"],
+        )
+
+    def test_reference_step_selectors_reject_unknown_tasks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown tasks: missing"):
+            _parameter_step_references(
+                {"reference_from_steps": ["missing"]}, {"character"},
+            )
+
+    def test_shared_reference_policy_cannot_silently_degrade_to_text_to_video(self) -> None:
+        character = RebuildPlanItem(
+            step_id="character", action="create", capability="atomic.image.generate",
+            output_artifact_type="character_setting_reference",
+        )
+        setting = RebuildPlanItem(
+            step_id="setting", action="create", capability="atomic.image.generate",
+            output_artifact_type="scene_setting_reference",
+        )
+        clip = RebuildPlanItem(
+            step_id="clip", action="create", capability="atomic.video.generate",
+            output_artifact_type="video_segment",
+            parameters={"continuity_mode": "shared_reference_images"},
+        )
+        _bind_shared_video_references([character, setting, clip], [clip])
+        self.assertEqual(clip.parameters["reference_from_steps"], ["character", "setting"])
+        self.assertEqual(clip.depends_on, ["character", "setting"])
+
+    def test_shared_reference_policy_rejects_missing_reference_media(self) -> None:
+        clip = RebuildPlanItem(
+            step_id="clip", action="create", capability="atomic.video.generate",
+            output_artifact_type="video_segment",
+            parameters={"continuity_mode": "shared_reference_images"},
+        )
+        with self.assertRaisesRegex(ValueError, "no identity or setting reference"):
+            _bind_shared_video_references([clip], [clip])
 
     def test_legacy_intent_receives_a_complete_language_contract(self) -> None:
         intent = ProjectIntent(

@@ -73,6 +73,20 @@ _MEDIA_REFERENCE_PARAMETER_KEYS = frozenset({
     "last_image", "audio_url", "video_url",
 })
 
+_STEP_REFERENCE_PARAMETER_KEYS = (
+    "start_image_from_step", "strict_start_frame_from_step",
+    "character_reference_from_step", "character_reference_from_steps",
+    "scene_reference_from_steps", "product_identity_reference_steps",
+    "reference_from_steps", "video_reference_from_steps",
+    "audio_reference_from_step", "audio_reference_from_steps",
+)
+
+_SHARED_IMAGE_REFERENCE_TYPES = frozenset({
+    "character_reference", "character_setting_reference",
+    "scene_reference", "scene_setting_reference",
+    "product_reference", "product_setting_reference",
+})
+
 _CHECKPOINT_TASK_PARAMETER_KEYS = frozenset({
     "prompt", "negative_prompt", "duration", "duration_seconds",
     "segment_duration_seconds", "aspect_ratio", "resolution", "width", "height",
@@ -102,6 +116,83 @@ def _implicit_artifact_inputs(
             if candidate_id in known_artifact_version_ids and candidate_id not in result:
                 result.append(candidate_id)
     return result
+
+
+def _parameter_step_references(
+    parameters: dict[str, Any], known_step_ids: set[str],
+) -> list[str]:
+    """Return provider step selectors that must also be DAG dependencies."""
+    result: list[str] = []
+    unknown: list[str] = []
+    for key in _STEP_REFERENCE_PARAMETER_KEYS:
+        value = parameters.get(key)
+        values = value if isinstance(value, list) else [value]
+        for candidate in values:
+            step_id = str(candidate) if isinstance(candidate, str) else ""
+            if not step_id:
+                continue
+            if step_id not in known_step_ids:
+                unknown.append(step_id)
+            elif step_id not in result:
+                result.append(step_id)
+    if unknown:
+        raise ValueError(
+            "provider reference parameters name unknown tasks: "
+            + ", ".join(dict.fromkeys(unknown))
+        )
+    return result
+
+
+def _bind_shared_video_references(
+    steps: list[RebuildPlanItem], proposed_steps: list[RebuildPlanItem],
+) -> None:
+    """Bind declared shared identity/setting references to Agent-authored video tasks.
+
+    The Agent remains responsible for selecting references when a shot uses a
+    subset. ``shared_reference_images`` is the explicit policy for the common
+    Cuti case where every generated identity/setting sheet applies to every
+    segment; omitting the mechanical fields must not silently degrade to T2V.
+    """
+    reference_steps = [
+        item.step_id for item in steps
+        if item.action in {"create", "reuse"}
+        and not item.superseded_by
+        and (
+            item.output_artifact_type.strip().casefold() in _SHARED_IMAGE_REFERENCE_TYPES
+            or str(item.parameters.get("artifact_role") or "").strip().casefold()
+            in _SHARED_IMAGE_REFERENCE_TYPES
+        )
+    ]
+    video_capabilities = {
+        "atomic.video.generate", "api.provider.generate", "api.ark_protocol.generate",
+    }
+    known_ids = {item.step_id for item in steps}
+    for item in proposed_steps:
+        if item.action != "create" or item.capability not in video_capabilities:
+            continue
+        dependency_refs = _parameter_step_references(item.parameters, known_ids)
+        if str(item.parameters.get("continuity_mode") or "").casefold() == "shared_reference_images":
+            shared_refs = [
+                step_id for step_id in reference_steps if step_id != item.step_id
+            ]
+            if not shared_refs and not dependency_refs and not item.input_artifact_version_ids and not any(
+                item.parameters.get(key) for key in _MEDIA_REFERENCE_PARAMETER_KEYS
+            ):
+                raise ValueError(
+                    f"PlanPatch video task {item.step_id} requests shared_reference_images "
+                    "but no identity or setting reference is available"
+                )
+            if shared_refs:
+                existing_shared = item.parameters.get("reference_from_steps") or []
+                if isinstance(existing_shared, str):
+                    existing_shared = [existing_shared]
+                if not isinstance(existing_shared, list):
+                    raise ValueError("reference_from_steps must be an array of task ids")
+                item.parameters["reference_from_steps"] = list(dict.fromkeys([
+                    *existing_shared, *shared_refs,
+                ]))
+                dependency_refs = list(dict.fromkeys([*dependency_refs, *shared_refs]))
+        item.depends_on = list(dict.fromkeys([*item.depends_on, *dependency_refs]))
 
 
 def _bounded_checkpoint_value(value: Any, *, limit: int = 16_000) -> Any:
@@ -1684,9 +1775,9 @@ class VideoBuildRuntime:
                     if item.action == "reuse" and item.artifact_version_id
                 })
                 normalized_steps: list[RebuildPlanItem] = []
-                known_ids = {item.plan_step_id for item in build_step_states}
+                existing_step_ids = {item.plan_step_id for item in build_step_states}
                 for proposed in resolution.proposed_steps:
-                    if proposed.step_id in known_ids:
+                    if proposed.step_id in existing_step_ids:
                         raise ValueError(f"PlanPatch task id was already used: {proposed.step_id}")
                     proposed = proposed.model_copy(deep=True)
                     proposed.superseded_by = None
@@ -1759,6 +1850,13 @@ class VideoBuildRuntime:
                             proposed.parameters.setdefault(
                                 "thread_id", build_record.session_id,
                             )
+                    # Workflow defaults (including continuity_mode) are resolved
+                    # before reference binding. Otherwise an Agent-authored step
+                    # can acquire shared_reference_images only after the binder
+                    # has already let it degrade to text-to-video.
+                    _bind_shared_video_references(
+                        [*base_plan.items, *normalized_steps], [proposed],
+                    )
                     if schema:
                         validator = validator_for(schema)(schema)
                         try:

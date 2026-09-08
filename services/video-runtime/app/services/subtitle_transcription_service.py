@@ -121,6 +121,7 @@ async def transcribe_video(
     run_id: str,
     language: str | None = None,
     model: str | None = None,
+    prompt: str | None = None,
 ) -> dict[str, Any]:
     chat_settings = get_chat_settings()
     api_key = (
@@ -154,6 +155,8 @@ async def transcribe_video(
         normalized_language = normalize_transcription_language(language)
         if normalized_language:
             arguments["language"] = normalized_language
+        if prompt:
+            arguments["prompt"] = prompt
         if selected_model == "whisper-1":
             arguments["timestamp_granularities"] = ["word", "segment"]
         keys = [api_key]
@@ -177,6 +180,7 @@ async def transcribe_video(
                         file=audio_file,
                         **arguments,
                     )
+                validate_transcription(_object_dict(response))
                 break
             except Exception as exc:
                 if index + 1 >= len(keys):
@@ -234,8 +238,26 @@ async def transcribe_video(
             "provider": "openai",
             "model": selected_model,
             "source_video_url": video_url,
+            "recognition_prompt": prompt,
+            "timing_quality_checked": True,
             "extracted_audio_url": audio_url,
             "audio_bytes": size,
         }
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def validate_transcription(raw: dict[str, Any]) -> None:
+    """Reject unsupported speech timing before it becomes a subtitle Artifact."""
+    words = [_object_dict(item) for item in raw.get("words") or []]
+    if len(words) >= 8:
+        collapsed = sum(
+            float(item.get("end") or 0) <= float(item.get("start") or 0)
+            for item in words
+        )
+        if collapsed / len(words) > 0.5:
+            raise ValueError(
+                "Unreliable transcription: most word timestamps have zero duration. "
+                "Re-transcribe with the known lyrics or source-audio context; "
+                "do not burn this transcript into the video."
+            )

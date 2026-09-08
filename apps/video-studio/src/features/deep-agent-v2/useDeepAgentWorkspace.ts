@@ -58,6 +58,7 @@ export function useDeepAgentWorkspace({
   const selectedRunIdRef = useRef<string | null>(null)
   const selectionVersionRef = useRef(0)
   const sendingRef = useRef(false)
+  const sendControllerRef = useRef<AbortController | null>(null)
   const listControllerRef = useRef<AbortController | null>(null)
   const hydrateControllerRef = useRef<AbortController | null>(null)
   autoSelectRef.current = autoSelect
@@ -184,7 +185,20 @@ export function useDeepAgentWorkspace({
   useEffect(() => () => {
     listControllerRef.current?.abort()
     hydrateControllerRef.current?.abort()
+    sendControllerRef.current?.abort()
   }, [])
+
+  // Stop/failure/completion is authoritative over a still-unwinding POST.
+  // Abort the browser request and release the synchronous guard so a cancelled
+  // task can immediately accept a new instruction through the resume endpoint.
+  useEffect(() => {
+    const status = state.snapshot?.run.status
+    if (!status || !['completed', 'failed', 'cancelled'].includes(status)) return
+    sendControllerRef.current?.abort()
+    sendControllerRef.current = null
+    sendingRef.current = false
+    dispatch({ type: 'SENDING', sending: false })
+  }, [state.snapshot?.run.status])
 
   const streamReady = Boolean(
     state.selectedRunId && state.snapshot?.run.id === state.selectedRunId,
@@ -289,6 +303,9 @@ export function useDeepAgentWorkspace({
   ) => {
     const normalized = content.trim()
     if (!normalized || sendingRef.current) return undefined
+    const controller = new AbortController()
+    sendControllerRef.current?.abort()
+    sendControllerRef.current = controller
     sendingRef.current = true
     dispatch({ type: 'SENDING', sending: true })
     dispatch({ type: 'NOTICE', notice: null })
@@ -312,7 +329,7 @@ export function useDeepAgentWorkspace({
         const run = await deepAgentV2Client.createRun(normalized, threadId, {
           ...options,
           thread_id: threadId,
-        })
+        }, controller.signal)
         persistThreadId(run.id, run.thread_id || threadId)
         setPendingThreadId(null)
         selectionVersionRef.current += 1
@@ -338,17 +355,24 @@ export function useDeepAgentWorkspace({
         state.selectedRunId,
         normalized,
         payload,
+        controller.signal,
       )
       persistThreadId(state.selectedRunId, run.thread_id || threadId)
       await hydrateRun(state.selectedRunId)
       return run
     } catch (error) {
       dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
+      if (error instanceof DOMException && error.name === 'AbortError') return undefined
       dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
       throw error
     } finally {
-      sendingRef.current = false
-      dispatch({ type: 'SENDING', sending: false })
+      // An aborted older request may unwind after a resumed message already
+      // started. Only its own controller may release the current send lock.
+      if (sendControllerRef.current === controller) {
+        sendControllerRef.current = null
+        sendingRef.current = false
+        dispatch({ type: 'SENDING', sending: false })
+      }
     }
   }, [hydrateRun, language, pendingThreadId, resolveSessionThreadId, state.selectedRunId, state.snapshot?.run.status, t])
 
@@ -375,8 +399,22 @@ export function useDeepAgentWorkspace({
 
   const cancel = useCallback(async () => {
     if (!state.selectedRunId) return
-    await deepAgentV2Client.cancelRun(state.selectedRunId)
-    await hydrateRun(state.selectedRunId)
+    // Release the local composer before waiting for the two durable cancellation
+    // calls (Video Build + DeepSeek Session). The server snapshot remains the
+    // source of truth and hydrateRun reconciles the final state below.
+    sendControllerRef.current?.abort()
+    sendControllerRef.current = null
+    sendingRef.current = false
+    dispatch({ type: 'SENDING', sending: false })
+    try {
+      await deepAgentV2Client.cancelRun(state.selectedRunId)
+    } finally {
+      // The BFF stops the durable Video Build before asking DeepSeek Harness to
+      // cancel its active turn. If the latter transport call fails, cancellation
+      // has still partially succeeded; always reconcile instead of leaving the
+      // browser on its pre-stop running snapshot.
+      await hydrateRun(state.selectedRunId)
+    }
   }, [hydrateRun, state.selectedRunId])
 
   const deleteRun = useCallback(async (runId: string) => {

@@ -302,6 +302,25 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             legacy_artifacts,
             validate_prompt_slots=envelope.grant.capability != "atomic.text.generate",
         )
+        if (
+            envelope.grant.capability in {
+                "atomic.video.generate", "api.provider.generate",
+            }
+            and str(parameters.get("continuity_mode") or "").casefold()
+            == "shared_reference_images"
+            and not any(
+                parameters.get(key)
+                for key in (
+                    "images", "image_urls", "reference_images", "reference_urls",
+                    "input_image_urls", "start_image_url", "image_url",
+                    "first_frame_url", "continuity_frame_url",
+                )
+            )
+        ):
+            raise ValueError(
+                "shared_reference_images requires at least one resolved image URI "
+                "before video provider dispatch"
+            )
         if envelope.grant.capability == "api.provider.generate":
             from app.integrations.providers.provider_bridge import normalize_video_profile
 

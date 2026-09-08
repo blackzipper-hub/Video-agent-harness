@@ -67,6 +67,29 @@ class ProviderMediaInputTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(ValueError, "unavailable|no URI|missing images"): await self.call(payload)
                 fake.assert_not_called()
 
+    async def test_shared_reference_policy_cannot_degrade_to_text_to_video(self):
+        payload = self.payload()
+        payload["step"]["input_artifact_version_ids"] = []
+        payload["completed_artifacts"] = {}
+        payload["step"]["parameters"] = {
+            "prompt": "Keep the same hero in every segment",
+            "provider": "seedance-2.5",
+            "continuity_mode": "shared_reference_images",
+        }
+        fake = AsyncMock(return_value={"uri": "https://cdn.example.test/out.mp4"})
+        with patch("app.integrations.providers.provider_bridge.generate_video", fake):
+            with self.assertRaisesRegex(ValueError, "resolved image URI"):
+                await self.call(payload)
+            fake.assert_not_called()
+
+    async def test_shared_reference_policy_accepts_resolved_artifact_inputs(self):
+        payload = self.payload()
+        payload["step"]["parameters"]["continuity_mode"] = "shared_reference_images"
+        fake = AsyncMock(return_value={"uri": "https://cdn.example.test/out.mp4"})
+        with patch("app.integrations.providers.provider_bridge.generate_video", fake):
+            await self.call(payload)
+        self.assertEqual(len(fake.call_args.args[0]["images"]), 4)
+
     async def test_audio_video_inputs_and_project_isolation(self):
         payload = self.payload()
         for kind in ("source_audio", "source_video"):

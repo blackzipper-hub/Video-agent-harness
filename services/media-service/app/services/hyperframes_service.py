@@ -16,6 +16,7 @@ from app.services.ffmpeg_service import get_video_info
 DEFAULT_CLI = "~/.local/hyperframes-runtime/node_modules/.bin/hyperframes"
 DEFAULT_NODE_BIN = "~/.local/node-v24.5.0/bin"
 CLI_CANDIDATES = (
+    str(Path(__file__).resolve().parents[4] / ".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs"),
     "/opt/hyperframes/node_modules/.bin/hyperframes",
     DEFAULT_CLI,
 )
@@ -24,12 +25,15 @@ NODE_BIN_CANDIDATES = (
     DEFAULT_NODE_BIN,
 )
 CJK_FONT_CANDIDATES = (
+    str(Path(os.getenv("WINDIR", "C:/Windows")) / "Fonts/msyh.ttc"),
     "/usr/share/fonts/truetype/cuti/NotoSansSC-VF.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansSC-VF.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
     "/mnt/c/Windows/Fonts/NotoSansSC-VF.ttf",
 )
 BROWSER_CANDIDATES = (
+    "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "/opt/hyperframes/browser.path",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -213,6 +217,7 @@ def _resolve_node_bin(cli: Path) -> Path:
 
 def _resolve_gsap(cli: Path) -> Path:
     for candidate in (
+        *(parent / "gsap/dist/gsap.min.js" for parent in cli.parents),
         cli.parents[1] / "gsap" / "dist" / "gsap.min.js",
         Path("/opt/hyperframes/node_modules/gsap/dist/gsap.min.js"),
     ):
@@ -496,12 +501,18 @@ async def render_captions(
         if design_md:
             (project / "DESIGN.md").write_text(design_md, encoding="utf-8")
         env = os.environ.copy()
-        env["PATH"] = f"{node_bin}:{env.get('PATH', '')}"
+        env["PATH"] = f"{node_bin}{os.pathsep}{env.get('PATH', '')}"
         if browser is not None:
             env.setdefault("HYPERFRAMES_BROWSER_PATH", str(browser))
             env.setdefault("PUPPETEER_EXECUTABLE_PATH", str(browser))
+        command = [str(cli)]
+        if cli.suffix in {".js", ".mjs", ".cjs"}:
+            node = shutil.which("node", path=env["PATH"])
+            if not node:
+                raise RuntimeError("HyperFrames requires Node.js on PATH")
+            command = [node, str(cli)]
         render_args = [
-            str(cli), "render", str(project), "--output", output_path,
+            *command, "render", str(project), "--output", output_path,
             "--workers", "1", "--no-browser-gpu",
             "--browser-timeout", "120",
         ]

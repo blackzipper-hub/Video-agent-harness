@@ -254,6 +254,16 @@ def test_hyperframes_cli_missing_raises(monkeypatch):
         hyperframes_service._resolve_cli()
 
 
+def test_hyperframes_finds_gsap_beside_npm_package_entry(tmp_path):
+    cli = tmp_path / "node_modules/hyperframes/bin/hyperframes.mjs"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("", encoding="utf-8")
+    gsap = tmp_path / "node_modules/gsap/dist/gsap.min.js"
+    gsap.parent.mkdir(parents=True)
+    gsap.write_text("", encoding="utf-8")
+    assert hyperframes_service._resolve_gsap(cli) == gsap
+
+
 def test_normalize_cues_wraps_cjk_and_reports_overlap():
     cues, validation = subtitle_service.normalize_cues(
         [

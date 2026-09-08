@@ -116,6 +116,11 @@ def checkpoint_prompt(
             "and Artifact metadata.generation_context. Later or repaired clips must retain "
             "comparable specificity instead of collapsing into plot-only bullets. Adapt the "
             "detail and temporal beats to the requested duration; do not assume a fixed clip count.",
+            "When a video uses generated identity, character, product, scene, keyframe, or continuity "
+            "references, name the producing task ids in both depends_on and the appropriate "
+            "reference_from_steps/start_image_from_step parameter. For continuity_mode "
+            "shared_reference_images, all shared identity and setting sheets must reach every segment; "
+            "a textual phrase such as 'the same character' is not a media reference.",
         ]
     else:
         instructions = [

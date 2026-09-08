@@ -6,6 +6,8 @@ Media processing microservice for the Cuti platform. Handles FFmpeg video/audio 
 
 ## Architecture
 
+Windows local captions require Node.js, FFmpeg and the HyperFrames runtime. Run `scripts/setup-video-captions.ps1` from the repository to install the pinned CLI, GSAP and rendering browser. The service discovers this installation under `.runtime-deps/hyperframes`, runs JavaScript entrypoints with Node, and supports Windows CJK fonts and Chrome/Edge paths. Explicit `HYPERFRAMES_*` environment settings override discovery.
+
 - **FastAPI** REST API
 - **FFmpeg** for video/audio processing with concurrency control
 - **Pillow** for image processing

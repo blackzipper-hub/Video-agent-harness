@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+
+import { deepAgentReducer, initialDeepAgentState } from '../src/features/deep-agent-v2/reducer'
+
+const terminalSnapshot = (status: 'completed' | 'failed' | 'cancelled') => ({
+  run: {
+    id: 'project-1',
+    project_id: 'project-1',
+    thread_id: 'thread-1',
+    status,
+    updated_at: '2026-09-08T00:00:00Z',
+  },
+  tasks: [],
+  artifacts: [],
+  selections: [],
+  messages: [],
+  last_event_sequence: 1,
+})
+
+describe('Deep Agent terminal send state', () => {
+  it.each(['completed', 'failed', 'cancelled'] as const)(
+    'releases a stale sending lock when the hydrated run is %s',
+    (status) => {
+      const state = {
+        ...initialDeepAgentState,
+        selectedRunId: 'project-1',
+        isSending: true,
+      }
+
+      const next = deepAgentReducer(state, {
+        type: 'HYDRATE',
+        runId: 'project-1',
+        snapshot: terminalSnapshot(status) as never,
+        messages: [],
+        events: [],
+      })
+
+      expect(next.snapshot?.run.status).toBe(status)
+      expect(next.isSending).toBe(false)
+    },
+  )
+})

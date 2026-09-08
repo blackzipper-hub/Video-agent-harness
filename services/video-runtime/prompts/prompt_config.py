@@ -152,7 +152,7 @@ from app.models.video_state import (
     StoryboardDetailLLMOutput,
     CharacterProfiles,
 )
-from app.services.agent.video.keyframe_generation_service import (
+from app.schemas.keyframe_prompt import (
     BatchKeyframePromptResult,
 )
 from app.schemas.response import ClarifyResponse

@@ -887,7 +887,9 @@ export default function DeepAgentWorkspacePage() {
                   user_option: currentUserOption(),
                 }).catch(error => toast.error(error.message))
               }}
-              onCancelGeneration={() => void workspace.cancel()}
+              onCancelGeneration={() => void workspace.cancel().catch((error) => {
+                toast.error(error instanceof Error ? error.message : String(error))
+              })}
               showTodoList={false}
               showActionSuggestions
               streamedActionSuggestions={state.suggestions}
