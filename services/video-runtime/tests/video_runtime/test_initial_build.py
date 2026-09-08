@@ -660,6 +660,75 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         captioned = next(item for item in current if item.artifact_id == selected_video.artifact_id)
         self.assertNotEqual(captioned.id, selected_video.id)
         self.assertEqual(captioned.version, selected_video.version + 1)
+        dependencies = await runtime.repo.current_dependencies(project.id)
+        self.assertTrue(dependencies)
+        self.assertFalse(any(
+            item.source_version_id == item.target_version_id
+            for item in dependencies
+        ))
+        self.assertFalse(any(
+            item.source_version_id == captioned.id
+            and item.target_version_id != captioned.id
+            for item in dependencies
+        ))
+
+    async def test_timeline_edit_can_author_new_shots_for_duration_extension(self):
+        runtime = await video_runtime()
+        project, _version = await runtime.create_project(user_id="user", title="Extend duration")
+        spec = video_spec()
+        await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id=f"{project.id}:spec",
+            project_id=project.id,
+            type="video_spec",
+            metadata={"content": spec.model_dump(mode="json"), "plan_step_id": "spec"},
+        ))
+        await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id=f"{project.id}:seedance-prompts",
+            project_id=project.id,
+            type="shot_plan",
+            metadata={"plan_step_id": "seedance-prompts"},
+        ))
+        for shot in spec.shots:
+            await runtime.repo.add_artifact(MediaArtifactVersion(
+                artifact_id=f"{project.id}:shot:{shot.id}",
+                project_id=project.id,
+                type="video_clip",
+                uri=f"https://media.test/{shot.id}.mp4",
+                metadata={"plan_step_id": f"shot-{shot.id}-video"},
+            ))
+        project = await runtime.repo.get_project(project.id)
+        shot_patches = [
+            shot.model_dump(mode="json") | {"duration_seconds": 15}
+            for shot in spec.shots
+        ]
+        shot_patches.append({
+            "id": "four",
+            "order": 4,
+            "duration_seconds": 15,
+            "beat": "returns",
+            "visual_prompt": "0-15秒，主角回到站台，镜头完成故事收束。",
+            "character_ids": ["hero"],
+        })
+
+        plan = await runtime.preview_edits(
+            project_id=project.id,
+            base_project_version_id=project.current_version_id,
+            description="Extend to one minute",
+            idempotency_key="extend-duration-preview",
+            edits=[{
+                "type": "patch_timeline",
+                "patch": {
+                    "target_duration_seconds": 60,
+                    "shots": shot_patches,
+                },
+            }],
+        )
+
+        self.assertEqual(plan.video_spec.target_duration_seconds, 60)
+        self.assertEqual(len(plan.video_spec.shots), 4)
+        new_shot = next(item for item in plan.items if item.step_id == "shot-four-video")
+        self.assertEqual(new_shot.action, "create")
+        topological_steps(plan.items)
 
     async def test_dynamic_media_patch_rejects_direct_urls_and_unselected_artifacts(self):
         runtime = await video_runtime()

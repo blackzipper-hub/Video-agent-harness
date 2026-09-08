@@ -648,6 +648,10 @@ class VideoBuildRuntime:
                 shot_patches = patch.get("shots")
                 if shot_patches is not None and not isinstance(shot_patches, list):
                     raise ValueError("patch_timeline.patch.shots must be a list")
+                requested_duration = patch.get(
+                    "target_duration_seconds",
+                    patch.get("targetDurationSeconds"),
+                )
                 shots_by_id = {
                     str(item.get("id") or ""): item
                     for item in spec_data.get("shots", [])
@@ -658,10 +662,28 @@ class VideoBuildRuntime:
                     shot_id = str(shot_patch.get("id") or "")
                     shot = shots_by_id.get(shot_id)
                     if shot is None:
-                        raise LookupError(f"shot not found: {shot_id}")
+                        # Duration extensions often need additional creative
+                        # segments. The Agent authors them as complete shot
+                        # records; the Runtime validates rather than inventing
+                        # creative content or forcing a Workflow-specific shape.
+                        required = {"id", "order", "duration_seconds", "beat", "visual_prompt"}
+                        missing = sorted(required - set(shot_patch))
+                        if missing:
+                            raise ValueError(
+                                f"new timeline shot {shot_id or '<missing id>'} is missing: "
+                                + ", ".join(missing)
+                            )
+                        shot = dict(shot_patch)
+                        shots_by_id[shot_id] = shot
+                        manual_steps.add("storyboard")
+                        template_roots.add(f"shot-{shot_id}-video")
+                        continue
                     previous_duration = shot.get("duration_seconds")
                     previous_narration = shot.get("narration")
-                    for field in ("order", "duration_seconds", "transition", "narration"):
+                    for field in (
+                        "order", "duration_seconds", "beat", "visual_prompt", "transition",
+                        "narration", "character_ids", "reference_asset_ids",
+                    ):
                         if field in shot_patch:
                             shot[field] = shot_patch[field]
                     if shot.get("duration_seconds") != previous_duration:
@@ -676,11 +698,31 @@ class VideoBuildRuntime:
                     spec_data["shots"] = sorted(
                         shots_by_id.values(), key=lambda item: int(item.get("order") or 0),
                     )
-                    spec_data["target_duration_seconds"] = sum(
+                    authored_duration = sum(
                         float(item.get("duration_seconds") or 0)
                         for item in spec_data["shots"]
                     )
+                    if requested_duration is not None and abs(
+                        authored_duration - float(requested_duration)
+                    ) > 1:
+                        raise ValueError(
+                            "timeline shot durations must match target_duration_seconds; "
+                            "the Agent must author the added or resized shots"
+                        )
+                    spec_data["target_duration_seconds"] = (
+                        float(requested_duration)
+                        if requested_duration is not None
+                        else authored_duration
+                    )
                     manual_steps.add("storyboard")
+                elif requested_duration is not None and abs(
+                    float(requested_duration)
+                    - float(spec_data.get("target_duration_seconds") or 0)
+                ) > 1:
+                    raise ValueError(
+                        "changing target duration requires authored shot patches; "
+                        "include the revised and newly added shots in patch_timeline.patch.shots"
+                    )
                 target_step("timeline")
                 target_step("assembled-video")
                 template_roots.update({"timeline", "assembled-video"})

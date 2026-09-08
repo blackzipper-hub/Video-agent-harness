@@ -145,6 +145,7 @@ class LocalJsonVideoProjectRepository(InMemoryVideoProjectRepository):
             project_id: [ArtifactDependency.model_validate(item) for item in values]
             for project_id, values in raw.get("dependencies", {}).items()
         })
+        dependencies_repaired = self._repair_invalid_build_dependencies()
         bindings = [
             ProjectSessionBinding.model_validate(item)
             for item in raw.get("bindings", [])
@@ -206,6 +207,36 @@ class LocalJsonVideoProjectRepository(InMemoryVideoProjectRepository):
             tuple(item["key"]): tuple(item["value"])
             for item in raw.get("compatibility_runs", [])
         }
+        if dependencies_repaired:
+            self._persist()
+
+    def _repair_invalid_build_dependencies(self) -> bool:
+        """Remove dependency shapes produced by the former replacement-alias bug.
+
+        A build output cannot depend on itself, and a deterministic build-step edge
+        cannot point from an artifact created after its target. Other relation types
+        are left untouched because imported legacy provenance may not preserve time.
+        """
+        repaired = False
+        for project_id, edges in list(self.dependencies.items()):
+            artifacts = self.artifacts.get(project_id, {})
+            kept: list[ArtifactDependency] = []
+            for edge in edges:
+                source = artifacts.get(edge.source_version_id)
+                target = artifacts.get(edge.target_version_id)
+                invalid = edge.source_version_id == edge.target_version_id
+                invalid = invalid or (
+                    edge.relation == "build_step_dependency"
+                    and source is not None
+                    and target is not None
+                    and source.created_at > target.created_at
+                )
+                if invalid:
+                    repaired = True
+                else:
+                    kept.append(edge)
+            self.dependencies[project_id] = kept
+        return repaired
 
     def _append_event(
         self, project_id: str, event_type: str, payload: dict,

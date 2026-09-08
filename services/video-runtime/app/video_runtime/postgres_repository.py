@@ -386,9 +386,13 @@ class PostgresVideoProjectRepository:
         project = await self.get_project(project_id)
         rows = await self.pool.fetch(
             f"""SELECT edge.* FROM {self.schema}.artifact_edges edge
+            JOIN {self.schema}.artifact_versions source ON source.id=edge.source_version_id
+            JOIN {self.schema}.artifact_versions target ON target.id=edge.target_version_id
             WHERE edge.project_id=$1
               AND edge.source_version_id IN (SELECT artifact_version_id FROM {self.schema}.project_version_artifacts WHERE project_version_id=$2)
               AND edge.target_version_id IN (SELECT artifact_version_id FROM {self.schema}.project_version_artifacts WHERE project_version_id=$2)
+              AND edge.source_version_id <> edge.target_version_id
+              AND NOT (edge.relation='build_step_dependency' AND source.created_at > target.created_at)
             ORDER BY edge.created_at""",
             project_id, project.current_version_id,
         )
@@ -1440,36 +1444,42 @@ class PostgresVideoProjectRepository:
                 next_selections[artifact.artifact_id] = artifact.id
                 created_ids[step_id] = artifact.id
             edges = await connection.fetch(f"SELECT * FROM {self.schema}.artifact_edges WHERE project_id=$1", project.id)
-            for row_edge in edges:
-                edge = ArtifactDependency(**dict(row_edge))
-                source = replacement_ids.get(edge.source_version_id, edge.source_version_id)
-                target = replacement_ids.get(edge.target_version_id, edge.target_version_id)
-                if source != edge.source_version_id or target != edge.target_version_id:
-                    await self._insert_edge(connection, ArtifactDependency(
-                        project_id=project.id, source_version_id=source, target_version_id=target,
-                        relation=edge.relation, invalidation_policy=edge.invalidation_policy,
-                    ))
-            output_by_step: dict[str, str] = {}
-            for item in plan.items:
-                if item.action == "create":
-                    output_id = created_ids.get(item.step_id)
-                elif item.artifact_version_id:
-                    output_id = replacement_ids.get(item.artifact_version_id, item.artifact_version_id)
-                else:
-                    output_id = None
-                if output_id:
-                    output_by_step[item.step_id] = output_id
             existing_edges = {
                 (str(row["source_version_id"]), str(row["target_version_id"]))
                 for row in edges
             }
+            for row_edge in edges:
+                edge = ArtifactDependency(**dict(row_edge))
+                target = replacement_ids.get(edge.target_version_id)
+                if target is None:
+                    continue
+                source = edge.source_version_id
+                if source == target or (source, target) in existing_edges:
+                    continue
+                await self._insert_edge(connection, ArtifactDependency(
+                    project_id=project.id, source_version_id=source, target_version_id=target,
+                    relation=edge.relation, invalidation_policy=edge.invalidation_policy,
+                ))
+                existing_edges.add((source, target))
+            output_by_step: dict[str, str] = {}
+            for item in plan.items:
+                if item.action == "create":
+                    output_id = created_ids.get(item.step_id)
+                elif item.action == "rebuild" and item.artifact_version_id:
+                    output_id = replacement_ids.get(item.artifact_version_id)
+                elif item.artifact_version_id:
+                    output_id = item.artifact_version_id
+                else:
+                    output_id = None
+                if output_id:
+                    output_by_step[item.step_id] = output_id
             for item in plan.items:
                 target = output_by_step.get(item.step_id)
                 if target is None:
                     continue
                 for dependency in item.depends_on:
                     source = output_by_step.get(dependency)
-                    if source is None or (source, target) in existing_edges:
+                    if source is None or source == target or (source, target) in existing_edges:
                         continue
                     await self._insert_edge(connection, ArtifactDependency(
                         project_id=project.id,

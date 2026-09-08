@@ -454,7 +454,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_edit_preview',
-    description: 'Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.',
+    description: 'Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.',
     parameters: {
       project_id: { type: 'string', required: true },
       base_project_version_id: { type: 'string', required: true },

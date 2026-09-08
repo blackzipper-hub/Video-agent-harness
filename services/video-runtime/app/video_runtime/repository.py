@@ -1057,9 +1057,16 @@ class InMemoryVideoProjectRepository:
 
             old_edges = list(self.dependencies[project.id])
             for edge in old_edges:
-                source = replacement_ids.get(edge.source_version_id, edge.source_version_id)
-                target = replacement_ids.get(edge.target_version_id, edge.target_version_id)
-                if source == edge.source_version_id and target == edge.target_version_id:
+                # Artifact versions are immutable provenance nodes. Replacing a source
+                # does not make an already-built target depend on the new source, and
+                # a reuse step still consumes the exact old version. Only carry an
+                # existing incoming edge forward when its target is rebuilt; explicit
+                # plan dependencies below connect rebuilt sources to rebuilt targets.
+                target = replacement_ids.get(edge.target_version_id)
+                if target is None:
+                    continue
+                source = edge.source_version_id
+                if source == target:
                     continue
                 self.dependencies[project.id].append(ArtifactDependency(
                     project_id=project.id,
@@ -1073,10 +1080,10 @@ class InMemoryVideoProjectRepository:
             for item in plan.items:
                 if item.action == "create":
                     output_id = created_ids.get(item.step_id)
+                elif item.action == "rebuild" and item.artifact_version_id:
+                    output_id = replacement_ids.get(item.artifact_version_id)
                 elif item.artifact_version_id:
-                    output_id = replacement_ids.get(
-                        item.artifact_version_id, item.artifact_version_id,
-                    )
+                    output_id = item.artifact_version_id
                 else:
                     output_id = None
                 if output_id:
@@ -1091,7 +1098,7 @@ class InMemoryVideoProjectRepository:
                     continue
                 for dependency in item.depends_on:
                     source = output_by_step.get(dependency)
-                    if source is None or (source, target) in existing_edges:
+                    if source is None or source == target or (source, target) in existing_edges:
                         continue
                     self.dependencies[project.id].append(ArtifactDependency(
                         project_id=project.id,
