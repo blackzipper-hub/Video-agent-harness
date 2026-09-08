@@ -215,9 +215,25 @@ def test_hyperframes_reads_browser_path_file(tmp_path, monkeypatch):
 
 def test_hyperframes_cli_missing_raises(monkeypatch):
     monkeypatch.delenv("HYPERFRAMES_CLI", raising=False)
-    monkeypatch.setattr(hyperframes_service, "CLI_CANDIDATES", ("/definitely/missing/hyperframes",))
+    monkeypatch.setattr(hyperframes_service, "_checkout_hyperframes_cli", lambda start=None: "")
+    monkeypatch.setattr(hyperframes_service, "CLI_CANDIDATES", ())
+    monkeypatch.setattr(hyperframes_service.shutil, "which", lambda *_args, **_kwargs: None)
     with pytest.raises(RuntimeError, match="HYPERFRAMES_CLI"):
         hyperframes_service._resolve_cli()
+
+
+def test_hyperframes_cli_walks_checkout_runtime_deps(tmp_path):
+    repo = tmp_path / "repo"
+    cli = repo / ".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("", encoding="utf-8")
+    nested = repo / "services/media-service/app/services/hyperframes_service.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("", encoding="utf-8")
+    other = tmp_path / "other" / "file.py"
+    other.parent.mkdir()
+    assert hyperframes_service._checkout_hyperframes_cli(nested) == str(cli)
+    assert hyperframes_service._checkout_hyperframes_cli(other) == ""
 
 
 def test_hyperframes_finds_gsap_beside_npm_package_entry(tmp_path):

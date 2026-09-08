@@ -12,29 +12,20 @@ from app.hyperframes import compose as hf_compose
 from app.services.ffmpeg_service import get_video_info
 
 
-DEFAULT_CLI = "~/.local/hyperframes-runtime/node_modules/.bin/hyperframes"
-DEFAULT_NODE_BIN = "~/.local/node-v24.5.0/bin"
+_CHECKOUT_CLI = Path(".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs")
+IMAGE_CLI = "/opt/hyperframes/node_modules/.bin/hyperframes"
+CLI_CANDIDATES = (IMAGE_CLI,)
 
 
-def _dev_hyperframes_cli() -> str:
-    # Repo checkout: services/media-service/app/services → parents[4] is the monorepo root.
-    # Docker image copies this package to /app, which is too shallow for parents[4].
-    try:
-        root = Path(__file__).resolve().parents[4]
-    except IndexError:
-        return ""
-    return str(root / ".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs")
+def _checkout_hyperframes_cli(start: Path | None = None) -> str:
+    here = (start or Path(__file__)).resolve()
+    for parent in here.parents:
+        candidate = parent / _CHECKOUT_CLI
+        if candidate.is_file():
+            return str(candidate)
+    return ""
 
 
-CLI_CANDIDATES = (
-    _dev_hyperframes_cli(),
-    "/opt/hyperframes/node_modules/.bin/hyperframes",
-    DEFAULT_CLI,
-)
-NODE_BIN_CANDIDATES = (
-    "/usr/local/bin",
-    DEFAULT_NODE_BIN,
-)
 CJK_FONT_CANDIDATES = (
     str(Path(os.getenv("WINDIR", "C:/Windows")) / "Fonts/msyh.ttc"),
     "/usr/share/fonts/truetype/cuti/NotoSansSC-VF.ttf",
@@ -199,7 +190,14 @@ def _first_file(candidates: tuple[str, ...]) -> Path | None:
 
 
 def _resolve_cli() -> Path:
-    cli = _first_file((os.getenv("HYPERFRAMES_CLI") or "",) + CLI_CANDIDATES)
+    cli = _first_file(
+        (
+            os.getenv("HYPERFRAMES_CLI") or "",
+            _checkout_hyperframes_cli(),
+        )
+        + CLI_CANDIDATES
+        + (shutil.which("hyperframes") or "",)
+    )
     if cli is None:
         raise RuntimeError("HyperFrames CLI is not installed; set HYPERFRAMES_CLI")
     return cli
@@ -207,10 +205,8 @@ def _resolve_cli() -> Path:
 
 def _resolve_node_bin(cli: Path) -> Path:
     extra = os.getenv("HYPERFRAMES_NODE_BIN") or ""
-    for raw in (extra,) + NODE_BIN_CANDIDATES:
-        if not raw:
-            continue
-        path = Path(os.path.expanduser(raw))
+    if extra:
+        path = Path(os.path.expanduser(extra))
         if path.is_dir():
             return path
     node = shutil.which("node")
