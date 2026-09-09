@@ -10,7 +10,7 @@ description: >-
   短剧对白片用 short-drama-workflow；产品广告用 product-ad-video。
 metadata:
   kind: workflow
-  version: "2.7.4"
+  version: "2.7.5"
   workflow:
     title: Music Video
     mode: mv
@@ -50,8 +50,6 @@ metadata:
       - media.mix_audio
       - media.transcribe
       - media.hyperframes_caption
-      - subtitle.compose
-      - media.subtitle_burn
 ---
 
 # MV 工作流
@@ -192,7 +190,7 @@ metadata:
 5. **下一段是下一镜。** 多段是分镜，不是一条长镜头硬接。每段自己开镜、自己收镜；`images` 带这镜用得上的身份/场/物。prompt 当下一个镜头写。真想一条运镜接着走，再抽尾帧当下一镜的图、短叠化——跟参考音频时 H3 锁不住开场，别指望像素接上。
 6. **拼起来。** `media.concat` 有序 `video_urls`。分镜硬切 `transition_duration: 0`；连续镜头才 `0.125`。
 7. **叠回原曲。** `media.mix_audio` `mode: replace`，音频用 cut 的 master。
-8. **成片上的图文。** 歌已经叠回去了，对着这条成片 `video_skill_load("hyperframes-captions")`。转写之后字怎么叠由你定：根跟着这条成片走，句跟着唱的走，写出 HyperFrames HTML，交给 `media.hyperframes_caption` 的 `caption_html`。用户说不要字就收到叠歌。单段生成片和还没叠歌的 concat 预览先不用转写。静态硬烧也可以：`video_skill_load("subtitle-authoring")` → `subtitle.compose` → `media.subtitle_burn`。
+8. **成片上的图文。** 歌已经叠回去了，对着这条成片 `video_skill_load("hyperframes-captions")`。转写之后字怎么叠由你定：根跟着这条成片走，句跟着唱的走，写出 HyperFrames HTML，交给 `media.hyperframes_caption` 的 `caption_html`。用户说不要字就收到叠歌。单段生成片和还没叠歌的 concat 预览先不用转写。
 
 ## Never
 
@@ -204,6 +202,6 @@ metadata:
 - 不选就默认：每段都严格对口型，或者一律不让画面沾词
 - 用整曲歌词纸写某一段 prompt
 - 把 concat 预览当成片，或对单段生成片转写字幕
+- 把「歌必须 karaoke / 必须标题 / 禁止逐字」写成这条工作流的法
 - 搜索主语还没写成字
 - 要把源送进模型时，只写在 `depends_on` 里（它只排队，不带像素）
-- 把「歌必须 karaoke / 必须标题 / 禁止逐字」写成这条工作流的法

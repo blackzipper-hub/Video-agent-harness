@@ -244,7 +244,13 @@ class DestAndStepSchemaTest(unittest.TestCase):
         self.assertIn("caption_html", skill.instructions)
         self.assertIn("media.hyperframes_caption", skill.instructions)
         self.assertIn("video_skill_load", skill.instructions)
+        self.assertIn("media.transcribe", skill.instructions)
         self.assertNotIn("不要只报一个 registry 组件名", skill.instructions)
+        self.assertNotIn("style 名字", skill.instructions)
+        self.assertNotIn("灌词", skill.instructions)
+        self.assertNotIn("subtitle-authoring", skill.instructions)
+        self.assertNotIn("静态硬烧", skill.instructions)
+        self.assertNotIn("静态字幕", skill.instructions)
 
 
 class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):

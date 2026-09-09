@@ -434,9 +434,6 @@ def test_mv_skill_files_and_workflow_contract():
         "hyperframes-captions",
         "caption_html",
         "media.hyperframes_caption",
-        "subtitle-authoring",
-        "subtitle.compose",
-        "media.subtitle_burn",
         "Never",
         "minimax-h3",
         "suno.generate",
@@ -500,6 +497,8 @@ def test_mv_skill_files_and_workflow_contract():
         "api.provider.generate",
     ):
         assert cap in spec.pipeline
+    assert "subtitle.compose" not in (spec.allowed_capabilities or ())
+    assert "media.subtitle_burn" not in (spec.allowed_capabilities or ())
     assert spec.pipeline[0] == "research.generate"
     params = inject_workflow_parameters({}, spec)
     assert params["workflow_mode"] == "mv"
@@ -510,6 +509,10 @@ def test_mv_skill_files_and_workflow_contract():
     assert "research.generate" in description
     assert "media.audio_cut" in description
     assert "media.hyperframes_caption" in description
+    assert "subtitle-authoring" not in text
+    assert "subtitle.compose" not in text
+    assert "media.subtitle_burn" not in text
+    assert "静态硬烧" not in text
     assert spec.skill_dependencies == ()
 
 
@@ -555,7 +558,13 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert "media.hyperframes_caption" in text
     assert "caption_html" in text
     assert "video_skill_load" in text
+    assert "media.transcribe" in text
     assert "不要只报一个 registry 组件名" not in text
+    assert "style 名字" not in text
+    assert "灌词" not in text
+    assert "subtitle-authoring" not in text
+    assert "静态硬烧" not in text
+    assert "静态字幕" not in text
     for name in (
         "hyperframes-core",
         "hyperframes-cli",

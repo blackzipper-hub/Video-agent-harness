@@ -19,7 +19,7 @@ description: 成片上叠词和标题。转写后由你写 HyperFrames HTML，�
 3. **写出 caption HTML**（把 transcript 的词和时间写进去），通过 `media.hyperframes_caption` 的 `caption_html` 交出去。成片垫在底下。你写的是这一层：根跟着成片走（多长、多宽、多高，转写和画面已经告诉你），句跟着它唱的那几秒。GSAP 这份工程里已经有了。不要自己跑 `npx hyperframes`。没有 `caption_html` 这次叠字就不会跑。
 4. 同一条成片、同一份 transcript，一次叠完。
 
-用户说不要字，这一步就停。静态硬烧另走 `video_skill_load("subtitle-authoring")`。
+用户说不要字，这一步就停。
 
 ## 你自己定
 
@@ -32,5 +32,5 @@ description: 成片上叠词和标题。转写后由你写 HyperFrames HTML，�
 1. 中文必须能显示。运行时已经带 CJK 字体；不要换成只会写英文的网字。
 2. 字是给人读的，不要把主体挡到看不清。
 3. registry 里的 `caption-*` 是起点，打开再改。海报级大字（一层 200px 背景词）不要原样灌整段歌词。
-4. 缺 Node / Chrome / GSAP / CLI 就把报错原样端上来，不要偷偷改成静态字幕。
+4. 缺 Node / Chrome / GSAP / CLI 就把报错原样端上来。
 5. 必须写出完整 HTML 放进 `caption_html`。
