@@ -100,12 +100,10 @@ WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
     "seedance2": ("seedance2", "direct"),
     "mv": ("mv", "music_suno"),
     "short-drama-workflow": ("short_drama_workflow", "story"),
-    "product-ad-video": ("product_ad_video", "product_ad"),
     "cuti-product-workflow": ("cuti_product_workflow", "product_cuti"),
     "cuti-scenario-product-workflow": (
         "cuti_scenario_product_workflow", "product_scenario",
     ),
-    "libtv-product-workflow": ("libtv_product_workflow", "product_libtv"),
 }
 
 
@@ -181,11 +179,6 @@ def initial_checkpoint(workflow: WorkflowSpec | None, workflow_id: str) -> PlanC
                 "plus workflow_parameters.segment_proofs (one exact proof objective per shot). "
                 "Each shot prompt must cover 0-15s densely in Chinese; use native synchronized "
                 "dialogue/audio and do not add TTS, BGM, subtitles, keyframes, or Director Skills."
-            )
-        elif family == "product_ad":
-            instruction = (
-                "Use the real product still and analysis to create a polished product-anchored "
-                "I2V commercial. Preserve identity and supplied brand copy; do not invent claims."
             )
         elif family == "product_cuti":
             instruction = (
