@@ -7,7 +7,7 @@ import GenerationBox from '@/components/GenerationBox'
 const HOME_SKILLS = [
   { id: 'short-drama-workflow', labelKey: 'homeSkillShortDrama' as const },
   { id: 'cuti-scenario-product-workflow', labelKey: 'homeSkillProductStory' as const },
-  { id: 'seedance2', labelKey: 'homeSkillMovieTrailer' as const },
+  { id: 'cinematic', labelKey: 'homeSkillMovieTrailer' as const },
   { id: 'mv', labelKey: 'homeSkillMusicVideo' as const },
 ]
 
@@ -17,7 +17,8 @@ const SelectionHub = () => {
   const location = useLocation()
   const { lang: routeLang } = useParams<{ lang: string }>()
   const lang = routeLang || language || 'en'
-  const [selectedSkillId, setSelectedSkillId] = useState('short-drama-workflow')
+  // nothing preselected: with no tag chosen the backend routes the request itself
+  const [selectedSkillId, setSelectedSkillId] = useState('')
 
   const go = (path: string) => {
     if (path === 'explore') {
