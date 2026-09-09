@@ -742,6 +742,70 @@ Keep the requested visual tone consistent.
         prompt = self.deepseek.prompts[-1][1]
         self.assertIn("content_language=en-US", prompt)
         self.assertIn("spoken_language=zh-CN", prompt)
+        self.assertIn("ui_locale is chrome only", prompt)
+
+    def test_create_english_objective_beats_chinese_studio_ui(self):
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            headers={"X-App-Language": "zh"},
+            json={
+                "objective": (
+                    "Magician. A stage magician closes a show; "
+                    "the last spark hides in his palm."
+                ),
+                "idempotency_key": "language-contract-magician",
+                "workflow_id": "seedance2",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        self.assertEqual(run["output_language"], "en")
+        self.assertEqual(run["language_contract"], {
+            "ui_locale": "zh-CN",
+            "content_language": "en-US",
+            "spoken_language": "en-US",
+            "subtitle_language": "en-US",
+            "provider_prompt_language": "auto",
+        })
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertIn("content_language=en-US", prompt)
+        self.assertIn("Write every user-visible", prompt)
+        self.assertIn("English", prompt)
+
+    def test_create_chinese_objective_beats_english_studio_ui(self):
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            headers={"X-App-Language": "en"},
+            json={
+                "objective": "做一首中文说唱MV，舞台上的魔术师把最后一点光藏进掌心。",
+                "idempotency_key": "language-contract-rap-mv",
+                "workflow_id": "seedance2",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        self.assertEqual(run["output_language"], "zh")
+        self.assertEqual(run["language_contract"]["ui_locale"], "en-US")
+        self.assertEqual(run["language_contract"]["content_language"], "zh-CN")
+        self.assertEqual(run["language_contract"]["provider_prompt_language"], "auto")
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertIn("content_language=zh-CN", prompt)
+        self.assertIn("Simplified Chinese", prompt)
+
+    def test_create_language_neutral_ack_falls_back_to_studio_ui(self):
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            headers={"X-App-Language": "zh"},
+            json={
+                "objective": "OK",
+                "idempotency_key": "language-contract-ok-fallback",
+                "workflow_id": "seedance2",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        self.assertEqual(run["language_contract"]["ui_locale"], "zh-CN")
+        self.assertEqual(run["language_contract"]["content_language"], "zh-CN")
 
     def test_legacy_run_context_recovers_dialogue_language_from_project_intent(self):
         project, version = asyncio.run(self.runtime.create_project(

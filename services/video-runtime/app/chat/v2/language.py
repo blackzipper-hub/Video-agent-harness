@@ -4,6 +4,7 @@ import re
 
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]{4,}")
 _EXPLICIT_SKILL_RE = re.compile(
     r"(?<![A-Za-z0-9_-])[$/]([a-z0-9][a-z0-9-]{0,63})(?![A-Za-z0-9_-])",
     re.IGNORECASE,
@@ -183,10 +184,13 @@ def resolve_video_language_contract(
     )
     explicit_content = explicit_visible_language(text)
     if current:
-        inferred_content = canonical_content_language(current.get("content_language"), fallback=resolved_ui)
+        inferred_content = canonical_content_language(
+            current.get("content_language"), fallback=resolved_ui,
+        )
     else:
         inferred_content = canonical_content_language(
-            resolve_output_language(text, requested=resolved_ui), fallback=resolved_ui,
+            resolve_output_language(text, requested=resolved_ui),
+            fallback=resolved_ui,
         )
     content = canonical_content_language(
         overrides.get("content_language") or skill_language or explicit_content or inferred_content,
@@ -225,18 +229,24 @@ def video_language_instruction(contract: dict[str, str]) -> str:
     """Render the durable Video Runtime language obligations for the Agent."""
     content = canonical_content_language(contract.get("content_language"))
     visible = "Simplified Chinese" if content == "zh-CN" else "English"
+    ui = contract.get("ui_locale", content)
+    spoken = contract.get("spoken_language", content)
+    subtitle = contract.get("subtitle_language", content)
+    provider = contract.get("provider_prompt_language", "auto")
     return (
-        "Video language contract (authoritative): "
-        f"ui_locale={contract.get('ui_locale', content)}; "
-        f"content_language={content}; "
-        f"spoken_language={contract.get('spoken_language', content)}; "
-        f"subtitle_language={contract.get('subtitle_language', content)}; "
-        f"provider_prompt_language={contract.get('provider_prompt_language', 'auto')}. "
+        "<video_language_contract>\n"
+        f"ui_locale={ui}\n"
+        f"content_language={content}\n"
+        f"spoken_language={spoken}\n"
+        f"subtitle_language={subtitle}\n"
+        f"provider_prompt_language={provider}\n"
+        "</video_language_contract>\n"
         f"Write every user-visible title, summary, plan, script, character/scene/shot description, "
         f"review and final response in {visible}. Keep machine identifiers unchanged. "
         "Dialogue/narration and subtitles follow their independent fields. Provider prompts may "
         "use provider_prompt_language but are internal and must not replace the user-visible artifact. "
-        "Preserve this exact contract in ProjectIntent, VideoSpec and every PlanPatch."
+        "Preserve this exact contract in ProjectIntent, VideoSpec and every PlanPatch. "
+        f"ui_locale is chrome only; do not write user-visible plans in the UI language when it differs from {visible}."
     )
 
 
@@ -247,12 +257,20 @@ def resolve_output_language(
     current: str | None = None,
     language_skill: str | None = None,
 ) -> str:
-    """Resolve visible language; an explicit run-level language Skill wins."""
+    """Resolve visible language from the user message, then UI locale.
+
+    An explicit run-level language Skill wins. Otherwise Chinese script selects
+    Chinese and a real English word selects English. Short acknowledgements,
+    numbers, and empty text still fall back to current / requested / English.
+    """
     canonical = canonical_language_skill_name(language_skill)
     if canonical:
         return _LANGUAGE_SKILL_OUTPUT[canonical]
-    if _CJK_RE.search(text or ""):
+    source = text or ""
+    if _CJK_RE.search(source):
         return "zh"
+    if _LATIN_WORD_RE.search(source):
+        return "en"
     return (
         normalize_output_language(requested)
         or normalize_output_language(current)
