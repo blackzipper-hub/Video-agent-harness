@@ -37,12 +37,17 @@ import {
   Send,
   X,
   User,
+  Plus,
+  ArrowRight,
 } from 'lucide-react'
 
 interface GenerationBoxProps {
   title?: string
   subtitle?: string
   className?: string
+  variant?: 'default' | 'landing'
+  placeholder?: string
+  selectedWorkflowId?: string
   externalPrompt?: string // External prompt to fill into the input
   externalFiles?: File[] // External files to pre-upload
   /** 内容模版：如 "Lip-Sync MV"（点 Lip-sync 卡片时），默认不传为 Default */
@@ -65,6 +70,9 @@ const GenerationBox = ({
   title = '',
   subtitle = '',
   className = '',
+  variant = 'default',
+  placeholder,
+  selectedWorkflowId,
   externalPrompt,
   externalFiles,
   externalContentCategory,
@@ -139,12 +147,17 @@ const GenerationBox = ({
   // Auto-resize textarea based on content
   useEffect(() => {
     const textarea = textareaRef.current
-    if (textarea) {
-      textarea.style.height = 'auto'
-      const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
-      textarea.style.height = `${newHeight}px`
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    if (variant === 'landing') {
+      // one line by default; grow up to three, keeping the design's line height
+      const line = parseFloat(getComputedStyle(textarea).lineHeight) || 24
+      textarea.style.height = `${Math.max(Math.min(textarea.scrollHeight, line * 3), line)}px`
+      return
     }
-  }, [prompt])
+    const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
+    textarea.style.height = `${newHeight}px`
+  }, [prompt, variant])
 
   // 如果配置为不显示 image/music，且当前选中了这些类型，则切换到 video
   useEffect(() => {
@@ -177,9 +190,11 @@ const GenerationBox = ({
         const textarea = textareaRef.current
         if (textarea) {
           textarea.style.height = 'auto'
-          const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
+          const line = parseFloat(getComputedStyle(textarea).lineHeight) || 24
+          const newHeight = variant === 'landing'
+            ? Math.max(Math.min(textarea.scrollHeight, line * 3), line)
+            : Math.max(Math.min(textarea.scrollHeight, 300), 100)
           textarea.style.height = `${newHeight}px`
-          // Focus the textarea
           textarea.focus()
         }
       }, 0)
@@ -455,6 +470,7 @@ const GenerationBox = ({
         },
         shouldAutoSend: true,
       }
+      if (selectedWorkflowId) createState.workflow_id = selectedWorkflowId
       // 与 create 页一致：video 传 auto 由后端路由分析决定类型，image/music 传具体类型
       createState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType
       const lang = routeLang || language
@@ -480,6 +496,133 @@ const GenerationBox = ({
     instantState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType
     navigate('/instant-generation', { state: instantState })
     setIsGenerating(false)
+  }
+
+  const landingPlaceholder = placeholder || t('homePromptPlaceholder')
+  const landingPromptHandlers = {
+    onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value),
+    onFocus: () => setIsFocused(true),
+    onBlur: () => setIsFocused(false),
+    onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+      const isComposing = e.nativeEvent?.isComposing || target.composing
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+        e.preventDefault()
+        handleSendMessage()
+      }
+    },
+    onCompositionStart: (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+      const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+      target.composing = true
+    },
+    onCompositionEnd: (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+      const target = e.target as HTMLTextAreaElement & { composing?: boolean }
+      target.composing = false
+    },
+    onPaste: async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (isGenerating) return
+      const clipboardData = e.clipboardData
+      if (!clipboardData) return
+      const pasted: File[] = []
+      for (let i = 0; i < clipboardData.items.length; i++) {
+        const item = clipboardData.items[i]
+        if (item.kind !== 'file') continue
+        const f = item.getAsFile()
+        if (f) pasted.push(normalizeClipboardFile(f))
+      }
+      if (pasted.length === 0) return
+      e.preventDefault()
+      const { validFiles } = validateFiles(pasted, uploadedFiles, t)
+      if (validFiles.length > 0) {
+        await appendUploadedFilesAndOpenAudioCrop(validFiles)
+        toast.success(
+          validFiles.length === 1
+            ? t('pastedImage')
+            : t('pastedImages').replace('{count}', String(validFiles.length)),
+        )
+      }
+    },
+  }
+
+  if (variant === 'landing') {
+    return (
+      <div className={`w-full ${className}`}>
+        <div
+          className={`home-composer relative overflow-hidden ${
+            uploadedFiles.length > 0 ? '!rounded-[2rem]' : ''
+          } ${isDragOver ? 'border-white/40' : isFocused ? 'border-white/[0.18]' : ''}`}
+          onDragOver={dragDropHandler.handleDragOver}
+          onDragLeave={dragDropHandler.handleDragLeave}
+          onDrop={dragDropHandler.handleDrop}
+        >
+          {isDragOver && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-white/10">
+              <p className="text-sm font-medium text-white">{t('dropFilesHere')}</p>
+            </div>
+          )}
+          {uploadedFiles.length > 0 && (
+            <div className="relative z-[1] flex flex-wrap gap-1.5 px-5 pt-4">
+              {uploadedFiles.map((file, index) => (
+                <FilePreview
+                  key={index}
+                  file={file}
+                  index={index}
+                  onRemove={handleFileRemove}
+                  onCropAudio={handleOpenAudioCrop}
+                />
+              ))}
+            </div>
+          )}
+          <div className="home-composer-row">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isGenerating}
+              aria-label={t('uploadFiles')}
+              className="home-landing-hit home-composer-disc flex items-center justify-center disabled:opacity-40"
+            >
+              <Plus className="h-[45%] w-[45%]" strokeWidth={1.3} />
+            </button>
+            <div className="home-composer-divider" />
+            <textarea
+              ref={textareaRef}
+              value={prompt}
+              {...landingPromptHandlers}
+              placeholder={landingPlaceholder}
+              rows={1}
+              disabled={isGenerating}
+              className="home-composer-input"
+            />
+            <button
+              type="button"
+              onClick={handleSendMessage}
+              disabled={isGenerating || !prompt.trim()}
+              aria-label={t('generate')}
+              className={`home-landing-hit home-composer-send flex items-center justify-center disabled:cursor-not-allowed ${
+                sendButtonAnim === 'enlarge' ? 'scale-125' : ''
+              } ${sendButtonAnim === 'click' ? 'scale-90' : ''}`}
+            >
+              <ArrowRight className="h-[42%] w-[42%]" strokeWidth={1.9} />
+            </button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.webp,.wav,.mp3,.aiff,.aac,.ogg,.flac,.mp4,.mpeg,.mov,.avi,.flv,.mpg,.webm,.wmv,.3gpp,audio/mpeg,audio/wav,audio/aiff,audio/aac,audio/ogg,audio/flac,image/png,image/jpeg,image/webp,video/mp4,video/mpeg,video/quicktime,video/avi,video/x-msvideo,video/x-flv,video/mpg,video/webm,video/wmv,video/3gpp"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+        </div>
+        <AudioCropDialog
+          open={audioCropOpen}
+          file={audioCropTarget?.file || null}
+          suggestedDurationSec={getUploadAutoCropTargetSec()}
+          onOpenChange={setAudioCropOpen}
+          onApply={handleApplyAudioCrop}
+        />
+      </div>
+    )
   }
 
   return (

@@ -68,6 +68,7 @@ export default function DeepAgentWorkspacePage() {
     uploadedFiles?: File[]
     userOption?: Record<string, unknown>
     shouldAutoSend?: boolean
+    workflow_id?: string
   } | null
   const shouldStartFromHome = Boolean(initialRequest?.shouldAutoSend && initialRequest.initialPrompt?.trim())
   const isMobile = useIsMobile()
@@ -346,9 +347,11 @@ export default function DeepAgentWorkspacePage() {
     const submitInitialRequest = async () => {
       const files = initialRequest.uploadedFiles || []
       const inputFiles = files.length ? await deepAgentV2Client.uploadFiles(files) : []
+      if (initialRequest.workflow_id) setSelectedSkillName(initialRequest.workflow_id)
       await sendWorkspaceMessage(initialPrompt, {
         user_option: initialRequest.userOption,
         input_files: inputFiles,
+        ...(initialRequest.workflow_id ? { workflow_id: initialRequest.workflow_id } : {}),
       })
     }
     void submitInitialRequest().catch((error: unknown) => {
