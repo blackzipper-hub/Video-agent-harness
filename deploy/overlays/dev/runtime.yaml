@@ -23,7 +23,6 @@ env:
   VIDEO_PLUGIN_PATHS: /srv/video-runtime/plugins
   VIDEO_RUNTIME_DATABASE_SCHEMA: cuti_video_runtime
   ACCOUNT_BACKEND: env
-  ENABLE_TASK_WORKER: "false"
   STORAGE_BACKEND: s3
   MEDIA_SERVICE_URL: http://cuti-media-service:8080
   DEEPSEEK_HARNESS_URL: http://deepseek-harness:3080

@@ -2,11 +2,8 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# This entrypoint is the self-hosted Video Runtime. Imported Cuti environment
-# files often declare ENVIRONMENT=development but omit ACCOUNT_BACKEND, which
-# would otherwise make local Provider calls reach AWS AppConfig. Keep explicit
-# operator choices, while making the standalone default read provider keys from
-# its process environment.
+# This entrypoint is the self-hosted Video Runtime. Provider keys always come
+# from the process environment; keep ACCOUNT_BACKEND=env for older env files.
 os.environ.setdefault("ACCOUNT_BACKEND", "env")
 # The standalone distribution is self-contained by default.  Requiring every
 # developer to remember STORAGE_BACKEND=local made successfully generated

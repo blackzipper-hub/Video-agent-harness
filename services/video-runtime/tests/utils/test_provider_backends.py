@@ -1,8 +1,8 @@
-"""Provider 后端开关（开源自托管：只需 Postgres + Redis）。
+"""Provider 后端开关。
 
 覆盖：
-- STORAGE_BACKEND：local -> S3Utils 写本地磁盘并产出 /files URL；默认 s3 不变
-- ACCOUNT_BACKEND：env -> 从环境变量读各家 key；默认 appconfig 不变
+- STORAGE_BACKEND：local -> S3Utils 写本地磁盘并产出 /files URL；集群仍可用 s3
+- ACCOUNT_BACKEND：只支持 env，从环境变量读各家 key
 """
 import asyncio
 import os
@@ -147,7 +147,7 @@ def test_account_env_backend_reads_env_keys(monkeypatch):
     from app.services.account.account_manager import AccountConfigLoader
 
     loader = AccountConfigLoader()
-    accounts = asyncio.run(loader._load_accounts_from_appconfig())
+    accounts = asyncio.run(loader.load_accounts())
     assert accounts["openai"][0].api_key == "sk-openai-x"
     assert accounts["openai"][0].name == "openai-env"
     assert accounts["google"][0].api_key == "g-x"
@@ -174,6 +174,5 @@ def test_account_env_backend_initializes_without_redis(monkeypatch):
     assert limiter.redis is None
 
 
-def test_account_defaults_to_appconfig():
-    # 默认后端保持 appconfig（不触发 AWS 调用，仅校验默认值）
-    assert (getattr(settings, "ACCOUNT_BACKEND", "appconfig") or "appconfig").lower() in ("appconfig", "env")
+def test_account_defaults_to_env():
+    assert (getattr(settings, "ACCOUNT_BACKEND", "env") or "env").lower() == "env"

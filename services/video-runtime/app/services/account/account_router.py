@@ -1,7 +1,6 @@
 """
 账号路由器 - 负责请求路由、故障转移、限流
 """
-import asyncio
 from typing import Callable, Any
 import logging
 
@@ -23,7 +22,7 @@ class AccountRouter:
     - 自动处理异常和配额释放
     
     工作流程：
-    1. 从 AppConfig 加载账号列表
+    1. 从环境变量加载账号列表
     2. 对每个账号（按优先级）：
        a. 检查限流状态（check_rate_limit）
        b. 如果通过，获取限流配额（acquire_rate_limit）
@@ -38,7 +37,7 @@ class AccountRouter:
         初始化账号路由器
         
         Args:
-            account_config_loader: 账号配置加载器（负责从 AppConfig 加载账号配置）
+            account_config_loader: 账号配置加载器（从环境变量读各家 Key）
             rate_limiter: 限流器（必须提供）
         """
         self.account_config_loader = account_config_loader
@@ -46,13 +45,13 @@ class AccountRouter:
     
     def _get_provider_name(self, provider: ToolProvider) -> str:
         """
-        将 ToolProvider enum 转换为 AppConfig 中的 provider 名称
+        将 ToolProvider enum 转换为环境变量账号里的 provider 名称
         
         Args:
             provider: ToolProvider 枚举值
         
         Returns:
-            AppConfig 中的 provider 名称（如 "google", "wavespeed"）
+            provider 名称（如 "google", "wavespeed"）
         """
         provider_name_map = {
             ToolProvider.GOOGLE: "google",
@@ -74,7 +73,7 @@ class AccountRouter:
         路由Tool请求到最优账号，考虑 Model 级别限流
         
         流程：
-        1. 从 AppConfig 加载账号列表
+        1. 从环境变量加载账号列表
         2. 对每个账号（按优先级）：
            a. 检查限流状态
            b. 如果通过，获取限流配额
@@ -92,7 +91,7 @@ class AccountRouter:
             请求函数的返回结果
         """
         # 加载账号列表
-        accounts_dict = await self.account_config_loader._load_accounts_from_appconfig()
+        accounts_dict = await self.account_config_loader.load_accounts()
         provider_name = self._get_provider_name(provider)
         
         if not provider_name or provider_name not in accounts_dict:
@@ -192,33 +191,14 @@ async def get_account_router() -> AccountRouter:
                 )
                 raise RuntimeError(
                     "AccountConfigLoader not initialized and auto-initialization failed. "
-                    "Please ensure AccountConfigLoader.initialize() is called in application lifespan, "
-                    "or check Redis/AppConfig configuration. "
+                    "Please ensure AccountConfigLoader.initialize() is called in application lifespan. "
                     f"Error: {str(e)}"
                 )
         
-        # 初始化 ModelRateLimiter
         rate_limiter = ModelRateLimiter()
         await rate_limiter.initialize()
-        
-        # 加载限流规则：
-        # - ACCOUNT_BACKEND=env（开源自托管）：不依赖 AWS AppConfig，使用空规则
-        #   （单用户场景无需跨账号限流；否则 boto3 会因缺少 AWS 凭据抛 NoCredentialsError）。
-        # - 否则（默认 appconfig）：从 AWS AppConfig 加载。
-        from ...config import settings
-        backend = (getattr(settings, "ACCOUNT_BACKEND", "appconfig") or "appconfig").lower()
-        if backend == "env":
-            await rate_limiter.load_rules_from_config({"providers": {}})
-            logger.info("ModelRateLimiter initialized with empty rules (ACCOUNT_BACKEND=env, self-hosted)")
-        else:
-            from ..aws.appconfig_service import get_appconfig_service
-            appconfig_service = get_appconfig_service()
-            config = await asyncio.to_thread(
-                appconfig_service.get_configuration,
-                "account-config"
-            )
-            await rate_limiter.load_rules_from_config(config)
-            logger.info("ModelRateLimiter initialized and rules loaded from AppConfig")
+        await rate_limiter.load_rules_from_config({"providers": {}})
+        logger.info("ModelRateLimiter initialized with empty rules (environment keys)")
         
         _account_router = AccountRouter(account_config_loader, rate_limiter)
     return _account_router

@@ -158,28 +158,6 @@ class Settings(BaseSettings):
         description="Fallback user_id for service callers / local single-user mode (set via env/.env)"
     )
 
-    # Billing / credits switch (for open-source / self-hosted deployments)
-    # 默认 False = 保持现有计费行为不变；置 True 时跳过所有额度预检查与扣款（不读写计费表）。
-    DISABLE_BILLING: bool = Field(
-        default=False,
-        description="When True, skip all credit pre-checks and deductions (no billing DB access). Default False keeps existing behavior."
-    )
-
-    # Ops/testing admin (smart_testing / error_tracking / monitoring / shield / curated / run_content)
-    # 默认 True = 保持现有行为（挂载全部运营 admin 路由）；
-    # 开源自托管建议置 False（这些是内部运维/测试能力，属闭源 ee，开源快照不含这些文件）。
-    ENABLE_OPS_ADMIN: bool = Field(
-        default=True,
-        description="Mount internal ops/testing admin routers. Default True keeps existing behavior; set False for open-source deployments."
-    )
-
-    # Task Worker（从 SQS 队列消费并执行视频任务）。默认 True 保持现有行为（dev/prod 需配置 SQS）。
-    # 无 SQS/队列的自托管场景可置 False，避免启动即报错/刷屏（此时不处理异步任务，可后续接入队列）。
-    ENABLE_TASK_WORKER: bool = Field(
-        default=True,
-        description="Start the SQS task worker on boot. Default True. Set False for local/self-host without a queue (no async task processing)."
-    )
-
     # In-process Chat Agent (merged monorepo). Default False keeps this service byte-identical
     # to the standalone VideoAgent; the monorepo deployment sets True so the single process also
     # serves the Chat SSE router at /chat-v1/service (no separate VideoChatAgent process/HTTP hop).
@@ -253,35 +231,25 @@ class Settings(BaseSettings):
         description="Secret key for S3-compatible storage (only used when S3_ENDPOINT_URL is set)."
     )
     
-    # SQS Queue URL (根据ENVIRONMENT自动选择对应的队列)
-    # 格式: https://sqs.{region}.amazonaws.com/{account_id}/{queue_name}
-    SQS_QUEUE_URL: Optional[str] = Field(
-        default=None,
-        description="SQS task queue URL (automatically selected based on ENVIRONMENT)"
-    )
-    # SQS-compatible endpoint (for open-source / self-hosted: point to elasticmq)
-    # 默认 None = 真实 AWS SQS（IAM role）；设为如 http://elasticmq:9324 即切到 SQS 兼容队列。
-    SQS_ENDPOINT_URL: Optional[str] = Field(
-        default=None,
-        description="Custom SQS-compatible endpoint (e.g. http://elasticmq:9324). None = real AWS SQS."
-    )
-
-    # ==================== Provider 后端开关（开源自托管：只需 Postgres + Redis） ====================
-    # 任务队列后端：sqs（默认，生产/AWS）| redis（开源自托管，复用现有 Redis，无需 SQS/elasticmq/moto）
-    QUEUE_BACKEND: str = Field(
-        default="sqs",
-        description="Task queue backend: 'sqs' (default, AWS) or 'redis' (self-host, reuses Redis; no SQS needed)."
-    )
-    # 对象存储后端：s3（默认，AWS/MinIO）| local（开源自托管，本地文件系统，无需对象存储）
+    # ==================== Provider 后端开关 ====================
+    # 对象存储后端：s3（集群成品）| local（自托管 / compose 本地盘）
     STORAGE_BACKEND: str = Field(
         default="s3",
-        description="Object storage backend: 's3' (default, AWS/MinIO) or 'local' (self-host filesystem; no object store needed)."
+        description="Object storage backend: 's3' (AWS/MinIO) or 'local' (filesystem; no object store needed)."
     )
-    # 账号/Key 路由后端：appconfig（默认，AWS AppConfig 账号池）| env（开源自托管，直接读环境变量里的各家 Key）
+    # 账号/Key 只从环境变量读。保留该字段是为了兼容已有 Helm / compose（值只能是 env）。
     ACCOUNT_BACKEND: str = Field(
-        default="appconfig",
-        description="LLM account/key backend: 'appconfig' (default, AWS) or 'env' (self-host, reads keys from env vars)."
+        default="env",
+        description="Provider key backend. Only 'env' is supported (reads keys from environment variables).",
     )
+
+    @field_validator("ACCOUNT_BACKEND")
+    @classmethod
+    def _account_backend_is_env(cls, value: str) -> str:
+        backend = (value or "env").strip().lower()
+        if backend != "env":
+            return "env"
+        return backend
     # 本地存储（STORAGE_BACKEND=local）：文件落地目录 + 对外访问基址
     LOCAL_STORAGE_DIR: str = Field(
         default="./data/uploads",
@@ -343,11 +311,6 @@ class LocalSettings(Settings):
     """Local development environment settings."""
     
     ENVIRONMENT: EnvironmentType = EnvironmentType.LOCAL
-    # Local/self-hosted runs must read provider keys from the process/.env.
-    # Falling back to the base "appconfig" default makes image generation try
-    # AWS AppConfig and fail with NoCredentialsError even when provider keys
-    # are present locally.
-    ACCOUNT_BACKEND: str = "env"
     DEBUG: bool = True
     LOG_LEVEL: str = "DEBUG"
     SERVER_PORT: int = 9002  # 本地环境使用不同端口，避免与其他环境冲突

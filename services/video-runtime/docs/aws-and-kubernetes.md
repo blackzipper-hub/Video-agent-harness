@@ -2,6 +2,8 @@
 
 > 目标：将 VideoAgent 从 EC2 迁移到 EKS，老代码不动、EC2 保留运行，前端可随时切回。
 > 迁移开始日期：2026-03-10
+>
+> 2026-09：AppConfig 账号池、SQS Task Worker 已下线。Provider Key 只从环境变量读取；不要再写入 `SQS_QUEUE_URL`。
 
 ---
 
@@ -345,7 +347,6 @@ kubectl create secret generic cuti-videoagent-secrets \
   --from-literal=JWT_SECRET_KEY='...' \
   --from-literal=DATABASE_URL='postgresql+psycopg://cuti_user:PASSWORD@172.31.4.254:5432/cuti_storybook' \
   --from-literal=REDIS_URL='redis://172.31.4.254:6379/0' \
-  --from-literal=SQS_QUEUE_URL='https://sqs.ap-southeast-2.amazonaws.com/699475938168/QUEUE_NAME' \
   --from-literal=MEDIA_SERVICE_URL='http://cuti-media-service.dev.svc.cluster.local:8080' \
   --from-literal=S3_BUCKET_NAME='cuti-agent-assets-dev-699475938168-ap-southeast-2' \
   --from-literal=CDN_DOMAIN='https://cdn-dev.newai.land' \
@@ -993,12 +994,10 @@ kubectl get ingress -n dev cuti-videoagent-ingress -o jsonpath='{.status.loadBal
 |--------|-----|------|
 | K8s `terminationGracePeriodSeconds` | `10800`（3小时） | 旧 Pod 最多等 3 小时跑完任务 |
 | Pod annotation `safe-to-evict` | `"false"` | Cluster Autoscaler 不会驱逐 |
-| `task_worker.py` stop() timeout | `10500s`（2h55m） | 留 5 分钟余量给 K8s 清理 |
 | Rolling Update `maxSurge: 1, maxUnavailable: 0` | — | 先起新 Pod 再关旧 Pod |
 
 **部署时行为：**
-1. 新 Pod 启动，开始从 SQS 消费新任务
-2. 旧 Pod 收到 SIGTERM → `TaskWorker.stop()` → `self.running = False` → 主循环退出，不再拉新消息
-3. 只等当前正在执行的那一个任务自然完成
-4. 没有活跃任务 → 旧 Pod 几秒内退出
-5. 不会接新任务导致无限延长
+1. 新 Pod 启动后承接新的 HTTP / build 请求
+2. 旧 Pod 收到 SIGTERM 后不再接新请求，等当前生成任务自然完成
+3. 没有活跃任务 → 旧 Pod 几秒内退出
+4. 不会接新任务导致无限延长

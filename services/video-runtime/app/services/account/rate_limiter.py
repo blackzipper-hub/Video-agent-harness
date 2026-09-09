@@ -5,7 +5,7 @@ API 限流器 - 按 Model 维度进行限流
 - 控制 API 调用频率（按 Provider + Model + Account 维度）
 - 支持多种限流策略：RPM、TPM、RPD、FIXED_WINDOW、CONCURRENT
 - 支持共享限流（如 WaveSpeed 的 Images/min、Videos/min）
-- 所有限流规则从 AppConfig 加载，代码中不提供默认规则
+- 限流规则由调用方注入；环境变量账号路径使用空规则（单 Key 无需跨账号限流）
 
 与 worker/rate_limiter.py 的区别：
 - worker/rate_limiter: 控制 worker 任务的并发数（所有 worker 共享）
@@ -124,7 +124,7 @@ class ModelRateLimiter:
     - 控制 API 调用频率（按 Provider + Model + Account 维度）
     - 支持多种限流策略：RPM、TPM、RPD、FIXED_WINDOW、CONCURRENT
     - 支持共享限流（如 WaveSpeed 的 Images/min、Videos/min）
-    - 所有限流规则从 AppConfig 加载
+    - 限流规则由 load_rules_from_config 注入；环境变量账号路径使用空规则
     
     使用示例：
         rate_limiter = ModelRateLimiter()
@@ -165,22 +165,13 @@ class ModelRateLimiter:
         return env_prefix_map.get(env, "dev")
     
     async def initialize(self):
-        """
-        初始化 Redis 客户端
-        
-        注意：如果构造时已传入 redis_client，则不会重新创建
-        """
-        backend = (getattr(get_settings(), "ACCOUNT_BACKEND", "appconfig") or "appconfig").lower()
-        if backend == "env":
-            logger.info("ModelRateLimiter initialized without Redis (ACCOUNT_BACKEND=env)")
-            return
-        if self.redis is None:
-            self.redis = await get_redis_client(decode_responses=True)
-        logger.info("ModelRateLimiter initialized")
+        """No-op: environment-key path does not connect Redis for rate-limit rules."""
+        logger.info("ModelRateLimiter initialized without Redis (environment keys)")
+        return
     
     async def load_rules_from_config(self, config: dict):
         """
-        从 AppConfig 加载限流规则
+        加载限流规则（环境变量账号路径传入空 providers）
         
         配置格式：
         {
@@ -223,7 +214,7 @@ class ModelRateLimiter:
         }
         
         Args:
-            config: AppConfig 配置字典
+            config: provider config dict (environment path passes empty providers)
         """
         self._rules_cache.clear()
         

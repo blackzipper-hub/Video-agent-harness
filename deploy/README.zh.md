@@ -152,7 +152,7 @@ helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-prod -f ./helm/values-
 | Postgres | compose 卷 | 同左 + 多一个 `storybook_dev` | **PVC**（chart）或继续 RDS |
 | Redis | 无 | compose 卷 | **PVC** 或 ElastiCache。**Go 必有** |
 | S3 | 不用（local 盘） | 不用 | 成片用 S3 |
-| Runtime Redis | 不用 | 不用 | 不用（`ENABLE_TASK_WORKER=false`） |
+| Runtime Redis | 不用 | 不用 | 不用 |
 
 现网旧 Go 仍在 EC2，进程就是 `-env cuti-api-go.dev`（:8443）和 `-env cuti-api-go.prod`（:2096）。新栈 Helm 也只用这两个名字；库不在本机时用 Secret 里的 `CUTI_DATABASE_DSN` 覆盖 yaml 里的 `127.0.0.1`。
 

@@ -151,7 +151,7 @@ helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-prod -f ./helm/values-
 | Postgres | Compose volume | Same, plus `storybook_dev` | **PVC** (chart) or existing RDS |
 | Redis | None | Compose volume | **PVC** or ElastiCache; **required by Go** |
 | S3 | Not used (local disk) | Not used | Final videos use S3 |
-| Runtime Redis | Not used | Not used | Not used (`ENABLE_TASK_WORKER=false`) |
+| Runtime Redis | Not used | Not used | Not used |
 
 The existing Go services still run on EC2 with `-env cuti-api-go.dev` (:8443) and `-env cuti-api-go.prod` (:2096). The new Helm stack uses the same two names. For a remote database, override the YAML's `127.0.0.1` using secret `CUTI_DATABASE_DSN`.
 
