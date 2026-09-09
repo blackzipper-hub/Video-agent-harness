@@ -104,8 +104,19 @@ async def hyperframes_caption(req: HyperframesCaptionRequest, request: Request):
             caption_html=req.caption_html,
             composition_html=req.composition_html,
         )
-    except (RuntimeError, ValueError) as exc:
+    except ValueError as exc:
+        # the caller sent something unusable, e.g. neither caption_html nor
+        # composition_html
         raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        # The request was fine and the renderer failed: a missing CLI, a browser
+        # this image cannot probe, or a HyperFrames render error. Reporting that
+        # as 422 made an environment failure look like a bad parameter.
+        # 500 rather than 502: these failures are deterministic, and the runtime's
+        # media client retries 502/503/504 four times with backoff, which would
+        # multiply a broken image into a dozen renders.
+        logger.exception("HyperFrames caption render failed for run %s", req.run_id)
+        raise HTTPException(500, str(exc)) from exc
     url = await s3.upload(out_path, f"media/{req.run_id}/{out_name}", "video/mp4")
     info = await ffmpeg_service.get_video_info(out_path)
     await ws_svc.cleanup_if_enabled(req.run_id)

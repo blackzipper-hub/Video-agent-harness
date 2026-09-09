@@ -44,6 +44,8 @@ async def close():
 
 
 _RETRYABLE_STATUS = {502, 503, 504}
+# Media Service returns up to 3000 characters of renderer stderr on a failure.
+_ERROR_BODY_CHARS = 4000
 
 
 class _RetryableMediaServiceError(Exception):
@@ -91,7 +93,13 @@ async def _post(endpoint: str, payload: dict) -> dict:
         raise
     except httpx.HTTPStatusError as e:
         elapsed_ms = (time.monotonic() - t0) * 1000
-        logger.error(f"📡 MSC !! {endpoint}  {e.response.status_code}  {elapsed_ms:.0f}ms  body={e.response.text[:200]}")
+        # Media Service reports a failed render by putting the renderer's stderr
+        # tail in the body. 200 characters cut that off before the actual error,
+        # so a HyperFrames failure only ever showed its first log line.
+        body = e.response.text
+        if len(body) > _ERROR_BODY_CHARS:
+            body = f"{body[:_ERROR_BODY_CHARS]}… (+{len(body) - _ERROR_BODY_CHARS} chars)"
+        logger.error(f"📡 MSC !! {endpoint}  {e.response.status_code}  {elapsed_ms:.0f}ms  body={body}")
         raise
     except (httpx.ConnectError, httpx.ReadError, httpx.ConnectTimeout) as e:
         elapsed_ms = (time.monotonic() - t0) * 1000

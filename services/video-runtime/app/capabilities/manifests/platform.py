@@ -93,10 +93,13 @@ def platform_capabilities() -> list[CapabilityManifest]:
                     },
                     "prompt": {
                         "type": "string",
+                        "maxLength": 3000,
                         "description": (
-                            "In simple mode: a description of desired music "
-                            "(max 500 chars). In custom mode: the exact lyrics "
-                            "to sing (max 3000 chars)."
+                            "In simple mode: a description of desired music. The "
+                            "vendor rejects this field at 400 characters or more "
+                            "(HTTP 400 validation_error on gpt_description_prompt), "
+                            "so keep it to 399 or fewer. In custom mode: the exact "
+                            "lyrics to sing (max 3000 chars)."
                         ),
                     },
                     "tags": {
@@ -138,6 +141,11 @@ def platform_capabilities() -> list[CapabilityManifest]:
                         ),
                     },
                 },
+                # The 400-character cap only applies to simple mode, where prompt
+                # becomes the vendor's gpt_description_prompt. In custom mode the
+                # same field carries the lyrics and stays long.
+                "if": {"not": {"properties": {"custom_mode": {"const": True}}}},
+                "then": {"properties": {"prompt": {"maxLength": 399}}},
                 "additionalProperties": True,
             },
         ),
