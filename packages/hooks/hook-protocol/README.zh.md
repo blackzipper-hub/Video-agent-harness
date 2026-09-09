@@ -41,4 +41,4 @@ Hook 调用／结果记录必须位于一个尚未结束的轮次内。`UserProm
 
 ## 已知限制与暂缓事项
 
-- **`HookOutput.updatedInput` 会被解析但不会应用**：输入改写是已暂缓的一致性设计问题（见 [pre-tool-input-rewrite Agent Note](../../../.agents/notes/proposed/feature/2026-06-30-pre-tool-input-rewrite.zh.md)）；当 hook 设置它时，桥接会记录 + 警告。完整约定见 `src/types.ts`。
+- **`HookOutput.updatedInput` 会被解析但不会应用**：输入改写是已暂缓的一致性设计问题（见 [pre-tool-input-rewrite Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/proposed/feature/2026-06-30-pre-tool-input-rewrite.md)）；当 hook 设置它时，桥接会记录 + 警告。完整约定见 `src/types.ts`。

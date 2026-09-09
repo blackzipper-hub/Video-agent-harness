@@ -287,7 +287,7 @@ function checkWorkspace({ dir, manifest }: WorkspaceManifest): string[] {
     // them, while the dsh family stays restricted until its own sequence goes
     // public. A mixed scope is why no publish path passes `--access` — one flag
     // cannot serve both, so each packed manifest decides
-    // ([rationale](../.agents/notes/implemented/process/2026-08-13-public-vendor-and-native-sequences.md)).
+    // ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-13-public-vendor-and-native-sequences.md)).
     if (manifest.private === true) {
       errors.push(`${label}: release member must not set "private": true`)
     }

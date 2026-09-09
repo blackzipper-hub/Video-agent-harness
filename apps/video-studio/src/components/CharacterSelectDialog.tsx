@@ -41,7 +41,7 @@ const CharacterSelectPopover = ({
   selectedCharacters = [],
 }: CharacterSelectPopoverProps) => {
   const { t } = useLanguage()
-  const [characters, setCharacters] = useState<Character[]>(DEFAULT_CHARACTERS)
+  const characters: Character[] = DEFAULT_CHARACTERS
   const [selected, setSelected] = useState<string[]>(
     selectedCharacters.map(c => c.id),
   )
@@ -95,7 +95,7 @@ const CharacterSelectPopover = ({
                 return (
                   <button
                     key={character.id}
-                    onClick={() => toggleCharacter(character.id, character.name)}
+                    onClick={() =>{  toggleCharacter(character.id, character.name) }}
                     className="flex-shrink-0 flex flex-col items-center gap-2 p-2 rounded-xl hover:bg-muted/50 transition-all group"
                   >
                     <div

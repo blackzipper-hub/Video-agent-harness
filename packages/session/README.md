@@ -15,7 +15,7 @@ Durable session persistence, semantic checkpoint policy, and the shipped storage
 | [`session-persistence-jsonl/`](session-persistence-jsonl/README.md) | Persists sessions in JSONL files | registers on `ctx.sessionPersistence` |
 | [`session-persistence-sqlite/`](session-persistence-sqlite/README.md) | Opt-in SQLite backend with packed physical chunk rows | registers on `ctx.sessionPersistence` |
 
-The [session-persistence decision](../../.agents/notes/implemented/architecture/2026-06-14-session-persistence.md) records the persistence design.
+The [session-persistence decision](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-14-session-persistence.md) records the persistence design.
 
 ## Projection
 
@@ -42,7 +42,7 @@ Deployments may register one model-backed provider; the service retains a determ
 
 ## SessionTelemetryBackend
 
-Projects session activity into outbound telemetry and delegates delivery to a configured reporting backend. The [telemetry decision](../../.agents/notes/implemented/feature/2026-07-23-session-telemetry-otel-revival.md) records the reporting boundary; the [mode decision](../../.agents/notes/implemented/feature/2026-08-05-feedback-gated-session-telemetry.md) records immediate, feedback-gated, and disabled delivery.
+Projects session activity into outbound telemetry and delegates delivery to a configured reporting backend. The [telemetry decision](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-23-session-telemetry-otel-revival.md) records the reporting boundary; the [mode decision](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-08-05-feedback-gated-session-telemetry.md) records immediate, feedback-gated, and disabled delivery.
 
 | Package | Role |
 |---|---|

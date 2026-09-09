@@ -98,6 +98,15 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'videoRuntime',
+    pkg: 'video-runtime',
+    title: 'Versioned video project runtime',
+    mode: 'seam',
+    implementations: ['video-runtime-http'],
+    consumers: ['tool-video'],
+    note: 'The Python Runtime owns projects, artifacts, builds, and checkpoints; DeepSeek owns the agent loop.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',
@@ -1446,7 +1455,7 @@ function renderIndex(docs: GraphDoc[]): string {
     ...generatedHeader('Documentation Graph Index'),
     'These diagrams show relationships that the generated catalogs do not. Use them to find package relationships, capability seams, event flow, model-facing tools, app composition, and runtime lifecycle paths. Exact signatures and type definitions still live in the [subsystem pages](subsystems/core.md) (types + the generated Cordis API regions) and [tool-catalog.md](tool-catalog.md).',
     '',
-    'The process decision behind this index is recorded in [the documentation graph Agent Note](../.agents/notes/archived/process/2026-07-03-documentation-graph-atlas.md).',
+    'The process decision behind this index is recorded in [the documentation graph Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/archived/process/2026-07-03-documentation-graph-atlas.md).',
     '',
     '| Graph | Mode |',
     '| --- | --- |',

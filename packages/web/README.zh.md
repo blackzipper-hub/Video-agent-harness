@@ -13,6 +13,6 @@
 | [`web-fetch-http/`](web-fetch-http/README.zh.md) | 抓取公共 HTTP 和 HTTPS 资源 | 注册到 `ctx.web` |
 | [`tool-web/`](tool-web/README.zh.md) | 向模型公开 web 搜索和抓取 | 注册到 `ctx.tools` |
 
-[web 能力决策](../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.zh.md)记录了搜索和抓取共用一项提供方选择服务的原因。
+[web 能力决策](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md)记录了搜索和抓取共用一项提供方选择服务的原因。
 
-子系统参考——搜索/抓取请求与结果、可用性、`WebError`——见 [docs/subsystems/web.md](../../docs/subsystems/web.zh.md)；依据（含延后的 SSRF 防护）见 [web 能力 seam Agent Note](../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.zh.md)。
+子系统参考——搜索/抓取请求与结果、可用性、`WebError`——见 [docs/subsystems/web.md](../../docs/subsystems/web.zh.md)；依据（含延后的 SSRF 防护）见 [web 能力 seam Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md)。

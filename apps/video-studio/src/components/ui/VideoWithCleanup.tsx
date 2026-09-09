@@ -1,7 +1,7 @@
-import { useEffect, useRef, forwardRef, useCallback } from "react";
-import { hardCleanupVideo } from "@/utils/videoCleanup";
+import { useEffect, useRef, forwardRef, useCallback } from 'react'
+import { hardCleanupVideo } from '@/utils/videoCleanup'
 
-type VideoWithCleanupProps = React.ComponentPropsWithoutRef<"video">;
+type VideoWithCleanupProps = React.ComponentPropsWithoutRef<'video'>
 
 /**
  * 包装 <video>，在组件卸载时执行 hardCleanupVideo，避免 Detached 节点与显存泄漏。
@@ -9,21 +9,21 @@ type VideoWithCleanupProps = React.ComponentPropsWithoutRef<"video">;
  */
 export const VideoWithCleanup = forwardRef<HTMLVideoElement, VideoWithCleanupProps>(
   function VideoWithCleanup(props, ref) {
-    const innerRef = useRef<HTMLVideoElement | null>(null);
+    const innerRef = useRef<HTMLVideoElement | null>(null)
     const setRef = useCallback(
       (el: HTMLVideoElement | null) => {
-        innerRef.current = el;
-        if (typeof ref === "function") {
-          ref(el);
+        innerRef.current = el
+        if (typeof ref === 'function') {
+          ref(el)
         } else if (ref) {
-          (ref as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+          (ref).current = el
         }
       },
-      [ref]
-    );
+      [ref],
+    )
     useEffect(() => {
-      return () => hardCleanupVideo(innerRef.current);
-    }, []);
-    return <video ref={setRef} {...props} />;
-  }
-);
+      return () =>{  hardCleanupVideo(innerRef.current) }
+    }, [])
+    return <video ref={setRef} {...props} />
+  },
+)

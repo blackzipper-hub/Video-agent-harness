@@ -1,3 +1,4 @@
+import { asyncEvent } from '../utils/asyncEvent'
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useLanguage } from '@/i18n/LanguageContext'
@@ -202,7 +203,7 @@ const GenerationBox = ({
     }, 450)
     const t2 = setTimeout(() => {
       setSendButtonAnim('idle')
-      handleSendMessage()
+      void handleSendMessage()
     }, 650)
     return () => {
       clearTimeout(t1)
@@ -223,7 +224,7 @@ const GenerationBox = ({
       }
     }, 100)
 
-    return () => clearTimeout(timer)
+    return () =>{  clearTimeout(timer) }
   }, []) // 只在组件挂载时执行一次
 
   const autoCropUploadedAudioFiles = async (files: File[], targetDurationSec?: number | null) =>
@@ -231,7 +232,7 @@ const GenerationBox = ({
 
   const getUploadAutoCropTargetSec = () =>
     resolveAutoCropTargetDurationSec(
-      Number(duration?.[0] || DEFAULT_VIDEO_OPTIONS.duration),
+      (duration[0] || DEFAULT_VIDEO_OPTIONS.duration),
       prompt,
       { panelDurationExplicit: durationExplicitlySetRef.current },
     )
@@ -263,12 +264,12 @@ const GenerationBox = ({
   // 创建拖拽处理器
   const dragDropHandler = createDragDropHandler(
     setIsDragOver,
-    async (files: File[]) => {
+    asyncEvent(async (files: File[]) => {
       const { validFiles } = validateFiles(files, uploadedFiles, t)
       if (validFiles.length > 0) {
         await appendUploadedFilesAndOpenAudioCrop(validFiles)
       }
-    },
+    }),
     () => isGenerating,
     t,
   )
@@ -379,7 +380,7 @@ const GenerationBox = ({
     try {
       sendDurationPlan = await resolveSendDurationPlan(
         uploadedFiles,
-        Number(duration?.[0] || DEFAULT_VIDEO_OPTIONS.duration),
+        (duration[0] || DEFAULT_VIDEO_OPTIONS.duration),
         prompt,
         {
           panelDurationExplicit: durationExplicitlySetRef.current,
@@ -456,7 +457,7 @@ const GenerationBox = ({
       }
       // 与 create 页一致：video 传 auto 由后端路由分析决定类型，image/music 传具体类型
       createState.agentType = selectedMediaType === 'video' ? 'auto' : selectedMediaType
-      const lang = routeLang || language || 'en'
+      const lang = routeLang || language
       navigate(`/${lang}/create`, { state: createState })
       setIsGenerating(false)
       return
@@ -506,7 +507,7 @@ const GenerationBox = ({
                 return false
               }
               // 如果配置为不显示 image/music，则过滤掉这些选项
-              if (!showImageMusicCreation && (type === 'image' || type === 'music')) {
+              if (!showImageMusicCreation) {
                 return false
               }
               return true
@@ -522,7 +523,7 @@ const GenerationBox = ({
               {availableTabs.map(({ type, icon: IconComponent, label }) => (
                 <button
                   key={type}
-                  onClick={() => setSelectedMediaType(type)}
+                  onClick={() =>{  setSelectedMediaType(type) }}
                   className={`relative pb-2 sm:pb-3 text-xs sm:text-sm font-medium transition-all duration-300 whitespace-nowrap flex-shrink-0 ${
                     selectedMediaType === type
                       ? 'text-foreground scale-105 sm:scale-110'
@@ -594,7 +595,7 @@ const GenerationBox = ({
                   id="characterName"
                   type="text"
                   value={characterName}
-                  onChange={e => setCharacterName(e.target.value)}
+                  onChange={(e) =>{  setCharacterName(e.target.value) }}
                   placeholder={t('characterNamePlaceholder')}
                   disabled={isUploadingCharacter}
                   className="text-lg"
@@ -644,7 +645,7 @@ const GenerationBox = ({
                           className="w-full h-full object-cover"
                         />
                         <button
-                          onClick={() => handleCharacterImageRemove(index)}
+                          onClick={() =>{  handleCharacterImageRemove(index) }}
                           className="absolute top-1 right-1 w-6 h-6 rounded-full bg-destructive/90 hover:bg-destructive flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
                           title={t('removeImage')}
                         >
@@ -660,7 +661,7 @@ const GenerationBox = ({
               )}
 
               <Button
-                onClick={handleCharacterUpload}
+                onClick={asyncEvent(handleCharacterUpload)}
                 disabled={isUploadingCharacter || !characterName.trim() || characterImages.length === 0}
                 className="w-full h-12 text-base font-medium"
                 size="lg"
@@ -684,15 +685,15 @@ const GenerationBox = ({
                 <textarea
                   ref={textareaRef}
                   value={prompt}
-                  onChange={e => setPrompt(e.target.value)}
-                  onFocus={() => setIsFocused(true)}
-                  onBlur={() => setIsFocused(false)}
+                  onChange={(e) =>{  setPrompt(e.target.value) }}
+                  onFocus={() =>{  setIsFocused(true) }}
+                  onBlur={() =>{  setIsFocused(false) }}
                   onKeyDown={(e) => {
                     const target = e.target as HTMLTextAreaElement & { composing?: boolean }
-                    const isComposing = e.nativeEvent?.isComposing || target.composing
+                    const isComposing = e.nativeEvent.isComposing || target.composing
                     if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                       e.preventDefault()
-                      handleSendMessage()
+                      void handleSendMessage()
                     }
                   }}
                   onCompositionStart={(e) => {
@@ -703,13 +704,13 @@ const GenerationBox = ({
                     const target = e.target as HTMLTextAreaElement & { composing?: boolean }
                     target.composing = false
                   }}
-                  onPaste={async (e) => {
+                  onPaste={asyncEvent(async (e) => {
                     if (isGenerating) return
                     const clipboardData = e.clipboardData
-                    if (!clipboardData) return
                     const pasted: File[] = []
                     for (let i = 0; i < clipboardData.items.length; i++) {
                       const item = clipboardData.items[i]
+                      if (!item) continue
                       if (item.kind !== 'file') continue
                       const f = item.getAsFile()
                       if (f) pasted.push(normalizeClipboardFile(f))
@@ -725,7 +726,7 @@ const GenerationBox = ({
                           : t('pastedImages').replace('{count}', String(validFiles.length)),
                       )
                     }
-                  }}
+                  })}
                   placeholder={
                     selectedMediaType === 'image'
                       ? t('describeImageContent')
@@ -746,7 +747,7 @@ const GenerationBox = ({
                   multiple
                   accept=".jpg,.jpeg,.png,.webp,.wav,.mp3,.aiff,.aac,.ogg,.flac,.mp4,.mpeg,.mov,.avi,.flv,.mpg,.webm,.wmv,.3gpp,audio/mpeg,audio/wav,audio/aiff,audio/aac,audio/ogg,audio/flac,image/png,image/jpeg,image/webp,video/mp4,video/mpeg,video/quicktime,video/avi,video/x-msvideo,video/x-flv,video/mpg,video/webm,video/wmv,video/3gpp"
                   className="hidden"
-                  onChange={handleFileSelect}
+                  onChange={asyncEvent(handleFileSelect)}
                 />
               </div>
 
@@ -801,7 +802,7 @@ const GenerationBox = ({
                   <TooltipTrigger asChild>
                     <span className="inline-flex">
                       <CharacterSelectPopover
-                        onSelect={async (characters) => {
+                        onSelect={asyncEvent(async (characters) => {
                           const prevIds = new Set(selectedCharacters.map(c => c.id))
                           const newIds = new Set(characters.map(c => c.id))
                           const added = characters.filter(c => !prevIds.has(c.id))
@@ -813,7 +814,7 @@ const GenerationBox = ({
                             const removedIds = new Set(removed.map(c => c.id))
                             setUploadedFiles(prev => prev.filter((f) => {
                               const m = f.name.match(/^character-(.+)\.(png|jpg|jpeg|webp)$/i)
-                              return !m || !removedIds.has(m[1])
+                              return !m?.[1] || !removedIds.has(m[1])
                             }))
                           }
 
@@ -834,7 +835,7 @@ const GenerationBox = ({
                               setUploadedFiles(prev => [...prev, ...newFiles])
                             }
                           }
-                        }}
+                        })}
                         selectedCharacters={selectedCharacters}
                       >
                         <button
@@ -862,7 +863,7 @@ const GenerationBox = ({
                       <button
                         type="button"
                         disabled={isGenerating}
-                        onClick={() => setIsFullAuto(true)}
+                        onClick={() =>{  setIsFullAuto(true) }}
                         className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
                           isFullAuto
                             ? 'bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
@@ -881,7 +882,7 @@ const GenerationBox = ({
                       <button
                         type="button"
                         disabled={isGenerating}
-                        onClick={() => setIsFullAuto(false)}
+                        onClick={() =>{  setIsFullAuto(false) }}
                         className={`min-w-0 px-1.5 sm:px-2.5 py-2 sm:py-2.5 rounded-full text-[10px] sm:text-xs font-medium transition-colors truncate ${
                           !isFullAuto
                             ? 'bg-white/50 backdrop-blur-sm text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.4)] dark:bg-white/15 dark:backdrop-blur-sm dark:text-gray-200 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
@@ -919,16 +920,16 @@ const GenerationBox = ({
                             onResolutionChange={setResolution}
                             aspectRatio={aspectRatio}
                             onAspectRatioChange={setAspectRatio}
-                            lipsyncCoverage={lipsyncRatio[0]}
-                            onLipsyncCoverageChange={v => setLipsyncRatio([v])}
+                            lipsyncCoverage={lipsyncRatio[0] ?? 100}
+                            onLipsyncCoverageChange={(v) =>{  setLipsyncRatio([v]) }}
                             isAutoModel={isAutoModel}
                             onAutoModelChange={setIsAutoModel}
                             imageGenerationTool={imageModel}
                             onImageGenerationToolChange={setImageModel}
                             videoModel={videoModel}
-                            onVideoModelChange={v => setVideoModel(v)}
+                            onVideoModelChange={(v) =>{  setVideoModel(v) }}
                             lipsyncVideoModel={lipsyncVideoModel}
-                            onLipsyncVideoModelChange={v => setLipsyncVideoModel(v)}
+                            onLipsyncVideoModelChange={(v) =>{  setLipsyncVideoModel(v) }}
                             enableContinuityMode={isContinuousMode}
                             onEnableContinuityModeChange={setIsContinuousMode}
                             enableKeyframeReflection={enableReflectionMode}
@@ -949,7 +950,7 @@ const GenerationBox = ({
                 </Tooltip>
                 {/* Send Button */}
                 <Button
-                  onClick={handleSendMessage}
+                  onClick={asyncEvent(handleSendMessage)}
                   disabled={isGenerating || !prompt.trim()}
                   size="icon"
                   className={`h-10 sm:h-11 w-10 sm:w-11 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-violet-600 text-white shadow-lg hover:shadow-xl hover:scale-105 hover:opacity-95 transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100 ${
@@ -975,7 +976,7 @@ const GenerationBox = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setShowSoraDialog(false)}>
+            <AlertDialogCancel onClick={() =>{  setShowSoraDialog(false) }}>
               {t('cancel') || 'Cancel'}
             </AlertDialogCancel>
             <AlertDialogAction

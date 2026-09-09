@@ -9,6 +9,26 @@ This file is GENERATED from source (`scripts/gen-config-catalog.ts`) and verifie
 
 A `Requires:` line lists the service keys the plugin `inject`s: its `cordis.yml` tree must also load providers for those services. Scope is the harness tier (`packages/`); the vendored cordis plugins a config tree may also load (`hmr`, the console logger, …) are pinned upstream source ([vendoring policy](../vendor/README.md)) and not catalogued here.
 
+<a id="cuti-aivideo-runtime-http"></a>
+
+## `@cuti-ai/video-runtime-http`
+
+```ts config-catalog
+/** Connection and request bounds for the Python Video Runtime HTTP provider. */
+export interface Config {
+  /** Runtime origin, without a project-specific API path. */
+  baseUrl: string
+  /** Optional service credential sent with Runtime requests. */
+  serviceToken?: string
+  /** Default user attribution when a request supplies none. */
+  userId?: string
+  /** Per-request timeout in milliseconds; defaults to 30000. */
+  timeoutMs?: number
+}
+```
+
+Source: [`packages/video/video-runtime-http/src/index.ts:33`](../packages/video/video-runtime-http/src/index.ts)
+
 <a id="deepseek-aidsh-acp"></a>
 
 ## `@deepseek-ai/dsh-acp`
@@ -3222,6 +3242,8 @@ Source: [`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages
 
 These load from a `cordis.yml` entry with no `config:` block; they declare no configuration API.
 
+- `@cuti-ai/tool-video` — requires `tools` · `videoRuntime` ([`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts))
+- `@cuti-ai/video-agent-bundle` ([`packages/bundle/video-agent/src/index.ts`](../packages/bundle/video-agent/src/index.ts))
 - `@deepseek-ai/dsh-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
 - `@deepseek-ai/dsh-api-gateway` — requires `typert` ([`packages/api/gateway/src/index.ts`](../packages/api/gateway/src/index.ts))
 - `@deepseek-ai/dsh-api-remotes` ([`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts))
@@ -3295,8 +3317,9 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 
 ## Seam packages (not directly loadable)
 
-Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).
+Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).
 
+- `@cuti-ai/video-runtime` — abstract `VideoRuntime` ([`packages/video/video-runtime/src/index.ts`](../packages/video/video-runtime/src/index.ts))
 - `@deepseek-ai/dsh-attachment` — abstract `AttachmentStore` ([`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts))
 - `@deepseek-ai/dsh-code-runtime` — abstract `CodeRuntime` ([`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts))
 - `@deepseek-ai/dsh-compaction` — abstract `CompactionEngine` ([`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts))

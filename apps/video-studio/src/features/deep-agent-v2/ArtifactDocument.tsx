@@ -1,3 +1,4 @@
+import { displayValue } from '../../utils/displayValue'
 import { memo, useId, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -41,7 +42,7 @@ function parseDocument(source: string): unknown {
   let value: unknown = source
   for (let pass = 0; pass < 3 && typeof value === 'string'; pass++) {
     const candidate = value.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1').trim()
-    if (!['[', '{', '"'].includes(candidate[0])) break
+    if (!['[', '{', '"'].includes(candidate.charAt(0))) break
     try { value = JSON.parse(candidate) } catch { break }
   }
   return value
@@ -53,8 +54,8 @@ function MarkdownText({ text, language }: { text: string; language: Language }) 
     let fenced = false
     return text.split('\n').flatMap((line, index) => {
       if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; return [] }
-      const match = !fenced && /^#{2,3}\s+(.+)/.exec(line)
-      return match ? [{ label: match[1].replace(/[*`]/g, ''), id: `${scope}-${index + 1}` }] : []
+      const match = fenced ? null : /^#{2,3}\s+(.+)/.exec(line)
+      return match?.[1] ? [{ label: match[1].replace(/[*`]/g, ''), id: `${scope}-${index + 1}` }] : []
     })
   }, [scope, text])
   const navigation = headings.length >= 4 ? <details className="mb-5 rounded-xl border border-border/60 bg-muted/20 p-3">
@@ -85,23 +86,23 @@ function ValueView({ value, language, depth = 0 }: { value: unknown; language: L
   const [expanded, setExpanded] = useState(false)
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>
   if (typeof value === 'string') return <MarkdownText text={value} language={language} />
-  if (typeof value !== 'object') return <span className="text-sm leading-7">{typeof value === 'boolean' ? (value ? copy[language].yes : copy[language].no) : String(value)}</span>
+  if (typeof value !== 'object') return <span className="text-sm leading-7">{typeof value === 'boolean' ? (value ? copy[language].yes : copy[language].no) : displayValue(value)}</span>
   if (depth >= 6) return <details className="rounded-lg border border-border/50 p-3"><summary className="cursor-pointer text-sm">{copy[language].nested}</summary><pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(value, null, 2)}</pre></details>
   if (Array.isArray(value)) {
-    const shown = expanded ? value : value.slice(0, 8)
+    const shown: unknown[] = expanded ? value : value.slice(0, 8)
     return <div className="space-y-3">
       {shown.map((item, index) => <section key={index} className="flex min-w-0 gap-3 rounded-xl border border-border/50 bg-muted/15 p-4">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">{index + 1}</span>
         <div className="min-w-0 flex-1"><ValueView value={item} language={language} depth={depth + 1} /></div>
       </section>)}
       {!value.length && <p className="text-sm text-muted-foreground">{copy[language].empty}</p>}
-      {value.length > 8 && <button type="button" onClick={() => setExpanded(!expanded)} className="rounded-md px-2 py-1 text-sm text-primary hover:bg-muted focus-visible:outline focus-visible:outline-2">{expanded ? copy[language].collapse : `${copy[language].expand} ${value.length} ${copy[language].items}`}</button>}
+      {value.length > 8 && <button type="button" onClick={() =>{  setExpanded(!expanded) }} className="rounded-md px-2 py-1 text-sm text-primary hover:bg-muted focus-visible:outline focus-visible:outline-2">{expanded ? copy[language].collapse : `${copy[language].expand} ${value.length} ${copy[language].items}`}</button>}
     </div>
   }
-  const fields = Object.entries(value)
+  const fields: [string, unknown][] = Object.entries(value)
   const heading = fields.find(([key, item]) => ['title', 'name'].includes(key) && typeof item === 'string')
   return <div className="min-w-0">
-    {heading && <h3 className="mb-4 whitespace-pre-wrap break-words text-base font-semibold leading-7">{String(heading[1])}</h3>}
+    {heading && <h3 className="mb-4 whitespace-pre-wrap break-words text-base font-semibold leading-7">{displayValue(heading[1])}</h3>}
     <dl className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">{fields.filter(([key]) => key !== heading?.[0]).map(([key, item]) => <div key={key} className={typeof item === 'object' || (typeof item === 'string' && item.length > 60) ? 'min-w-0 sm:col-span-2' : 'min-w-0'}>
       <dt className="mb-1 break-words text-xs font-medium tracking-wide text-muted-foreground">{labels[language][key] || key.replace(/[_-]/g, ' ')}</dt>
       <dd className="min-w-0"><ValueView value={item} language={language} depth={depth + 1} /></dd>
@@ -118,7 +119,7 @@ export const ArtifactDocument = memo(function ArtifactDocument({ children }: { c
     <div className="max-h-[36rem] overflow-y-auto overscroll-contain pr-2 [overflow-wrap:anywhere]">
       <ValueView value={value} language={language} />
     </div>
-    {structured && <details className="mt-5 border-t border-border/50 pt-3" onToggle={event => setRawOpen(event.currentTarget.open)}>
+    {structured && <details className="mt-5 border-t border-border/50 pt-3" onToggle={(event) =>{  setRawOpen(event.currentTarget.open) }}>
       <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">{copy[language].raw}</summary>
       {rawOpen && <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted/40 p-4 font-mono text-xs leading-5">{JSON.stringify(value, null, 2)}</pre>}
     </details>}

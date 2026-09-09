@@ -1,8 +1,8 @@
 // API 响应类型定义
 
 // Imported Cuti response payloads remain heterogeneous during the Runtime migration.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LegacyApiValue = any
+
+type LegacyApiValue = unknown
 
 /**
  * 统一响应格式 - CartoonBook Backend

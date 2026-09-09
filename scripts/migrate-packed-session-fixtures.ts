@@ -2,7 +2,7 @@
 /**
  * Temporary branch-convergence command for canonical projected session fixtures.
  *
- * @see ../.agents/notes/proposed/process/2026-07-26-remove-packed-session-fixture-migrator.md
+ * @see https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/proposed/process/2026-07-26-remove-packed-session-fixture-migrator.md
  */
 
 import { writeFileSync } from 'node:fs'

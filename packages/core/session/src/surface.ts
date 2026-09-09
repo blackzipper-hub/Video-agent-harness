@@ -92,7 +92,7 @@ export function deriveEventMessage(event: SessionEvent): Message | null {
     // if reintroduced, must be driven by the event `meta` map and a dedicated
     // renderer, keeping this projection a verbatim pass-through. See the
     // deferred design note in
-    // ../../../../.agents/notes/implemented/simplification/2026-07-20-unwrap-injected-content-envelopes.md
+    // https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/simplification/2026-07-20-unwrap-injected-content-envelopes.md
     case 'user/message': {
       return event.data
     }

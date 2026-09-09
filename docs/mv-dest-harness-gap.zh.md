@@ -1,9 +1,8 @@
 # `$mv`：dest vs 现在 harness（讨论稿）
 
-> 状态：看板里「已做」的已经改了代码。划掉的 = 已拍板不用做。
-> 日期：2026-09-05。
-> 对照：dest 备份 `origin/archive/pre-harness-dev`（`82f910a`，8-30）vs 当前 `deepseek-harness`（`5663485`）。
-> 若 8-30 之后只改了线上 dest、没回这个 archive，那些改动这份对不上。
+[English](mv-dest-harness-gap.md) | 中文
+
+> 状态：看板里「已做」的已经改了代码。划掉的 = 已拍板不用做。 日期：2026-09-05。 对照：dest 备份 `origin/archive/pre-harness-dev`（`82f910a`，8-30）vs 当前 `deepseek-harness`（`5663485`）。 若 8-30 之后只改了线上 dest、没回这个 archive，那些改动这份对不上。
 
 前提：本地 compose **开了** `VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED`。不跑 `compile_mv`。顺序和参数靠 `$mv` / `$h3` 等 skill，和 dest 一样。
 
@@ -104,9 +103,7 @@ LLM add_tasks（capability + parameters）
 | **dest 当年** | `chat/v2/executors.py` | **`video_urls`**（没有则用选中的 artifact URL） |
 | **现在 build** | `builtin_plugins/media_core.py` | **`video_steps`**（上一步的 step_id，再换成 URI） |
 
-`$mv` skill 还在教 dest 那套：`media.concat` 传 **`video_urls`**。
-现在 `execute_build` 走 **media_core**，**只看 `video_steps`**。传了 `video_urls` 当没看见。
-`video_urls` 是 **最后调 ffmpeg 时** 程序自己填的，不是让 LLM 填的。
+`$mv` skill 还在教 dest 那套：`media.concat` 传 **`video_urls`**。 现在 `execute_build` 走 **media_core**，**只看 `video_steps`**。传了 `video_urls` 当没看见。 `video_urls` 是 **最后调 ffmpeg 时** 程序自己填的，不是让 LLM 填的。
 
 改的只是「文件从哪来」那几个键，不是整个 capability 只剩 step：
 
@@ -122,11 +119,9 @@ LLM add_tasks（capability + parameters）
 
 `prompt`、`duration`、`model`、`resolution`、`tags`、`normalize`、`transition_duration`、`caption_html` **没改成 step**。
 
-`images`：plugin 用 `setdefault`，LLM 若已经塞了可用 URL，H3 **有可能**直接工作。
-concat / mix / 字幕 **没有**这层兼容。
+`images`：plugin 用 `setdefault`，LLM 若已经塞了可用 URL，H3 **有可能**直接工作。 concat / mix / 字幕 **没有**这层兼容。
 
-后期 `preview_plan_patch` 有一层：禁止 LLM 写 `*_url` / `*_step`，改由 `inputs[]` 填成 `video_steps`。
-**continuous 的 `add_tasks` 没有这层映射。**
+后期 `preview_plan_patch` 有一层：禁止 LLM 写 `*_url` / `*_step`，改由 `inputs[]` 填成 `video_steps`。 **continuous 的 `add_tasks` 没有这层映射。**
 
 ### 2.3 用一次 concat 看完
 
@@ -153,8 +148,7 @@ schema 可能过（还要求 `video_urls`）。`execute_build` → media_core �
 
 `video_step` = 上一步产出文件的名字。Runtime 表：`shot-1-video → uri`。plugin 查表再交给 ffmpeg。
 
-dest 用 URL：一步跑完才调下一步，tool 返回里已经有 URL。
-harness 用 step：计划提交时下一镜 URL 往往还不存在。
+dest 用 URL：一步跑完才调下一步，tool 返回里已经有 URL。 harness 用 step：计划提交时下一镜 URL 往往还不存在。
 
 ### 2.4 可以怎么改（已拍板：方案 3）
 
@@ -180,8 +174,7 @@ dest Never（写在 `$mv` 里，不是 Python）：没听分析不许切、不�
 
 `_validate_mv_compat_plan` 是 harness **compiler** 冻整张 DAG 时的门禁。continuous 初始化只有 intent，没有那张图，校验没对象。模型一批一批 `add_tasks`，更接近 dest。
 
-Runtime 仍会拦：capability 不在白名单、一批超过 8 个、依赖还没跑完。
-**不会**拦「第一批必须是歌」。dest 当时也拦不了。
+Runtime 仍会拦：capability 不在白名单、一批超过 8 个、依赖还没跑完。 **不会**拦「第一批必须是歌」。dest 当时也拦不了。
 
 ~~continuous 加政策门禁 / 恢复「第一批必须是歌」~~：**不用。** 用 skill 控制。
 

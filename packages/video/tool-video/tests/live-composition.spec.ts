@@ -17,9 +17,10 @@ afterEach(async () => {
 it('loads video tools through YAML and transports a live edit with pending cancellation', async () => {
   const calls: Array<{ path: string; method: string; body: Record<string, unknown> }> = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => {
+    if (options.body != null && typeof options.body !== 'string') throw new Error('Expected JSON request text')
     calls.push({
       path: new URL(url).pathname, method: options.method ?? 'GET',
-      body: options.body ? JSON.parse(String(options.body)) as Record<string, unknown> : {},
+      body: options.body ? JSON.parse(options.body) as Record<string, unknown> : {},
     })
     return Response.json({ data: url.endsWith('/live')
       ? { id: 'checkpoint-2', phase: 'live:2', next_phase: 'agent_execution', artifact_summaries: [], base_plan_revision: 2, base_spec_revision: 2 }

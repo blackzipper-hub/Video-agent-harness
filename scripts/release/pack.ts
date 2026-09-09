@@ -4,7 +4,7 @@
  *
  * The pack step is the release boundary: it runs without credentials, produces
  * every tarball from one commit, and hands the publish step exactly those bytes
- * ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+ * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'

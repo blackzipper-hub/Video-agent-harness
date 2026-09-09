@@ -39,7 +39,7 @@ export interface DeepAgentSkillLock {
   skill_id: string
   version: string
   digest: string
-  source: 'builtin' | 'external' | string
+  source: string
   enabled: boolean
 }
 
@@ -128,7 +128,7 @@ export interface DeepAgentSelection {
 export interface DeepAgentMessage {
   id: string
   run_id: string
-  role: 'user' | 'assistant' | string
+  role: string
   content: string
   sequence?: number
   metadata?: Record<string, unknown>
@@ -138,7 +138,7 @@ export interface DeepAgentMessage {
 }
 
 export interface DeepAgentInputFile {
-  type: 'image' | 'audio' | 'video' | string
+  type: string
   url: string
   artifact_id?: string
   filename?: string | null

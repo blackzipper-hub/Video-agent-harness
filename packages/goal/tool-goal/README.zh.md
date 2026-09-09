@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[`ctx.goals`](../goal/README.zh.md) 的面向模型控制 API：`get_goal`、`create_goal` 和 `update_goal`。[goal 工具 Agent Note](../../../.agents/notes/implemented/feature/2026-07-19-model-facing-goal-tools.zh.md) 负责权限拆分与 Codex 风格用户体验。
+[`ctx.goals`](../goal/README.zh.md) 的面向模型控制 API：`get_goal`、`create_goal` 和 `update_goal`。[goal 工具 Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-19-model-facing-goal-tools.md) 负责权限拆分与 Codex 风格用户体验。
 
 ## 工具
 

@@ -8,7 +8,7 @@
  * carriers consume the snapshot read face and the change feed. Neither side
  * knows the other
  * (capability-seam three-way split). Design authority: the session-projection
- * RFC (.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
+ * RFC (https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
  *
  * Whole-value event rule (load-bearing): a state-carrying log event MUST
  * carry the complete post-change state, never a bare delta — it keeps every

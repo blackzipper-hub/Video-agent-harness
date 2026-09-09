@@ -33,7 +33,7 @@ const readThreadId = (runId?: string | null): string | undefined => {
 
 /** Stable 32-char hex id — matches backend default thread_id shape. */
 export const createThreadId = (): string =>
-  (globalThis.crypto?.randomUUID?.() ?? createIdempotencyKey()).replace(/-/g, '').slice(0, 32)
+  createIdempotencyKey().replace(/-/g, '').slice(0, 32)
 
 export function useDeepAgentWorkspace({
   autoSelect = true,
@@ -76,7 +76,7 @@ export function useDeepAgentWorkspace({
     try {
       const runs = await deepAgentV2Client.listRuns(controller.signal)
       if (controller.signal.aborted) return
-      runs.forEach(run => persistThreadId(run.id, run.thread_id))
+      runs.forEach((run) =>{  persistThreadId(run.id, run.thread_id) })
       dispatch({ type: 'RUNS_LOADED', runs })
       if (selectionVersion !== selectionVersionRef.current) return
 
@@ -138,7 +138,7 @@ export function useDeepAgentWorkspace({
         type: 'HYDRATE',
         runId,
         snapshot,
-        messages: snapshot.messages ?? [],
+        messages: snapshot.messages,
         events: snapshot.events ?? [],
       })
     } catch (_error) {
@@ -215,11 +215,13 @@ export function useDeepAgentWorkspace({
     const controller = new AbortController()
     cursorRef.current = readSequence(runId)
     let stopped = false
+    const isAborted = () => controller.signal.aborted
 
     const connect = async () => {
       dispatch({ type: 'STREAMING', streaming: true })
       while (!stopped && !controller.signal.aborted) {
         let terminal = false
+        const isTerminal = () => terminal
         try {
           const response = await fetch(deepAgentV2Client.eventsUrl(runId, cursorRef.current), {
             credentials: 'include',
@@ -237,9 +239,9 @@ export function useDeepAgentWorkspace({
               'run.cancelled',
             ].includes(event.type)
           })
-          if (terminal) break
+          if (isTerminal()) break
         } catch (_error) {
-          if (controller.signal.aborted) break
+          if (isAborted()) break
           dispatch({
             type: 'NOTICE',
             notice: {
@@ -293,7 +295,7 @@ export function useDeepAgentWorkspace({
       return (pendingThreadId || routeThreadIdRef.current || '').trim() || undefined
     }
     const fromSnapshot = state.snapshot?.run.id === runId
-      ? state.snapshot?.run.thread_id
+      ? state.snapshot.run.thread_id
       : undefined
     const fromRuns = state.runs.find(run => run.id === runId)?.thread_id
     return (fromSnapshot || fromRuns || readThreadId(runId) || pendingThreadId || '').trim() || undefined

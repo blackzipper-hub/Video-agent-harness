@@ -11,25 +11,25 @@
  */
 
 export const VIDEO_MODEL_OPTIONS = [
-  { value: "seedance_1_0_pro_fast", label: "Seedance 1.0 Pro Fast" },
-  { value: "seedance_1_5_pro_fast", label: "Seedance 1.5 Pro Fast" },
-  { value: "seedance_2_i2v", label: "Seedance 2.0" },
-  { value: "seedance_2_i2v_turbo", label: "Seedance 2.0 Turbo" },
-  { value: "seedance_2_fast_i2v", label: "Seedance 2.0 Fast" },
-  { value: "seedance_2_fast_i2v_turbo", label: "Seedance 2.0 Fast Turbo" },
-  { value: "kling_v3_std", label: "Kling v3 Std" },
-  { value: "happyhorse_1_0_i2v", label: "HappyHorse 1.0" },
-  { value: "happyhorse_1_1_i2v", label: "HappyHorse 1.1" },
-  { value: "sora", label: "Sora" },
-  { value: "sora2_pro", label: "Sora2 Pro" },
-] as const;
+  { value: 'seedance_1_0_pro_fast', label: 'Seedance 1.0 Pro Fast' },
+  { value: 'seedance_1_5_pro_fast', label: 'Seedance 1.5 Pro Fast' },
+  { value: 'seedance_2_i2v', label: 'Seedance 2.0' },
+  { value: 'seedance_2_i2v_turbo', label: 'Seedance 2.0 Turbo' },
+  { value: 'seedance_2_fast_i2v', label: 'Seedance 2.0 Fast' },
+  { value: 'seedance_2_fast_i2v_turbo', label: 'Seedance 2.0 Fast Turbo' },
+  { value: 'kling_v3_std', label: 'Kling v3 Std' },
+  { value: 'happyhorse_1_0_i2v', label: 'HappyHorse 1.0' },
+  { value: 'happyhorse_1_1_i2v', label: 'HappyHorse 1.1' },
+  { value: 'sora', label: 'Sora' },
+  { value: 'sora2_pro', label: 'Sora2 Pro' },
+] as const
 
 /** Create 页 selectedModel 为 label 时，用此映射转成 value 传给面板 */
 export const VIDEO_MODEL_LABEL_TO_VALUE: Record<string, string> = Object.fromEntries(
-  VIDEO_MODEL_OPTIONS.map((m) => [m.label, m.value])
-);
+  VIDEO_MODEL_OPTIONS.map(m => [m.label, m.value]),
+)
 
 /** 视频模型 value 转成 label，供 Create 页 onModelChange 使用 */
 export const VIDEO_MODEL_VALUE_TO_LABEL: Record<string, string> = Object.fromEntries(
-  VIDEO_MODEL_OPTIONS.map((m) => [m.value, m.label])
-);
+  VIDEO_MODEL_OPTIONS.map(m => [m.value, m.label]),
+)

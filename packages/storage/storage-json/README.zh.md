@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[存储中心](../storage/README.zh.md)的 JSON 后端：配置根目录下每个单元使用一个人类可读的 `<unit>.json` 文件，注册为后端 `json`。设计见[领域 KV 存储 Agent Note](../../../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.zh.md)。
+[存储中心](../storage/README.zh.md)的 JSON 后端：配置根目录下每个单元使用一个人类可读的 `<unit>.json` 文件，注册为后端 `json`。设计见[领域 KV 存储 Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.md)。
 
 ## 模型
 

@@ -261,7 +261,7 @@ export interface ToolDefinition extends ToolSchema {
    * Opted-in executions must not mutate parent-owned state. Shared state must
    * tolerate concurrent dispatch; recorder races are permitted only when they
    * commute or fail closed. See the
-   * [parallel-tool-call Agent Note](../../../../.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)
+   * [parallel-tool-call Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)
    * for the full contract.
    * @param args - parsed arguments; `defineTool` validates before calling.
    * @returns Whether this call may join a parallel group.
@@ -1014,7 +1014,7 @@ export class ToolRuntime extends Service {
    * language between them would hand a program written against one SDK to the
    * other. Binding it is deferred until a second backend ships (the first
    * point it is testable); rationale in the
-   * [language-dispatch note](../../../../.agents/notes/implemented/feature/2026-07-31-code-mode-language-dispatch.md).
+   * [language-dispatch note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-31-code-mode-language-dispatch.md).
    */
   private requireCodeRuntime(mode: ToolPresentationMode): CodeRuntime {
     const runtime = this.ctx.get('codeRuntime')

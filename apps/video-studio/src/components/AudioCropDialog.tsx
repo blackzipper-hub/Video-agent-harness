@@ -1,35 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Pause, Play, Scissors } from "lucide-react";
-import { toast } from "sonner";
-import { createWaveformPeaks, cropAudioFile, decodeAudioFile } from "@/utils/audioCrop";
-import { useLanguage } from "@/i18n/LanguageContext";
-import { audioApi } from "@/services/api";
+import { asyncEvent } from '../utils/asyncEvent'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Pause, Play, Scissors } from 'lucide-react'
+import { toast } from 'sonner'
+import { createWaveformPeaks, cropAudioFile, decodeAudioFile } from '@/utils/audioCrop'
+import { useLanguage } from '@/i18n/LanguageContext'
+import { audioApi } from '@/services/api'
 
 interface AudioCropDialogProps {
-  open: boolean;
-  file: File | null;
+  open: boolean
+  file: File | null
   /** 用户显式指定的目标视频时长；用于 AI 推荐区间 + 手动「建议区间」快捷按钮 */
-  suggestedDurationSec?: number | null;
-  onOpenChange: (open: boolean) => void;
-  onApply: (nextFile: File) => void;
+  suggestedDurationSec?: number | null
+  onOpenChange: (open: boolean) => void
+  onApply: (nextFile: File) => void
 }
 
-const MIN_CROP_SECONDS = 1;
-const RECOMMEND_GAP_SEC = 1;
+const MIN_CROP_SECONDS = 1
+const RECOMMEND_GAP_SEC = 1
 
 const fileCacheKey = (file: File, suggestedDurationSec?: number | null) =>
-  `${file.name}:${file.size}:${file.lastModified}:${suggestedDurationSec ?? 0}`;
+  `${file.name}:${file.size}:${file.lastModified}:${suggestedDurationSec ?? 0}`
 
-const recommendCache = new Map<string, Awaited<ReturnType<typeof audioApi.recommendAudioCrop>>["data"]>();
+const recommendCache = new Map<string, Awaited<ReturnType<typeof audioApi.recommendAudioCrop>>['data']>()
 
 const formatSec = (sec: number) => {
-  if (!Number.isFinite(sec)) return "0.00s";
-  return `${sec.toFixed(2)}s`;
-};
+  if (!Number.isFinite(sec)) return '0.00s'
+  return `${sec.toFixed(2)}s`
+}
 
 export const AudioCropDialog = ({
   open,
@@ -38,190 +39,191 @@ export const AudioCropDialog = ({
   onOpenChange,
   onApply,
 }: AudioCropDialogProps) => {
-  const { t } = useLanguage();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-  const progressTrackRef = useRef<HTMLDivElement | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string>("");
-  const [duration, setDuration] = useState(0);
-  const [range, setRange] = useState<[number, number]>([0, 0]);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [wavePeaks, setWavePeaks] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [cropping, setCropping] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [draggingHandle, setDraggingHandle] = useState<"start" | "end" | null>(null);
+  const { t } = useLanguage()
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const objectUrlRef = useRef<string | null>(null)
+  const progressTrackRef = useRef<HTMLDivElement | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string>('')
+  const [duration, setDuration] = useState(0)
+  const [range, setRange] = useState<[number, number]>([0, 0])
+  const [currentTime, setCurrentTime] = useState(0)
+  const [wavePeaks, setWavePeaks] = useState<number[]>([])
+  const [loading, setLoading] = useState(false)
+  const [cropping, setCropping] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [draggingHandle, setDraggingHandle] = useState<'start' | 'end' | null>(null)
 
   useEffect(() => {
-    if (!open || !file) return;
-    let cancelled = false;
+    if (!open || !file) return
+    const operation = { cancelled: false }
+    const isCancelled = () => operation.cancelled
 
     const run = async () => {
-      setLoading(true);
+      setLoading(true)
       try {
-        const decoded = await decodeAudioFile(file);
-        if (cancelled) return;
-        const dur = Math.max(decoded.duration, MIN_CROP_SECONDS);
-        setDuration(dur);
-        setRange([0, dur]);
-        setCurrentTime(0);
-        setWavePeaks(createWaveformPeaks(decoded));
+        const decoded = await decodeAudioFile(file)
+        if (isCancelled()) return
+        const dur = Math.max(decoded.duration, MIN_CROP_SECONDS)
+        setDuration(dur)
+        setRange([0, dur])
+        setCurrentTime(0)
+        setWavePeaks(createWaveformPeaks(decoded))
 
-        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-        const url = URL.createObjectURL(file);
-        objectUrlRef.current = url;
-        setAudioUrl(url);
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+        const url = URL.createObjectURL(file)
+        objectUrlRef.current = url
+        setAudioUrl(url)
 
         const shouldRecommend =
           suggestedDurationSec != null
           && suggestedDurationSec > 0
-          && dur > suggestedDurationSec + RECOMMEND_GAP_SEC;
+          && dur > suggestedDurationSec + RECOMMEND_GAP_SEC
 
-        if (!shouldRecommend) return;
+        if (!shouldRecommend) return
 
-        const cacheKey = fileCacheKey(file, suggestedDurationSec);
-        let payload = recommendCache.get(cacheKey);
+        const cacheKey = fileCacheKey(file, suggestedDurationSec)
+        let payload = recommendCache.get(cacheKey)
         if (!payload) {
-          const res = await audioApi.recommendAudioCrop(file, suggestedDurationSec);
-          payload = res.data;
-          if (payload?.status === "ready") {
-            recommendCache.set(cacheKey, payload);
+          const res = await audioApi.recommendAudioCrop(file, suggestedDurationSec)
+          payload = res.data
+          if (payload.status === 'ready') {
+            recommendCache.set(cacheKey, payload)
           }
         }
-        if (cancelled) return;
+        if (isCancelled()) return
 
-        if (payload?.status === "ready" && payload.recommended) {
-          const rec = payload.recommended;
-          const start = Math.max(0, Math.min(rec.start_sec, dur - MIN_CROP_SECONDS));
-          const end = Math.min(dur, Math.max(rec.end_sec, start + MIN_CROP_SECONDS));
-          setRange([start, end]);
+        if (payload.status === 'ready' && payload.recommended) {
+          const rec = payload.recommended
+          const start = Math.max(0, Math.min(rec.start_sec, dur - MIN_CROP_SECONDS))
+          const end = Math.min(dur, Math.max(rec.end_sec, start + MIN_CROP_SECONDS))
+          setRange([start, end])
         }
-      } catch (error: any) {
-        if (!cancelled) {
-          toast.error(error?.message || t('failedParseAudio'));
+      } catch (error: unknown) {
+        if (!operation.cancelled) {
+          toast.error(error instanceof Error && error.message ? error.message : t('failedParseAudio'))
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
+        if (!operation.cancelled) {
+          setLoading(false)
         }
       }
-    };
+    }
 
-    run();
+    void run()
     return () => {
-      cancelled = true;
-    };
-  }, [open, file, suggestedDurationSec, t]);
+      operation.cancelled = true
+    }
+  }, [open, file, suggestedDurationSec, t])
 
   useEffect(() => {
     return () => {
       if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
+        URL.revokeObjectURL(objectUrlRef.current)
+        objectUrlRef.current = null
       }
-    };
-  }, []);
+    }
+  }, [])
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const audio = audioRef.current
+    if (!audio) return
 
     const handleTimeUpdate = () => {
-      const t = audio.currentTime;
-      setCurrentTime(t);
+      const t = audio.currentTime
+      setCurrentTime(t)
       if (t >= range[1]) {
-        audio.pause();
-        audio.currentTime = range[0];
+        audio.pause()
+        audio.currentTime = range[0]
       }
-    };
-    const handlePause = () => setPlaying(false);
-    const handlePlay = () => setPlaying(true);
+    }
+    const handlePause = () =>{  setPlaying(false) }
+    const handlePlay = () =>{  setPlaying(true) }
 
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("play", handlePlay);
+    audio.addEventListener('timeupdate', handleTimeUpdate)
+    audio.addEventListener('pause', handlePause)
+    audio.addEventListener('play', handlePlay)
     return () => {
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("play", handlePlay);
-    };
-  }, [range]);
+      audio.removeEventListener('timeupdate', handleTimeUpdate)
+      audio.removeEventListener('pause', handlePause)
+      audio.removeEventListener('play', handlePlay)
+    }
+  }, [range])
 
-  const selectedDuration = useMemo(() => Math.max(0, range[1] - range[0]), [range]);
+  const selectedDuration = useMemo(() => Math.max(0, range[1] - range[0]), [range])
 
   const setStart = (value: number) => {
-    const nextStart = Math.max(0, Math.min(value, range[1] - MIN_CROP_SECONDS));
-    setRange([nextStart, range[1]]);
-  };
+    const nextStart = Math.max(0, Math.min(value, range[1] - MIN_CROP_SECONDS))
+    setRange([nextStart, range[1]])
+  }
 
   const setEnd = (value: number) => {
-    const nextEnd = Math.min(duration, Math.max(value, range[0] + MIN_CROP_SECONDS));
-    setRange([range[0], nextEnd]);
-  };
+    const nextEnd = Math.min(duration, Math.max(value, range[0] + MIN_CROP_SECONDS))
+    setRange([range[0], nextEnd])
+  }
 
   const togglePlay = async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const audio = audioRef.current
+    if (!audio) return
     if (playing) {
-      audio.pause();
-      return;
+      audio.pause()
+      return
     }
     if (audio.currentTime < range[0] || audio.currentTime > range[1]) {
-      audio.currentTime = range[0];
+      audio.currentTime = range[0]
     }
     try {
-      await audio.play();
+      await audio.play()
     } catch {
-      setPlaying(false);
+      setPlaying(false)
     }
-  };
+  }
 
   const getSecFromPointer = (clientX: number) => {
-    const el = progressTrackRef.current;
-    if (!el) return 0;
-    const rect = el.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)));
-    return ratio * safeDuration;
-  };
+    const el = progressTrackRef.current
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)))
+    return ratio * safeDuration
+  }
 
   useEffect(() => {
-    if (!draggingHandle) return;
+    if (!draggingHandle) return
     const onMove = (event: PointerEvent) => {
-      const sec = getSecFromPointer(event.clientX);
-      if (draggingHandle === "start") {
-        setStart(sec);
+      const sec = getSecFromPointer(event.clientX)
+      if (draggingHandle === 'start') {
+        setStart(sec)
       } else {
-        setEnd(sec);
+        setEnd(sec)
       }
-    };
-    const onUp = () => setDraggingHandle(null);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    }
+    const onUp = () =>{  setDraggingHandle(null) }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
     return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [draggingHandle, range, duration]);
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [draggingHandle, range, duration])
 
   const handleApplyCrop = async () => {
-    if (!file) return;
-    setCropping(true);
+    if (!file) return
+    setCropping(true)
     try {
-      const cropped = await cropAudioFile(file, range[0], range[1]);
-      onApply(cropped);
-      onOpenChange(false);
-      toast.success(t('audioCropped'));
-    } catch (error: any) {
-      toast.error(error?.message || t('failedCropAudio'));
+      const cropped = await cropAudioFile(file, range[0], range[1])
+      onApply(cropped)
+      onOpenChange(false)
+      toast.success(t('audioCropped'))
+    } catch (error: unknown) {
+      toast.error(error instanceof Error && error.message ? error.message : t('failedCropAudio'))
     } finally {
-      setCropping(false);
+      setCropping(false)
     }
-  };
+  }
 
-  const safeDuration = duration || 1;
-  const startRatio = (range[0] / safeDuration) * 100;
-  const endRatio = (range[1] / safeDuration) * 100;
-  const playheadRatio = (currentTime / safeDuration) * 100;
+  const safeDuration = duration || 1
+  const startRatio = (range[0] / safeDuration) * 100
+  const endRatio = (range[1] / safeDuration) * 100
+  const playheadRatio = (currentTime / safeDuration) * 100
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -256,7 +258,7 @@ export const AudioCropDialog = ({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setRange([0, Math.min(duration, suggestedDurationSec)])}
+                  onClick={() =>{  setRange([0, Math.min(duration, suggestedDurationSec)]) }}
                 >
                   {t('applySuggestedCrop')}
                 </Button>
@@ -269,17 +271,17 @@ export const AudioCropDialog = ({
                   className="absolute inset-0 grid items-end gap-[2px]"
                   style={{ gridTemplateColumns: `repeat(${Math.max(1, wavePeaks.length)}, minmax(0, 1fr))` }}
                 >
-                {wavePeaks.map((peak, idx) => {
-                  const pct = (idx / Math.max(1, wavePeaks.length - 1)) * 100;
-                  const selected = pct >= startRatio && pct <= endRatio;
-                  return (
-                    <div
-                      key={idx}
-                      className={selected ? "bg-primary/90" : "bg-muted-foreground/30"}
-                      style={{ height: `${Math.max(6, peak * 100)}%` }}
-                    />
-                  );
-                })}
+                  {wavePeaks.map((peak, idx) => {
+                    const pct = (idx / Math.max(1, wavePeaks.length - 1)) * 100
+                    const selected = pct >= startRatio && pct <= endRatio
+                    return (
+                      <div
+                        key={idx}
+                        className={selected ? 'bg-primary/90' : 'bg-muted-foreground/30'}
+                        style={{ height: `${Math.max(6, peak * 100)}%` }}
+                      />
+                    )
+                  })}
                 </div>
                 <div
                   className="absolute top-0 bottom-0 w-[2px] bg-red-500"
@@ -316,8 +318,8 @@ export const AudioCropDialog = ({
                     className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full border-2 border-white bg-emerald-500 shadow cursor-ew-resize"
                     style={{ left: `${Math.min(99, Math.max(1, startRatio))}%` }}
                     onPointerDown={(e) => {
-                      e.preventDefault();
-                      setDraggingHandle("start");
+                      e.preventDefault()
+                      setDraggingHandle('start')
                     }}
                     aria-label={t('dragStartHandle')}
                     title={`${t('cropStart')} ${formatSec(range[0])}`}
@@ -327,8 +329,8 @@ export const AudioCropDialog = ({
                     className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full border-2 border-white bg-blue-500 shadow cursor-ew-resize"
                     style={{ left: `${Math.min(99, Math.max(1, endRatio))}%` }}
                     onPointerDown={(e) => {
-                      e.preventDefault();
-                      setDraggingHandle("end");
+                      e.preventDefault()
+                      setDraggingHandle('end')
                     }}
                     aria-label={t('dragEndHandle')}
                     title={`${t('cropEnd')} ${formatSec(range[1])}`}
@@ -356,7 +358,7 @@ export const AudioCropDialog = ({
                     max={Math.max(0, range[1] - MIN_CROP_SECONDS)}
                     step={0.01}
                     value={range[0].toFixed(2)}
-                    onChange={(e) => setStart(Number(e.target.value || 0))}
+                    onChange={(e) =>{  setStart(Number(e.target.value || 0)) }}
                   />
                 </div>
                 <div>
@@ -367,7 +369,7 @@ export const AudioCropDialog = ({
                     max={duration}
                     step={0.01}
                     value={range[1].toFixed(2)}
-                    onChange={(e) => setEnd(Number(e.target.value || duration))}
+                    onChange={(e) =>{  setEnd(Number(e.target.value || duration)) }}
                   />
                 </div>
               </div>
@@ -376,11 +378,11 @@ export const AudioCropDialog = ({
             <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" />
 
             <div className="flex items-center justify-between">
-              <Button variant="outline" type="button" onClick={togglePlay}>
+              <Button variant="outline" type="button" onClick={asyncEvent(togglePlay)}>
                 {playing ? <Pause className="w-4 h-4 mr-1" /> : <Play className="w-4 h-4 mr-1" />}
                 {playing ? t('pausePreview') : t('playPreview')}
               </Button>
-              <Button type="button" onClick={handleApplyCrop} disabled={cropping}>
+              <Button type="button" onClick={asyncEvent(handleApplyCrop)} disabled={cropping}>
                 {cropping ? t('cropping') : t('applyCrop')}
               </Button>
             </div>
@@ -388,5 +390,5 @@ export const AudioCropDialog = ({
         )}
       </DialogContent>
     </Dialog>
-  );
-};
+  )
+}

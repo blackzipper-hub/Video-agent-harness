@@ -6,7 +6,7 @@
  * version whose published tarball has the same integrity is skipped, and a
  * version whose published tarball differs fails the run — that last case means
  * the content changed without a version bump
- * ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+ * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  *
  * Skipping on identical integrity is what makes re-running the publish step over
  * the same artifact safe.

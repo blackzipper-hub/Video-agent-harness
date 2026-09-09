@@ -20,12 +20,12 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const pathParts = location.pathname.split('/').filter(Boolean)
     const firstPart = pathParts[0]
     if (firstPart === 'en' || firstPart === 'zh') {
-      return firstPart as Language
+      return firstPart
     }
 
     // 如果没有语言前缀，从localStorage读取或使用默认值
     const saved = localStorage.getItem('language')
-    return (saved as Language) || 'en'
+    return saved === 'zh' ? 'zh' : 'en'
   }, [location.pathname])
 
   // 保存语言到localStorage
@@ -84,4 +84,3 @@ export const useLanguage = () => {
   }
   return context
 }
-

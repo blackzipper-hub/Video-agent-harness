@@ -9,7 +9,7 @@
  * {@link SessionTelemetryBackend.emit} — batching, retry, queueing, and loss policy — is the
  * reporting SDK's territory and is deliberately not modelled here. The
  * design and its trade-offs are pinned in
- * .agents/notes/implemented/feature/2026-07-23-session-telemetry-otel-revival.md.
+ * https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-23-session-telemetry-otel-revival.md.
  *
  * @module @deepseek-ai/dsh-session-telemetry
  */

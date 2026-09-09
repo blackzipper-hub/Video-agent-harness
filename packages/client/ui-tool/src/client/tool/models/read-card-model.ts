@@ -6,7 +6,7 @@
  * tool row's resident body and the details panel's Output section) call this, so
  * the path, lines, total, and language they show are derived once.
  *
- * The read card is result-side only ([read card note](../../../../../../.agents/notes/implemented/feature/2026-07-30-web-read-card.md)):
+ * The read card is result-side only ([read card note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-30-web-read-card.md)):
  * a call carries no file content until `execute` returns, so the pending call
  * stays a generic card (`kind: 'read'`). A running read therefore has no read
  * card, and this returns null for it — the row keeps its args-derived summary

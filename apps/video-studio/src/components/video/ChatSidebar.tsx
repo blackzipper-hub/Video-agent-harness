@@ -37,7 +37,6 @@ import { useLanguage } from '@/i18n/LanguageContext'
 import { useNavigate } from 'react-router-dom'
 import aiAvatar from '@/assets/ai-avatar-capybara.png'
 import { isConversationPinned, getPinnedConversationsData } from '@/utils/pinnedConversations'
-import { getDisplayPromptForUserMessage } from '@/utils/promptMapping'
 
 interface Chat {
   id: string
@@ -207,7 +206,7 @@ export const ChatSidebar = ({
         // Try to get viewport if not already stored
         if (!scrollAreaViewportRef.current && scrollAreaRef.current) {
           const scrollAreaRoot = scrollAreaRef.current.closest('[data-radix-scroll-area-root]')
-          scrollAreaViewportRef.current = scrollAreaRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement || null
+          scrollAreaViewportRef.current = scrollAreaRoot?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]') ?? null
         }
 
         const viewport = scrollAreaViewportRef.current
@@ -229,7 +228,7 @@ export const ChatSidebar = ({
         }
       }, 150)
 
-      return () => clearTimeout(timeoutId)
+      return () =>{  clearTimeout(timeoutId) }
     }
   }, [collapsed, selectedChat])
 
@@ -239,7 +238,7 @@ export const ChatSidebar = ({
       const findViewport = () => {
         // Try to find viewport from scrollAreaRef's parent (ScrollArea root)
         const scrollAreaRoot = scrollAreaRef.current?.closest('[data-radix-scroll-area-root]')
-        const viewport = scrollAreaRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
+        const viewport = scrollAreaRoot?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]')
 
         if (viewport) {
           scrollAreaViewportRef.current = viewport
@@ -320,11 +319,9 @@ export const ChatSidebar = ({
           <div>
             <Button
               type="button"
-              className={`${
-                collapsed
-                  ? 'w-8 h-8 p-0 rounded-full text-white bg-gradient-to-b from-pink-500 via-fuchsia-500 to-purple-600 hover:from-pink-400 hover:via-fuchsia-400 hover:to-purple-500 dark:from-pink-600 dark:via-fuchsia-600 dark:to-purple-700 dark:hover:from-pink-500 dark:hover:via-fuchsia-500 dark:hover:to-purple-600'
-                  : 'w-full justify-start apple-button text-primary-foreground dark:bg-primary dark:text-primary-foreground dark:border-primary'
-              }`}
+              className={collapsed
+                ? 'w-8 h-8 p-0 rounded-full text-white bg-gradient-to-b from-pink-500 via-fuchsia-500 to-purple-600 hover:from-pink-400 hover:via-fuchsia-400 hover:to-purple-500 dark:from-pink-600 dark:via-fuchsia-600 dark:to-purple-700 dark:hover:from-pink-500 dark:hover:via-fuchsia-500 dark:hover:to-purple-600'
+                : 'w-full justify-start apple-button text-primary-foreground dark:bg-primary dark:text-primary-foreground dark:border-primary'}
               onClick={(event) => {
                 event.stopPropagation()
                 onNewTask()
@@ -363,7 +360,7 @@ export const ChatSidebar = ({
             </h3>
             {/* Mobile fullscreen: native scroll; Desktop: Radix ScrollArea */}
             {isMobileFullScreen ? (
-              <div className="grow h-0 overflow-y-auto overscroll-contain touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }} onScroll={handleScroll as React.UIEventHandler<HTMLDivElement>}>
+              <div className="grow h-0 overflow-y-auto overscroll-contain touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }} onScroll={handleScroll}>
                 <div className="space-y-2 pb-4" ref={scrollAreaRef}>
                   <TooltipProvider delayDuration={300}>
                     {mergedChats.map(chat => (
@@ -377,7 +374,7 @@ export const ChatSidebar = ({
                               ? 'opacity-70 hover:bg-black/5 dark:hover:bg-white/5'
                               : 'hover:bg-black/5 dark:hover:bg-white/5'
                         }`}
-                        onClick={() => onSelectChat(chat.id)}
+                        onClick={() =>{  onSelectChat(chat.id) }}
                       >
                         {/* Mobile full-screen chat item content - reuse same structure */}
                         <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -429,41 +426,19 @@ export const ChatSidebar = ({
                               ? 'opacity-70 hover:bg-black/5 dark:hover:bg-white/5'
                               : 'hover:bg-black/5 dark:hover:bg-white/5'
                         }`}
-                        onClick={() => onSelectChat(chat.id)}
+                        onClick={() =>{  onSelectChat(chat.id) }}
                       >
-                        <div className={`flex items-start gap-2 flex-1 min-w-0 ${isMobileFullScreen ? 'gap-3' : 'justify-between'}`}>
-                          {isMobileFullScreen && (
-                            <div className="flex-shrink-0 w-10 h-10 rounded-full overflow-hidden bg-muted">
-                              <img
-                                src={chat.previewImageUrl || aiAvatar}
-                                alt=""
-                                className="w-full h-full object-cover"
-                                onError={(e) => { e.currentTarget.src = aiAvatar }}
-                              />
-                            </div>
-                          )}
+                        <div className={'flex items-start gap-2 flex-1 min-w-0 justify-between'}>
                           <div className="flex items-start gap-2 flex-1 min-w-0">
-                            {!isMobileFullScreen && isConversationPinned(chat.id) && (
+                            {isConversationPinned(chat.id) && (
                               <Pin className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
                             )}
-                            {isMobileFullScreen && isConversationPinned(chat.id) && (
-                              <Pin className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-1" />
-                            )}
                             <div className="flex-1 min-w-0 pr-2">
-                              <h4 className={`font-medium leading-tight ${isMobileFullScreen ? 'text-base' : 'text-sm'}`}>
+                              <h4 className={'font-medium leading-tight text-sm'}>
                                 <span
-                                  className="break-words"
-                                  style={{
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: 'vertical' as const,
-                                    overflow: 'hidden',
-                                    wordBreak: 'break-word',
-                                  }}
+                                  className="break-words line-clamp-2"
                                 >
-                                  {isMobileFullScreen
-                                    ? (chat.preview ? getDisplayPromptForUserMessage(chat.preview) : chat.title)
-                                    : chat.title}
+                                  {chat.title}
                                 </span>
                               </h4>
                               {(chat.last_active_at || chat.created_at) && (
@@ -476,12 +451,12 @@ export const ChatSidebar = ({
                           {(showConversationActions || showDeleteAction) && <DropdownMenu>
                             <DropdownMenuTrigger
                               asChild
-                              onClick={e => e.stopPropagation()}
+                              onClick={(e) =>{  e.stopPropagation() }}
                             >
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className={`h-6 w-6 p-0 hover:bg-white/20 transition-opacity flex-shrink-0 ${isMobileFullScreen ? 'opacity-70' : 'opacity-0 group-hover:opacity-100'}`}
+                                className={'h-6 w-6 p-0 hover:bg-white/20 transition-opacity flex-shrink-0 opacity-0 group-hover:opacity-100'}
                               >
                                 <MoreHorizontal className="h-3 w-3" />
                               </Button>
@@ -494,7 +469,7 @@ export const ChatSidebar = ({
                                 className="cursor-pointer"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  onTogglePin(chat.id, e as unknown as React.MouseEvent)
+                                  onTogglePin(chat.id, e)
                                 }}
                               >
                                 {isConversationPinned(chat.id) ? (
@@ -525,7 +500,7 @@ export const ChatSidebar = ({
                                 className="cursor-pointer text-destructive focus:text-destructive"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  onDeleteChat(chat.id, e as unknown as React.MouseEvent)
+                                  onDeleteChat(chat.id, e)
                                 }}
                               >
                                 <Trash2 className="w-4 h-4 mr-2 text-red-500" />
@@ -563,7 +538,7 @@ export const ChatSidebar = ({
               </TooltipTrigger>
               {collapsed && <TooltipContent side="right">{t('settings') || 'Settings'}</TooltipContent>}
               <PopoverContent className="w-52 rounded-lg border border-border bg-popover p-4" align="start" side="right" sideOffset={8}>
-                <button type="button" className="flex w-full items-center justify-between gap-3 text-sm hover:opacity-80" onClick={() => setLanguage(language === 'en' ? 'zh' : 'en')}>
+                <button type="button" className="flex w-full items-center justify-between gap-3 text-sm hover:opacity-80" onClick={() =>{  setLanguage(language === 'en' ? 'zh' : 'en') }}>
                   <span className="flex items-center gap-2"><Globe className="h-4 w-4" />{t('language') || 'Language'}</span>
                   <span className="text-xs text-muted-foreground">{language === 'en' ? 'English' : '中文'}</span>
                 </button>

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The self-referential Cordis toolset: five model-facing tools over the live runtime in the current DSH process. The registry, the vm sandbox, and the browser broadcast belong to [`@deepseek-ai/dsh-cordis-host-runner`](../cordis-host-runner/README.md) (`ctx.dynamic`), which this toolset injects — a composition with these tools but no runner never activates them. Design home — sandbox semantics, dynamic-package lifecycle and composition, standing decisions: [the toolset Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md).
+The self-referential Cordis toolset: five model-facing tools over the live runtime in the current DSH process. The registry, the vm sandbox, and the browser broadcast belong to [`@deepseek-ai/dsh-cordis-host-runner`](../cordis-host-runner/README.md) (`ctx.dynamic`), which this toolset injects — a composition with these tools but no runner never activates them. Design home — sandbox semantics, dynamic-package lifecycle and composition, standing decisions: [the toolset Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md).
 
 ## What it does
 
@@ -20,7 +20,7 @@ Dynamic packages live only in the shared DSH process memory. They remain active 
 
 ## Trust stance
 
-The sandbox isolates globals but is not a security boundary. Node globals are absent or redirect to Cordis services such as `ctx.fs`, `ctx.web`, and `ctx.bash`, and writes to `globalThis` stay local, but host-realm helpers make escape possible. Mounted plugins receive a façade without framework internals, yet its allowed services affect the live runtime. Dynamic tool schemas and annotations cross the realm through iterative JSON cloning and schema normalization, so valid deep declarations are memory-bounded rather than call-stack-bounded; records with JSON-invisible keys and subclassed or decorated schema arrays reject before normalization. Treat this toolset like bash access; see the [design and trust stance](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md).
+The sandbox isolates globals but is not a security boundary. Node globals are absent or redirect to Cordis services such as `ctx.fs`, `ctx.web`, and `ctx.bash`, and writes to `globalThis` stay local, but host-realm helpers make escape possible. Mounted plugins receive a façade without framework internals, yet its allowed services affect the live runtime. Dynamic tool schemas and annotations cross the realm through iterative JSON cloning and schema normalization, so valid deep declarations are memory-bounded rather than call-stack-bounded; records with JSON-invisible keys and subclassed or decorated schema arrays reject before normalization. Treat this toolset like bash access; see the [design and trust stance](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md).
 
 ## Config
 

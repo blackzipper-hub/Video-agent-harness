@@ -617,12 +617,75 @@ class VideoBuildRuntime:
         plan = self.engine.preview(
             change=change,
             artifacts=await self.repo.current_artifacts(project_id),
-            dependencies=await self.repo.current_dependencies(project_id),
+            dependencies=await self._editable_dependencies(project_id),
         )
+        await self._restore_edit_steps(plan)
         for loaded in self.plugins.loaded:
             plan = await loaded.implementation.after_plan(context, plan)
         await self._resolve_plan_skills(plan)
         return await self.repo.save_change_and_plan(change, plan, idempotency_key)
+
+    async def _editable_dependencies(self, project_id: str) -> list[ArtifactDependency]:
+        """Recover selected input edges retained in recipes after output-only version changes."""
+        artifacts = await self.repo.current_artifacts(project_id)
+        edges = await self.repo.current_dependencies(project_id)
+        ids = {item.id for item in artifacts}
+        steps = {item.metadata.get("plan_step_id"): item.id for item in artifacts}
+        pairs = {(item.source_version_id, item.target_version_id) for item in edges}
+        for artifact in artifacts:
+            inputs = set(artifact.metadata.get("input_artifact_version_ids") or [])
+            for key, value in (artifact.metadata.get("generation_parameters") or {}).items():
+                if key.endswith("_step") and isinstance(value, str):
+                    inputs.add(steps.get(value))
+                elif key.endswith("_steps") and isinstance(value, list):
+                    inputs.update(steps.get(ref) for ref in value if isinstance(ref, str))
+            for source_id in inputs & ids:
+                pair = (source_id, artifact.id)
+                if source_id != artifact.id and pair not in pairs:
+                    edges.append(ArtifactDependency(project_id=project_id, source_version_id=source_id,
+                                                    target_version_id=artifact.id, relation="saved_recipe_input"))
+                    pairs.add(pair)
+        return edges
+
+    async def _restore_edit_steps(self, plan: RebuildPlan, overrides: dict | None = None) -> None:
+        """Restore executable recipes from selected artifacts and their producing plans."""
+        artifacts = {item.id: item for item in await self.repo.current_artifacts(plan.project_id)}
+        recipes = {}
+        for build in await self.repo.list_builds(plan.project_id):
+            source_plan = await self.repo.get_plan(build.plan_id)
+            for state in await self.repo.list_build_steps(plan.project_id, build.id):
+                if state.result_artifact_version_id:
+                    recipe = next((item for item in source_plan.items if item.step_id == state.plan_step_id), None)
+                    if recipe is not None:
+                        recipes[state.result_artifact_version_id] = recipe
+        version = await self.repo.get_project_version(plan.base_project_version_id)
+        plan.video_spec_revision_id = version.video_spec_revision_id
+        by_version = {}
+        for item in plan.items:
+            source = artifacts[item.artifact_version_id]
+            recipe = recipes.get(source.id)
+            item.step_id = str(source.metadata.get("plan_step_id") or (recipe.step_id if recipe else source.id))
+            item.output_artifact_id = source.artifact_id
+            item.output_artifact_type = source.type
+            item.capability = str(source.metadata.get("rebuild_capability") or source.metadata.get("capability") or (recipe.capability if recipe else ""))
+            item.parameters = deepcopy(recipe.parameters if recipe else {})
+            item.parameters.update(deepcopy(source.metadata.get("generation_parameters") or {}))
+            item.parameters.update(deepcopy((overrides or {}).get(source.id, {})))
+            item.parameters.pop("remote_operation_id", None)
+            if recipe is not None:
+                item.resolved_skills = deepcopy(recipe.resolved_skills)
+                item.skill_context = deepcopy(recipe.skill_context)
+                item.input_artifact_version_ids = list(recipe.input_artifact_version_ids)
+            if overrides is not None and item.action == "rebuild" and not item.capability:
+                raise ValueError(f"artifact {source.id} has no saved execution recipe; submit a PlanPatch with an explicit capability")
+            item.estimated_cost = float(source.metadata.get("estimated_cost") or (recipe.estimated_cost if recipe else 0))
+            by_version[source.id] = item
+        for edge in await self._editable_dependencies(plan.project_id):
+            source, target = by_version.get(edge.source_version_id), by_version.get(edge.target_version_id)
+            if source and target and source.step_id not in target.depends_on:
+                target.depends_on.append(source.step_id)
+        topological_steps(plan.items)
+        plan.estimated_cost = sum(item.estimated_cost for item in plan.items if item.action == "rebuild")
 
     async def preview_edits(
         self,
@@ -638,9 +701,35 @@ class VideoBuildRuntime:
             from .repository import ProjectVersionConflict
             raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
         artifacts = await self.repo.current_artifacts(project_id)
+        if edits and all(str(edit.get("type") or edit.get("kind")) == "regenerate_artifact" for edit in edits):
+            overrides = {}
+            for edit in edits:
+                version_id = str(edit.get("artifactVersionId") or edit.get("artifact_version_id") or "")
+                if not version_id:
+                    target = str(edit.get("id") or edit.get("targetId") or "")
+                    source = next((item for item in artifacts if target in {item.artifact_id, item.metadata.get("plan_step_id")}), None)
+                    if source is None:
+                        raise LookupError(f"artifact target not found: {target}")
+                    version_id = source.id
+                overrides.setdefault(version_id, {}).update(edit.get("patch") or {})
+            change = ChangeRequest(project_id=project_id, base_project_version_id=base_project_version_id,
+                                   description=description, edits=edits, target_artifact_version_ids=list(overrides))
+            plan = self.engine.preview(change=change, artifacts=artifacts,
+                                       dependencies=await self._editable_dependencies(project_id))
+            await self._restore_edit_steps(plan, overrides)
+            await self._resolve_plan_skills(plan)
+            return await self.repo.save_change_and_plan(change, plan, idempotency_key)
         spec_artifact = next((item for item in artifacts if item.type == "video_spec"), None)
+        persisted_spec_artifact = spec_artifact
+        version = await self.repo.get_project_version(base_project_version_id)
+        if version.video_spec_revision_id:
+            revision = await self.repo.get_video_spec_revision(version.video_spec_revision_id)
+            spec_artifact = MediaArtifactVersion(
+                project_id=project_id, artifact_id=f"{project_id}:spec", type="video_spec",
+                metadata={"content": deepcopy(revision.content)},
+            )
         if spec_artifact is None or not isinstance(spec_artifact.metadata.get("content"), dict):
-            raise LookupError("project has no editable VideoSpec")
+            raise ValueError("This structural edit needs a spec patch. Existing artifacts remain editable with regenerate_artifact or a PlanPatch.")
         spec_data = deepcopy(spec_artifact.metadata["content"])
         targets: set[str] = set()
         manual_steps: set[str] = set()
@@ -967,13 +1056,13 @@ class VideoBuildRuntime:
                 reason="Commit edited definition",
             ))
         # Persist the new spec atomically without invalidating every downstream artifact.
-        plan.items = [item for item in plan.items if item.artifact_version_id != spec_artifact.id]
+        plan.items = [item for item in plan.items if persisted_spec_artifact is None or item.artifact_version_id != persisted_spec_artifact.id]
         plan.items.append(RebuildPlanItem(
             step_id="spec",
-            artifact_version_id=spec_artifact.id,
+            artifact_version_id=persisted_spec_artifact.id if persisted_spec_artifact else "",
             output_artifact_id=spec_artifact.artifact_id,
             output_artifact_type="video_spec",
-            action="rebuild",
+            action="rebuild" if persisted_spec_artifact else "create",
             capability="runtime.artifact.persist",
             parameters={"title": proposed_spec.title, "content": proposed_spec.model_dump(mode="json")},
             order=-1,
@@ -1377,6 +1466,18 @@ class VideoBuildRuntime:
                         context=context,
                         intent=project_intent,
                     )
+                    # A follow-up goal starts with the selected work, including generated media.
+                    selected = await self.repo.current_artifacts(project_id)
+                    included = {item.artifact_version_id for item in plan.items}
+                    for artifact in selected:
+                        if artifact.id not in included:
+                            plan.items.append(RebuildPlanItem(
+                                step_id=f"existing-{artifact.id}", action="reuse",
+                                artifact_version_id=artifact.id,
+                                output_artifact_id=artifact.artifact_id,
+                                output_artifact_type=artifact.type,
+                                reason="Selected result retained for the next Agent goal",
+                            ))
                 else:
                     compile_initial = getattr(plugin.implementation, "compile_initial", None)
                     if not callable(compile_initial):
@@ -2041,6 +2142,17 @@ class VideoBuildRuntime:
         await self._resolve_plan_skills(updated_plan)
         topological_steps(updated_plan.items)
         validate_video_generation_steps(updated_plan.items)
+        spec_revision.content["execution_tasks"] = [
+            {
+                "step_id": item.step_id, "artifact_id": item.output_artifact_id,
+                "artifact_type": item.output_artifact_type,
+                "capability": item.capability, "parameters": deepcopy(item.parameters),
+                "depends_on": list(item.depends_on),
+                "input_artifact_version_ids": list(item.input_artifact_version_ids),
+                "superseded_by": item.superseded_by,
+            }
+            for item in updated_plan.items
+        ]
         plan_revision = BuildPlanRevision(
             plan_id=plan.id,
             project_id=project_id,

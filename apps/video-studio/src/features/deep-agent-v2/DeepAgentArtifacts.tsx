@@ -1,3 +1,4 @@
+import { displayValue } from '@/utils/displayValue'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArtifactDocument } from './ArtifactDocument'
@@ -34,7 +35,7 @@ function formatTimestamp(seconds: number): string {
   const mins = Math.floor(whole / 60)
   const secs = whole % 60
   const frac = Math.floor((seconds - whole) * 100)
-  return `${mins}:${String(secs).padStart(2, '0')}.${String(frac).padStart(2, '0')}`
+  return `${mins}:${displayValue(secs).padStart(2, '0')}.${displayValue(frac).padStart(2, '0')}`
 }
 
 function VideoFramePicker({
@@ -85,7 +86,7 @@ function VideoFramePicker({
             setDuration(event.currentTarget.duration || 0)
             setCurrentTime(event.currentTarget.currentTime || 0)
           }}
-          onTimeUpdate={event => setCurrentTime(event.currentTarget.currentTime || 0)}
+          onTimeUpdate={(event) =>{  setCurrentTime(event.currentTarget.currentTime || 0) }}
           onSeeked={capturePreview}
           onPause={capturePreview}
         />
@@ -150,7 +151,7 @@ const isMediaUrl = (value: string | null | undefined, type: 'image' | 'audio' | 
 
 const artifactMediaUri = (artifact: DeepAgentArtifact): string | undefined => {
   if (artifact.uri) return artifact.uri
-  const meta = artifact.metadata || {}
+  const meta = artifact.metadata
   // Prefer typed media fields before generic url/uri.
   const preferredKeys = artifact.type.includes('video')
     ? ['video_url', 'result_url', 'uri', 'url']
@@ -195,7 +196,7 @@ const buildStepEntityNames = (videoSpec: Record<string, unknown> | null | undefi
   const visit = (value: unknown, depth = 0) => {
     if (depth > 8 || !value || typeof value !== 'object') return
     if (Array.isArray(value)) {
-      value.forEach(item => visit(item, depth + 1))
+      value.forEach((item) =>{  visit(item, depth + 1) })
       return
     }
     const entity = asRecord(value)
@@ -203,7 +204,7 @@ const buildStepEntityNames = (videoSpec: Record<string, unknown> | null | undefi
       const id = stringField(entity.id, entity.character_id, entity.scene_id, entity.shot_id)
       const name = stringField(entity.name, entity.display_name, entity.title)
       if (id && name) names[id] = name
-      Object.values(entity).forEach(item => visit(item, depth + 1))
+      Object.values(entity).forEach((item) =>{  visit(item, depth + 1) })
     }
   }
   visit(videoSpec)
@@ -213,7 +214,7 @@ const buildStepEntityNames = (videoSpec: Record<string, unknown> | null | undefi
 const isResearchArtifact = (artifact: DeepAgentArtifact) => {
   if (artifact.type === 'research') return true
   const meta = asRecord(artifact.metadata)
-  return Boolean(typeof meta.research_summary === 'string' && Array.isArray(meta.directions))
+  return (typeof meta.research_summary === 'string' && Array.isArray(meta.directions))
 }
 
 const researchLinks = (items: unknown, keys: { title?: string; url?: string; note?: string }) => {
@@ -355,7 +356,7 @@ const isVideoArtifact = (artifact: DeepAgentArtifact) => {
 }
 
 const containsInternalModelPayload = (artifact: DeepAgentArtifact): boolean => {
-  const values = [artifact.summary, ...Object.values(artifact.metadata || {})]
+  const values = [artifact.summary, ...Object.values(artifact.metadata)]
     .filter((value): value is string => typeof value === 'string')
   return values.some(value =>
     value.includes('encrypted_content')
@@ -462,7 +463,7 @@ function MetaField({ label, value }: { label: string; value?: string }) {
 
 function MusicArtifactDetails({ artifact }: { artifact: DeepAgentArtifact }) {
   const { t } = useLanguage()
-  const meta = artifact.metadata || {}
+  const meta = artifact.metadata
   const params = asRecord(meta.generation_parameters)
   const resolved = asRecord(meta.resolved_generation_parameters)
   const lyrics = stringField(meta.lyrics, meta.generated_lyrics, params.lyrics, resolved.lyrics)
@@ -507,7 +508,7 @@ function MusicArtifactDetails({ artifact }: { artifact: DeepAgentArtifact }) {
 
 function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
   const { t } = useLanguage()
-  const meta = artifact.metadata || {}
+  const meta = artifact.metadata
   const sections = Array.isArray(meta.sections) ? meta.sections : []
   const segments = Array.isArray(meta.segments) ? meta.segments : []
   const instrumental = boolField(meta.is_instrumental)
@@ -522,7 +523,7 @@ function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <MetaField label={t('da.workspace.songName')} value={stringField(meta.song_name)} />
         <MetaField label={t('da.workspace.genre')} value={stringField(meta.genre)} />
-        <MetaField label={t('da.workspace.globalBpm')} value={meta.global_bpm == null ? '' : String(meta.global_bpm)} />
+        <MetaField label={t('da.workspace.globalBpm')} value={meta.global_bpm == null ? '' : displayValue(meta.global_bpm)} />
         <MetaField label={t('da.workspace.globalEmotion')} value={stringField(meta.global_emotion)} />
         <MetaField label={t('da.workspace.suggestedTheme')} value={stringField(meta.suggested_global_theme)} />
         <MetaField label={t('da.workspace.suggestedPalette')} value={stringField(meta.suggested_color_palette)} />
@@ -545,7 +546,7 @@ function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
               <div key={`section-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
                 <p className="text-xs font-medium">
                   {stringField(row.section_type, `${t('da.workspace.section')} ${index + 1}`)}
-                  {start != null && end != null ? ` · ${start}–${end}s` : ''}
+                  {start != null && end != null ? ` · ${displayValue(start)}–${displayValue(end)}s` : ''}
                 </p>
                 <p className="text-xs text-muted-foreground">{stringField(row.emotion, row.musical_features)}</p>
                 <p className="text-xs text-muted-foreground">{stringField(row.suggested_visual_theme)}</p>
@@ -568,9 +569,9 @@ function AudioAnalysisDetails({ artifact }: { artifact: DeepAgentArtifact }) {
                 <div key={`segment-${index}`} className="rounded-md border border-border/60 bg-muted/20 p-2 space-y-1">
                   <p className="whitespace-pre-wrap text-xs">{stringField(row.text) || '—'}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    {start != null && end != null ? `${start}–${end}s` : ''}
-                    {row.emotion ? ` · ${row.emotion}` : ''}
-                    {row.tempo ? ` · ${row.tempo}` : ''}
+                    {start != null && end != null ? `${displayValue(start)}–${displayValue(end)}s` : ''}
+                    {row.emotion ? ` · ${displayValue(row.emotion)}` : ''}
+                    {row.tempo ? ` · ${displayValue(row.tempo)}` : ''}
                     {presence == null ? '' : ` · ${presence ? t('da.workspace.vocalsYes') : t('da.workspace.vocalsNo')}`}
                     {gender ? ` · ${vocalGenderLabel(gender, t)}` : ''}
                   </p>
@@ -590,7 +591,7 @@ const firstMarkdownHeading = (body: string): string | undefined => {
 }
 
 const readableTextTitle = (artifact: DeepAgentArtifact, body: string, t: Translate): string => {
-  const metadataTitle = artifact.metadata && typeof artifact.metadata.title === 'string'
+  const metadataTitle = typeof artifact.metadata.title === 'string'
     ? artifact.metadata.title.trim()
     : ''
   const rawTitle = (artifact.title || '').trim()
@@ -617,7 +618,7 @@ const promptFromRecord = (value: unknown): string | undefined => {
  * request bodies, tool arguments, provider responses, or the rest of `raw`.
  */
 const artifactGenerationPrompt = (artifact: DeepAgentArtifact): string | undefined => {
-  const metadata = artifact.metadata || {}
+  const metadata = artifact.metadata
   return promptFromRecord(metadata.resolved_generation_parameters)
     || promptFromRecord(metadata.generation_parameters)
     || promptFromRecord(metadata)
@@ -627,7 +628,7 @@ const artifactGenerationPrompt = (artifact: DeepAgentArtifact): string | undefin
 function GenerationPrompt({ artifact }: { artifact: DeepAgentArtifact }) {
   const { t } = useLanguage()
   const prompt = artifactGenerationPrompt(artifact)
-  if (!prompt || artifact.summary?.trim() === prompt) return null
+  if (!prompt || artifact.summary.trim() === prompt) return null
   return (
     <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -642,7 +643,7 @@ function GenerationPrompt({ artifact }: { artifact: DeepAgentArtifact }) {
 }
 
 const storyBody = (artifact: DeepAgentArtifact): string => {
-  const meta = artifact.metadata || {}
+  const meta = artifact.metadata
   for (const key of ['script', 'content', 'outline', 'story', 'text', 'body', 'markdown', 'description']) {
     const value = meta[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
@@ -722,12 +723,12 @@ export function DeepAgentArtifacts({
         type: artifact.type,
         version: artifact.version,
         status: artifact.status,
-        produced_by_task_id: String(artifact.metadata?.build_id || 'video-runtime'),
+        produced_by_task_id: displayValue(artifact.metadata?.build_id || 'video-runtime'),
         title: artifact.title || artifact.logicalId || artifact.type,
         summary: artifact.summary || '',
         uri: artifact.uri || null,
         metadata: {
-          ...(artifact.metadata || {}),
+          ...(artifact.metadata),
           logical_id: artifact.logicalId,
           runtime_status: artifact.status,
           runtime_selected: artifact.isSelected,
@@ -750,11 +751,12 @@ export function DeepAgentArtifacts({
     setRuntimeWorkspace(null)
     setWorkspaceLoading(true)
     let active = true
+    const isActive = () => active
     let inFlight = false
     let queued = false
     let debounceTimer: number | undefined
     const load = async () => {
-      if (!active) return
+      if (!isActive()) return
       if (inFlight) {
         queued = true
         return
@@ -763,18 +765,18 @@ export function DeepAgentArtifacts({
       setWorkspaceLoading(true)
       try {
         const next = await videoRuntimeClient.workspace(projectId)
-        if (active) {
+        if (isActive()) {
           setRuntimeWorkspace(next)
           setWorkspaceError(null)
         }
       } catch {
-        if (active) {
+        if (isActive()) {
           setWorkspaceError(tRef.current('da.runtime.requestFailed'))
         }
       } finally {
         inFlight = false
-        if (active) setWorkspaceLoading(false)
-        if (active && queued) {
+        if (isActive()) setWorkspaceLoading(false)
+        if (isActive() && queued) {
           queued = false
           void load()
         }
@@ -795,13 +797,13 @@ export function DeepAgentArtifacts({
       'build.checkpoint.planning', 'build.checkpoint.resolved', 'build.checkpoint.failed',
       'video_spec.revised', 'plan.revised',
     ]
-    eventNames.forEach(name => events.addEventListener(name, scheduleLoad))
+    eventNames.forEach((name) =>{  events.addEventListener(name, scheduleLoad) })
     const interval = window.setInterval(() => void load(), 10000)
     return () => {
       active = false
       window.clearTimeout(debounceTimer)
       window.clearInterval(interval)
-      eventNames.forEach(name => events.removeEventListener(name, scheduleLoad))
+      eventNames.forEach((name) =>{  events.removeEventListener(name, scheduleLoad) })
       events.close()
     }
   }, [projectId])
@@ -822,8 +824,8 @@ export function DeepAgentArtifacts({
       progress: latestRuntimeBuild.progress || 0,
       message: runtimeMessage(latestRuntimeBuild.message || latestRuntimeBuild.kind || '', t),
       error: latestRuntimeBuild.error,
-      phase: runtimeWorkspace?.currentBuildPhase,
-      checkpoint: runtimeWorkspace?.activeCheckpoint ? {
+      phase: runtimeWorkspace.currentBuildPhase,
+      checkpoint: runtimeWorkspace.activeCheckpoint ? {
         status: runtimeWorkspace.activeCheckpoint.status,
         nextPhase: runtimeWorkspace.activeCheckpoint.next_phase,
         artifactCount: runtimeWorkspace.activeCheckpoint.artifact_summaries.length,
@@ -962,7 +964,7 @@ export function DeepAgentArtifacts({
     )
   const handleSelectArtifact = async (artifact: DeepAgentArtifact) => {
     const runtimeArtifact = runtimeWorkspace?.artifacts.find(item => item.id === artifact.id)
-    if (!runtimeArtifact) {
+    if (!runtimeArtifact || !runtimeWorkspace) {
       onSelectArtifact(artifact.id)
       return
     }
@@ -1045,7 +1047,7 @@ export function DeepAgentArtifacts({
                   {runtimeWorkspace.builds.slice(0, 1).map(build => (
                     <div key={build.buildId} className="rounded-lg border border-border/60 p-3">
                       <div className="mb-2 flex items-center justify-between text-xs">
-                        <span>{runtimeMessage(build.message || build.kind, t)}</span>
+                        <span>{runtimeMessage(build.message || build.kind || '', t)}</span>
                         <Badge variant="secondary">{statusLabel(build.status, t)}</Badge>
                       </div>
                       <Progress value={(build.progress || 0) * 100} className="h-1.5" />

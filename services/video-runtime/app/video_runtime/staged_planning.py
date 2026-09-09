@@ -96,6 +96,7 @@ def _validate_video_prompt_detail(
 # inherit Cuti's source-analysis phase merely by declaring ``mode: mv`` (or any
 # other known mode).
 WORKFLOW_PLANNING_CONTRACTS: dict[str, tuple[str, str]] = {
+    "cinematic": ("seedance2", "direct"),
     "seedance2": ("seedance2", "direct"),
     "mv": ("mv", "music_suno"),
     "short-drama-workflow": ("short_drama_workflow", "story"),

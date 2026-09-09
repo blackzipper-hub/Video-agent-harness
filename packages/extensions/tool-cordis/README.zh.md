@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-自引用 Cordis 工具集：五个面向模型的工具，操作当前 DSH 进程中的实时运行时。注册表、vm 沙箱与浏览器广播属于 [`@deepseek-ai/dsh-cordis-host-runner`](../cordis-host-runner/README.zh.md)（`ctx.dynamic`），本工具集注入它——只装这些工具而不装 runner 的组合永远不会激活它们。沙箱语义、动态包生命周期与组合及既定决策详见[工具集 Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.zh.md)。
+自引用 Cordis 工具集：五个面向模型的工具，操作当前 DSH 进程中的实时运行时。注册表、vm 沙箱与浏览器广播属于 [`@deepseek-ai/dsh-cordis-host-runner`](../cordis-host-runner/README.zh.md)（`ctx.dynamic`），本工具集注入它——只装这些工具而不装 runner 的组合永远不会激活它们。沙箱语义、动态包生命周期与组合及既定决策详见[工具集 Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md)。
 
 ## 功能
 
@@ -20,7 +20,7 @@
 
 ## 信任立场
 
-该沙箱隔离全局变量，但不是安全边界。Node 全局变量不存在，或会重定向到 `ctx.fs`、`ctx.web`、`ctx.bash` 等 Cordis 服务；写入 `globalThis` 的内容保持局部，但 host realm helper 使逃逸成为可能。运行中的 host 半收到不含框架内部机制的 façade，但获准服务仍会影响存活运行时。动态工具 schema 与 annotation 通过迭代式 JSON 克隆和 schema 规范化跨越 realm，因此有效的深层声明受内存而非调用栈限制；含 JSON 不可见 key 的 record，以及子类化或装饰过的 schema array，会在规范化前被拒绝。应当像对待 bash 访问一样对待该工具集；参见[设计与信任立场](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.zh.md)。
+该沙箱隔离全局变量，但不是安全边界。Node 全局变量不存在，或会重定向到 `ctx.fs`、`ctx.web`、`ctx.bash` 等 Cordis 服务；写入 `globalThis` 的内容保持局部，但 host realm helper 使逃逸成为可能。运行中的 host 半收到不含框架内部机制的 façade，但获准服务仍会影响存活运行时。动态工具 schema 与 annotation 通过迭代式 JSON 克隆和 schema 规范化跨越 realm，因此有效的深层声明受内存而非调用栈限制；含 JSON 不可见 key 的 record，以及子类化或装饰过的 schema array，会在规范化前被拒绝。应当像对待 bash 访问一样对待该工具集；参见[设计与信任立场](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md)。
 
 ## 配置
 

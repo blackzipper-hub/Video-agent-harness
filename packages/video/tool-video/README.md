@@ -8,15 +8,15 @@ Project creation and planning require a five-field video language contract. The 
 
 `video_checkpoint_inspect` accepts `checkpoint_id="live"` to open a planning snapshot for a user edit during execution. Use the returned id and revisions with `video_plan_patch_submit`. Task completion/failure notifications and live edits share the same append/cancel path; only pending tasks can be cancelled, and unrelated running tasks continue. See the [Runtime scheduling rules](../../../services/video-runtime/README.md).
 
-## Model Experience
-
 For corrected-parameter retries, submit `replace_failed_task_ids` mapping failed IDs to new `add_tasks` client keys. The Runtime replaces pending descendants atomically; completed outputs remain reusable. A failed continuous Build can be inspected with `checkpoint_id="live"` and stays stopped until the repair patch commits.
+
+## Model Experience
 
 ### Project video tools
 
 #### What the model sees
 
-Twenty `video_*` tools expose project creation, Cuti-compatible continuous `PlanPatch` planning, project inspection, structured edit and dependency impact previews, rebuild execution, durable build control, artifact selection, and export. `video_edit_preview` returns cost and affected steps but never executes paid work. Provider credentials, internal tasks, plugin hooks, and raw media operations are absent from the schemas.
+The [23 `video_*` tools](../../../docs/tool-catalog.md#cuti-aitool-video) expose project creation, Cuti-compatible continuous `PlanPatch` planning, project inspection, structured edit and dependency impact previews, rebuild execution, durable build control, artifact selection, and export. `video_edit_preview` returns cost and affected steps but never executes paid work. Provider credentials, internal tasks, plugin hooks, and raw media operations are absent from the schemas.
 
 #### Token effect
 

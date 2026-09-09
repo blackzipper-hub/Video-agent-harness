@@ -4,7 +4,7 @@
  * values that JSON cannot preserve but trusts model-written workflow scripts: getters and proxy traps may
  * run, and the vm is not a security boundary. The worker provides host-loop isolation and
  * forced termination, not hostile-value containment. See
- * .agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md for the isolation rationale.
+ * https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md for the isolation rationale.
  * @module @deepseek-ai/dsh-workflow-worker-thread/realm
  */
 

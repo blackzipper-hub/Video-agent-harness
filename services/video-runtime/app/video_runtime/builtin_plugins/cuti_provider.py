@@ -302,6 +302,14 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             legacy_artifacts,
             validate_prompt_slots=envelope.grant.capability != "atomic.text.generate",
         )
+        if envelope.grant.capability in {
+            "atomic.video.generate", "api.provider.generate",
+        }:
+            from app.integrations.providers.provider_bridge import (
+                normalize_video_frame_inputs,
+            )
+
+            parameters = normalize_video_frame_inputs(parameters)
         if (
             envelope.grant.capability in {
                 "atomic.video.generate", "api.provider.generate",

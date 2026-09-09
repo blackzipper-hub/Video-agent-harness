@@ -3,7 +3,7 @@
  * Those declaration-merged events record the lock and summary inputs without entering the surface, so they are not
  * surface events; a separate replacement `user/message` carries the summary.
  * Backend packages own configuration and retention policy; see
- * `.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md`.
+ * `https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md`.
  * @module @deepseek-ai/dsh-compaction/types
  */
 

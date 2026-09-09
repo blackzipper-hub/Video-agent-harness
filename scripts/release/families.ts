@@ -3,7 +3,7 @@
  * (`packages/` + `apps/`, `vendor/`, and `native/`) and the two this module
  * owns: `dsh` and `vendor`. Each family carries its own version baseline, tag
  * naming, and publish set, so releasing one never republishes another
- * ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+ * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  *
  * The family dimension lives here only. A new sequence adds a subclass and a
  * `releaseFamilies()` entry; nothing else in the release scripts branches on it.
@@ -162,7 +162,7 @@ export abstract class ReleaseFamily {
    * reports rather than works around. Peer edges order what they can and are
    * dropped where honouring one would deadlock: sibling packages declare each
    * other as peers, and npm treats an unmet peer as a warning rather than a
-   * resolution failure ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+   * resolution failure ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
    * Every dropped edge is reported, because dropping one is a decision about a
    * real release rather than an implementation detail.
    * @param members - this family's members.

@@ -36,6 +36,19 @@ DEFAULT_FALLBACKS = {
 }
 
 _REMOTE_TASK_ID_RE = re.compile(r"remote_task_id=([A-Za-z0-9_-]+)")
+_I2V_MODES = {"i2v", "image_to_video", "image-to-video"}
+_FIRST_FRAME_SLOT_PATTERNS = (
+    re.compile(
+        r"@(?:图片|image)\s*(\d+)\s*(?:作为|用作|为|as|is)\s*"
+        r"(?:the\s+)?(?:严格\s*)?(?:首帧|起始帧|first\s+frame|starting\s+frame|start\s+frame)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:首帧|起始帧|first\s+frame|starting\s+frame|start\s+frame)\s*"
+        r"(?:(?:使用|采用|设为|是|为|use|uses|is)|[:：])?\s*@(?:图片|image)\s*(\d+)",
+        re.IGNORECASE,
+    ),
+)
 
 
 class ProviderGenerateError(RuntimeError):
@@ -175,6 +188,58 @@ def _explicit_video_model_family(value: str | None) -> str | None:
     return None
 
 
+def _first_media_value(profile: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = profile.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _prompt_first_frame_slot(prompt: str) -> int | None:
+    for pattern in _FIRST_FRAME_SLOT_PATTERNS:
+        match = pattern.search(prompt)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def normalize_video_frame_inputs(profile: dict[str, Any]) -> dict[str, Any]:
+    """Keep references separate from a caller's explicit strict first frame."""
+    normalized = dict(profile)
+    if normalized.get("reference_mode") == "multi_reference":
+        if any(normalized.get(key) for key in (
+            "start_image_url", "start_image", "first_frame_url", "first_frame",
+            "continuity_frame_url", "end_image_url", "end_image", "last_image_url", "last_image",
+        )):
+            raise ValueError("multi_reference does not accept strict first/last frames; put all images in references")
+        normalized["generation_mode"] = "reference_to_video"
+        return normalized
+    explicit_start = _first_media_value(
+        normalized,
+        "start_image_url",
+        "start_image",
+        "first_frame_url",
+        "first_frame",
+        "continuity_frame_url",
+    )
+    if explicit_start is None:
+        images = normalized.get("images") or normalized.get("reference_images") or []
+        slot = _prompt_first_frame_slot(str(normalized.get("prompt") or ""))
+        if slot is not None and isinstance(images, list) and 1 <= slot <= len(images):
+            candidate = images[slot - 1]
+            if isinstance(candidate, str) and candidate.strip():
+                explicit_start = candidate.strip()
+    if explicit_start is not None:
+        normalized["start_image_url"] = explicit_start
+        normalized["generation_mode"] = "i2v"
+        return normalized
+    for key in ("mode", "generation_mode", "task_type"):
+        if str(normalized.get(key) or "").strip().lower() in _I2V_MODES:
+            normalized[key] = "t2v"
+    return normalized
+
+
 def normalize_video_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """Normalize the public video profile before selecting a provider.
 
@@ -183,7 +248,7 @@ def normalize_video_profile(profile: dict[str, Any]) -> dict[str, Any]:
     provider field here so a valid requested duration can never silently fall
     back to the provider default.
     """
-    normalized = dict(profile)
+    normalized = normalize_video_frame_inputs(profile)
     duration = normalized.get("duration")
     duration_seconds = normalized.get("duration_seconds")
     if duration is not None and duration_seconds is not None:
@@ -218,24 +283,6 @@ def normalize_video_profile(profile: dict[str, Any]) -> dict[str, Any]:
     normalized["provider"] = "wavespeed"
     normalized["requested_provider"] = requested_provider
     return normalized
-
-
-def _is_i2v_mode(profile: dict[str, Any]) -> bool:
-    mode = str(
-        profile.get("mode")
-        or profile.get("generation_mode")
-        or profile.get("task_type")
-        or ""
-    ).strip().lower()
-    return mode in {"i2v", "image_to_video", "image-to-video"}
-
-
-def _first_media_value(profile: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = profile.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
 
 
 async def _resolve_media_urls(urls: list[str]) -> list[str]:
@@ -476,7 +523,7 @@ async def _wavespeed_generate(
         if isinstance(u, str) and u.strip()
     ])
 
-    i2v_requested = _is_i2v_mode(profile) or bool(explicit_start_image)
+    i2v_requested = bool(explicit_start_image)
     start_image = explicit_start_image
     end_image = explicit_end_image
     if family == "minimax_h3":
@@ -488,15 +535,6 @@ async def _wavespeed_generate(
             images.insert(0, explicit_start_image)
         if explicit_end_image and explicit_end_image not in images:
             images.append(explicit_end_image)
-    elif i2v_requested and not start_image and images:
-        # Backward compatibility for legacy ``generation_mode=i2v`` calls.
-        start_image = images.pop(0)
-        if not end_image and images:
-            end_image = images.pop(0)
-    if family != "minimax_h3" and i2v_requested and not start_image:
-        raise ValueError(
-            "image-to-video generation requires start_image_url (or a legacy first images entry)"
-        )
 
     svc = get_wavespeed_service()
     logger.info(
@@ -508,14 +546,17 @@ async def _wavespeed_generate(
         bool(start_image),
         bool(end_image),
     )
-    if i2v_requested and images:
-        logger.info(
-            "api-provider-bridge wavespeed: %d generic reference image(s) are not sent "
-            "to the Seedance I2V endpoint; the strict start frame takes precedence",
-            len(images),
-        )
-
     request_id = str(profile.get("remote_operation_id") or "").strip() or None
+    if i2v_requested and images and not request_id:
+        # The documented WaveSpeed I2V request accepts image/last_image,
+        # not reference_images. Never charge for a degraded identity request.
+        raise ValueError(
+            "unsupported_start_frame_with_references: WaveSpeed Seedance I2V "
+            "cannot submit a strict start frame together with ordinary reference images. "
+            "Keep the original identity references; do not silently remove them or "
+            "switch providers. Ask the user to choose a supported endpoint or explicitly "
+            "approve multi-reference generation without a strict first-frame guarantee."
+        )
     created_remote = request_id is None
     try:
         if family == "minimax_h3":

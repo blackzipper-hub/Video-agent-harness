@@ -202,6 +202,38 @@ def test_duration_seconds_is_normalized_to_provider_duration():
     assert profile["duration"] == 15
 
 
+def test_generic_reference_is_not_promoted_by_i2v_mode_alone():
+    profile = normalize_video_profile({
+        "provider": "seedance-2.5",
+        "prompt": "Use @image1 as the character identity reference.",
+        "generation_mode": "i2v",
+        "images": ["https://cdn/character.png"],
+    })
+
+    assert profile["generation_mode"] == "t2v"
+    assert profile["images"] == ["https://cdn/character.png"]
+    assert "start_image_url" not in profile
+
+
+@pytest.mark.parametrize(
+    ("prompt", "slot"),
+    [
+        ("以@图片2作为首帧，保持人物动作连续。", "https://cdn/tail.png"),
+        ("Use @image 2 as the first frame and continue the action.", "https://cdn/tail.png"),
+        ("首帧使用@图片2，然后缓慢推镜。", "https://cdn/tail.png"),
+    ],
+)
+def test_explicit_prompt_first_frame_slot_becomes_start_image(prompt, slot):
+    profile = normalize_video_profile({
+        "provider": "seedance-2.5",
+        "prompt": prompt,
+        "images": ["https://cdn/character.png", "https://cdn/tail.png"],
+    })
+
+    assert profile["generation_mode"] == "i2v"
+    assert profile["start_image_url"] == slot
+
+
 def test_conflicting_duration_selectors_are_rejected():
     with pytest.raises(ValueError, match="conflicting video duration selectors"):
         normalize_video_profile({"duration": 5, "duration_seconds": 15})
@@ -413,6 +445,7 @@ async def test_wavespeed_generate_dispatches_seedance_25_multi_reference_t2v(mon
     out = await bridge._wavespeed_generate({
         "prompt": "product commercial",
         "model": "seedance-2.5",
+        "generation_mode": "i2v",
         "images": ["https://cdn/a.png", "https://cdn/b.png"],
         "duration": 30,
         "resolution": "1080p",
@@ -424,6 +457,8 @@ async def test_wavespeed_generate_dispatches_seedance_25_multi_reference_t2v(mon
     assert calls["create"]["reference_images"] == [
         "https://cdn/a.png", "https://cdn/b.png",
     ]
+    assert out["generation_mode"] == "t2v"
+    assert out["start_image_url"] is None
 
 
 @pytest.mark.asyncio
@@ -458,11 +493,7 @@ async def test_wavespeed_generate_uses_explicit_start_frame_for_seedance_25_i2v(
         "prompt": "continue the unresolved action",
         "model": "seedance-2.5",
         "start_image_url": "https://cdn/tail.png",
-        "images": [
-            "https://cdn/tail.png",
-            "https://cdn/character-sheet.png",
-            "https://cdn/scene-sheet.png",
-        ],
+        "images": ["https://cdn/tail.png"],
         "duration": 15,
         "resolution": "1080p",
     })
@@ -471,7 +502,7 @@ async def test_wavespeed_generate_uses_explicit_start_frame_for_seedance_25_i2v(
     assert calls["create"]["last_image"] is None
     assert out["generation_mode"] == "i2v"
     assert out["start_image_url"] == "https://cdn/tail.png"
-    assert out["reference_image_count"] == 2
+    assert out["reference_image_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -503,11 +534,42 @@ async def test_wavespeed_generate_only_uses_explicit_end_frame(monkeypatch):
         "model": "seedance-2.5",
         "start_image_url": "https://cdn/start.png",
         "end_image_url": "https://cdn/end.png",
-        "images": ["https://cdn/character-sheet.png"],
+        "images": [],
     })
 
     assert calls["create"]["image"] == "https://cdn/start.png"
     assert calls["create"]["last_image"] == "https://cdn/end.png"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["seedance-2.0", "seedance-2.5"])
+async def test_wavespeed_rejects_silently_dropping_identity_references(monkeypatch, model):
+    from app.chat.v2 import provider_bridge as bridge
+    from unittest.mock import AsyncMock
+
+    service = SimpleNamespace(
+        create_seedance_2_i2v_task=AsyncMock(),
+        create_seedance_2_5_i2v_task=AsyncMock(),
+        poll_seedance_video_task_until_complete=AsyncMock(return_value=SimpleNamespace(
+            video_url="https://cdn/existing.mp4",
+        )),
+    )
+    monkeypatch.setattr(bridge, "_resolve_media_urls", AsyncMock(side_effect=lambda urls: urls))
+    monkeypatch.setattr("app.llm.wavespeed_service.get_wavespeed_service", lambda: service)
+    profile = {
+        "model": model, "prompt": "Continue from the tail, retaining the original cast",
+        "start_image_url": "https://cdn/tail.png",
+        "images": ["https://cdn/identity.png", "https://cdn/scene.png"],
+    }
+    with pytest.raises(ValueError, match="unsupported_start_frame_with_references"):
+        await bridge._wavespeed_generate(profile)
+    service.create_seedance_2_i2v_task.assert_not_called()
+    service.create_seedance_2_5_i2v_task.assert_not_called()
+    # Already-submitted legacy jobs must still reconcile without a new charge.
+    await bridge._wavespeed_generate({**profile, "remote_operation_id": "already-submitted"})
+    service.poll_seedance_video_task_until_complete.assert_awaited_once()
+    service.create_seedance_2_i2v_task.assert_not_called()
+    service.create_seedance_2_5_i2v_task.assert_not_called()
 
 
 def test_system_skills_register_provider_and_media_concat():

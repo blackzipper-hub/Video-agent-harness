@@ -135,7 +135,7 @@ export default function DeepAgentWorkspacePage() {
     void deepAgentV2Client.getTokenUsage(state.selectedRunId, controller.signal)
       .then(setTokenUsage)
       .catch(() => undefined)
-    return () => controller.abort()
+    return () =>{  controller.abort() }
   }, [traceOpen, state.selectedRunId, state.traceEvents.length])
 
   const status = state.snapshot?.run.status
@@ -175,7 +175,7 @@ export default function DeepAgentWorkspacePage() {
     const timer = window.setInterval(() => {
       void workspace.refresh()
     }, 8000)
-    return () => window.clearInterval(timer)
+    return () =>{  window.clearInterval(timer) }
   }, [state.selectedRunId, status, workspace.refresh])
 
   const selectedSkill = skills.find(skill => skill.name === selectedSkillName)
@@ -218,14 +218,15 @@ export default function DeepAgentWorkspacePage() {
           )
           : []
         const attachmentData = metadataFiles.reduce<{
-          images: Record<string, unknown>[]
-          audio_files: Record<string, unknown>[]
-          video_files: Record<string, unknown>[]
+          images: Array<{ url: string; filename?: string }>
+          audio_files: Array<{ url: string; filename?: string }>
+          video_files: Array<{ url: string; filename?: string }>
         }>((result, file) => {
           if (typeof file.url !== 'string' || !file.url) return result
-          if (file.type === 'image') result.images.push(file)
-          if (file.type === 'audio' || file.type === 'music') result.audio_files.push(file)
-          if (file.type === 'video') result.video_files.push(file)
+          const attachment = { ...file, url: file.url, filename: typeof file.filename === 'string' ? file.filename : undefined }
+          if (file.type === 'image') result.images.push(attachment)
+          if (file.type === 'audio' || file.type === 'music') result.audio_files.push(attachment)
+          if (file.type === 'video') result.video_files.push(attachment)
           return result
         }, { images: [], audio_files: [], video_files: [] })
         const hasAttachments = metadataFiles.length > 0
@@ -329,7 +330,7 @@ export default function DeepAgentWorkspacePage() {
     if (location.pathname === expected) return
     // Avoid fighting an intentional bare /create while a draft without thread is impossible
     // (newSession always allocates one). Sync whenever we know the thread.
-    navigate(expected, { replace: true, state: location.state })
+    navigate(expected, { replace: true, state: location.state as unknown })
   }, [activeThreadId, location.pathname, location.state, navigate, state.selectedRunId, workspacePath])
 
   useEffect(() => {
@@ -350,7 +351,7 @@ export default function DeepAgentWorkspacePage() {
         input_files: inputFiles,
       })
     }
-    void submitInitialRequest().catch((error) => {
+    void submitInitialRequest().catch((error: unknown) => {
       setMessage(initialRequest.initialPrompt || '')
       setUploadedFiles(initialRequest.uploadedFiles || [])
       toast.error(error instanceof Error ? error.message : String(error))
@@ -367,13 +368,13 @@ export default function DeepAgentWorkspacePage() {
   useEffect(() => {
     const controller = new AbortController()
     void deepAgentV2Client.listSkills(controller.signal)
-      .then(items => setSkills(items.filter(item => item.enabled)))
-      .catch((error) => {
+      .then((items) =>{  setSkills(items.filter(item => item.enabled)) })
+      .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           toast.error(error instanceof Error ? error.message : String(error))
         }
       })
-    return () => controller.abort()
+    return () =>{  controller.abort() }
   }, [])
 
   useEffect(() => {
@@ -386,13 +387,13 @@ export default function DeepAgentWorkspacePage() {
       .then((locks) => {
         if (!controller.signal.aborted) setProjectSkillLocks(locks)
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         // A draft URL has no project yet. Do not turn that into a workspace error.
         if (!controller.signal.aborted && !(error instanceof Error && /not found/i.test(error.message))) {
           toast.error(error instanceof Error ? error.message : String(error))
         }
       })
-    return () => controller.abort()
+    return () =>{  controller.abort() }
   }, [activeThreadId, state.snapshot?.run.id])
 
   const setProjectSkill = async (skill: DeepAgentSkill, enabled: boolean) => {
@@ -496,7 +497,7 @@ export default function DeepAgentWorkspacePage() {
     : persistedChats
 
   const currentUserOption = (requestText?: string) => ({
-    duration: resolveUserOptionDurationSec(duration[0], requestText),
+    duration: resolveUserOptionDurationSec(duration[0] ?? DEFAULT_VIDEO_OPTIONS.duration, requestText),
     aspect_ratio: aspectRatio,
     resolution,
     video_generation_tool: videoModelValues[selectedModel] || 'auto',
@@ -559,7 +560,7 @@ export default function DeepAgentWorkspacePage() {
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-border/50 px-3">
         <div className="flex items-center gap-2">
           {isMobile && (
-            <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(true)}>
+            <Button variant="ghost" size="icon" onClick={() =>{  setMobileSidebarOpen(true) }}>
               <PanelLeft className="h-4 w-4" />
             </Button>
           )}
@@ -598,7 +599,7 @@ export default function DeepAgentWorkspacePage() {
               <div className="max-h-[60vh] overflow-y-auto pr-1">
                 <DropdownMenuRadioGroup
                   value={selectedSkillName || '__auto__'}
-                  onValueChange={value => setSelectedSkillName(value === '__auto__' ? '' : value)}
+                  onValueChange={(value) =>{  setSelectedSkillName(value === '__auto__' ? '' : value) }}
                 >
                   <DropdownMenuRadioItem value="__auto__">
                     <div>
@@ -701,7 +702,7 @@ export default function DeepAgentWorkspacePage() {
           <Button
             size="sm"
             variant={traceOpen ? 'secondary' : 'ghost'}
-            onClick={() => setTraceOpen(value => !value)}
+            onClick={() =>{  setTraceOpen(value => !value) }}
           >
             <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
             {t('da.page.trace')}
@@ -761,11 +762,11 @@ export default function DeepAgentWorkspacePage() {
               <p className="text-xs opacity-95">
                 <span className="font-semibold">{t('da.page.triggeredBy')}</span>
                 {[
-                  state.notice?.skillName && interpolate(t('da.page.noticeSkill'), { text: skillDisplayName(state.notice.skillName, t) }),
-                  state.notice?.skillResource,
-                  state.notice?.capabilityId && interpolate(t('da.page.noticeCapability'), { text: state.notice.capabilityId }),
-                  state.notice?.stage && interpolate(t('da.page.noticeStage'), { text: state.notice.stage }),
-                  state.notice?.taskId && interpolate(t('da.page.noticeTask'), { text: state.notice.taskId }),
+                  state.notice.skillName && interpolate(t('da.page.noticeSkill'), { text: skillDisplayName(state.notice.skillName, t) }),
+                  state.notice.skillResource,
+                  state.notice.capabilityId && interpolate(t('da.page.noticeCapability'), { text: state.notice.capabilityId }),
+                  state.notice.stage && interpolate(t('da.page.noticeStage'), { text: state.notice.stage }),
+                  state.notice.taskId && interpolate(t('da.page.noticeTask'), { text: state.notice.taskId }),
                 ].filter(Boolean).join(' · ')}
               </p>
             )}
@@ -852,19 +853,19 @@ export default function DeepAgentWorkspacePage() {
               threadId={activeThreadId}
               conversationId={state.selectedRunId || activeThreadId}
               onMessageChange={setMessage}
-              onFileUpload={files => setUploadedFiles(current => [...current, ...files])}
-              onFileRemove={index => setUploadedFiles(current => current.filter((_, itemIndex) => itemIndex !== index))}
-              onFileReplace={(index, file) => setUploadedFiles(current => (
+              onFileUpload={(files) =>{  setUploadedFiles(current => [...current, ...files]) }}
+              onFileRemove={(index) =>{  setUploadedFiles(current => current.filter((_, itemIndex) => itemIndex !== index)) }}
+              onFileReplace={(index, file) =>{  setUploadedFiles(current => (
                 current.map((item, itemIndex) => itemIndex === index ? file : item)
-              ))}
+              )) }}
               onSendMessage={() => void send()}
               onSendWithPrompt={prompt => void send(prompt)}
               onActionSuggestionClick={(suggestion) => {
                 void workspace.sendSuggestion(suggestion, {
                   user_option: currentUserOption(),
-                }).catch(error => toast.error(error.message))
+                }).catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)))
               }}
-              onCancelGeneration={() => void workspace.cancel().catch((error) => {
+              onCancelGeneration={() => void workspace.cancel().catch((error: unknown) => {
                 toast.error(error instanceof Error ? error.message : String(error))
               })}
               showTodoList={false}
@@ -927,11 +928,11 @@ export default function DeepAgentWorkspacePage() {
           hasMoreChats={false}
           showConversationActions={false}
           showDeleteAction
-          onToggleCollapse={() => setSidebarCollapsed(value => !value)}
+          onToggleCollapse={() =>{  setSidebarCollapsed(value => !value) }}
           onNewTask={startNewSession}
           onSelectChat={selectSession}
           onDeleteChat={(id, event) => void deleteSession(id, event)}
-          onTogglePin={(_, event) => event.stopPropagation()}
+          onTogglePin={(_, event) =>{  event.stopPropagation() }}
         />
       )}
 
@@ -940,10 +941,10 @@ export default function DeepAgentWorkspacePage() {
           <div className={mobileTab === 'chat' ? 'h-full min-h-0 pb-16' : 'hidden'}>{messageArea}</div>
           <div className={mobileTab === 'artifacts' ? 'h-full min-h-0 pb-16' : 'hidden'}>{artifactsArea}</div>
           <div className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 rounded-full border border-border/60 bg-background/90 p-1 shadow-lg backdrop-blur">
-            <Button size="sm" variant={mobileTab === 'chat' ? 'secondary' : 'ghost'} onClick={() => setMobileTab('chat')}>
+            <Button size="sm" variant={mobileTab === 'chat' ? 'secondary' : 'ghost'} onClick={() =>{  setMobileTab('chat') }}>
               {t('da.page.chat')}
             </Button>
-            <Button size="sm" variant={mobileTab === 'artifacts' ? 'secondary' : 'ghost'} onClick={() => setMobileTab('artifacts')}>
+            <Button size="sm" variant={mobileTab === 'artifacts' ? 'secondary' : 'ghost'} onClick={() =>{  setMobileTab('artifacts') }}>
               {t('da.page.create')}
             </Button>
           </div>
@@ -960,15 +961,15 @@ export default function DeepAgentWorkspacePage() {
                   hasMoreChats={false}
                   showConversationActions={false}
                   showDeleteAction
-                  onToggleCollapse={() => setMobileSidebarOpen(false)}
+                  onToggleCollapse={() =>{  setMobileSidebarOpen(false) }}
                   onNewTask={() => { startNewSession(); setMobileSidebarOpen(false) }}
                   onSelectChat={(id) => { selectSession(id); setMobileSidebarOpen(false) }}
                   onDeleteChat={(id, event) => void deleteSession(id, event)}
-                  onTogglePin={(_, event) => event.stopPropagation()}
+                  onTogglePin={(_, event) =>{  event.stopPropagation() }}
                   isMobileFullScreen
                 />
               </div>
-              <button className="flex-1 bg-black/50" aria-label={t('da.page.closeSidebar')} onClick={() => setMobileSidebarOpen(false)} />
+              <button className="flex-1 bg-black/50" aria-label={t('da.page.closeSidebar')} onClick={() =>{  setMobileSidebarOpen(false) }} />
             </div>
           )}
         </div>
@@ -988,7 +989,7 @@ export default function DeepAgentWorkspacePage() {
         tokenUsage={tokenUsage}
         open={traceOpen}
         language={language}
-        onClose={() => setTraceOpen(false)}
+        onClose={() =>{  setTraceOpen(false) }}
       />
     </div>
   )

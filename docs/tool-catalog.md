@@ -5,7 +5,7 @@
 
 Every model-facing tool a shipped plugin contributes to `ctx.tools`: the `name`, `description`, and JSON-Schema `parameters` the model receives via the system-prompt assembly. It complements the [subsystem pages](subsystems/core.md) (the types plus each page's generated Cordis API region) — this page is the *tools* the agent is offered.
 
-This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator's boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).
+This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator's boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).
 
 Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog's packages-only scope.
 
@@ -15,12 +15,13 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
+| `@cuti-ai/tool-video` | `video_artifact_list`, `video_artifact_select`, `video_build_cancel`, `video_build_retry_checkpoint`, `video_build_status`, `video_change_preview`, `video_checkpoint_inspect`, `video_checkpoint_resolve`, `video_edit_preview`, `video_export`, `video_plan_patch_capability_list`, `video_plan_patch_preview`, `video_plan_patch_submit`, `video_project_build`, `video_project_create`, `video_project_inspect`, `video_project_open`, `video_project_plan`, `video_rebuild_apply`, `video_skill_load`, `video_skill_read_resource`, `video_workflow_list`, `video_workflow_load` | `ctx.tools`, `ctx.videoRuntime` | `tool/call`, `tool/result` | - | Video tools expose durable projects, versioned plans, artifact editing, checkpoints, and builds. Provider execution remains behind the Runtime HTTP API. |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
-| `@deepseek-ai/dsh-tool-cordis` | `cordis_define`, `cordis_inspect_list`, `cordis_inspect_query`, `cordis_inspect_self`, `cordis_run`, `cordis_stop`, `cordis_undefine` | `ctx.tools`, `ctx.dynamicCordisRunner` | `tool/call`, `tool/result`, `process-local dynamic package lifecycle` | - | Not in any shipped tree (a deliberate opt-in — dynamic package code reaches the real runtime, see .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md). The toolset injects `ctx.dynamicCordisRunner` from `@deepseek-ai/dsh-cordis-host-runner`, which owns the definition registry and the vm sandbox; a composition missing it never activates the tools. A running package may register ADDITIONAL model-visible tools until it is stopped, undefined, or DSH restarts; a full changed request header logs those tool-set changes. |
+| `@deepseek-ai/dsh-tool-cordis` | `cordis_define`, `cordis_inspect_list`, `cordis_inspect_query`, `cordis_inspect_self`, `cordis_run`, `cordis_stop`, `cordis_undefine` | `ctx.tools`, `ctx.dynamicCordisRunner` | `tool/call`, `tool/result`, `process-local dynamic package lifecycle` | - | Not in any shipped tree (a deliberate opt-in — dynamic package code reaches the real runtime, see https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md). The toolset injects `ctx.dynamicCordisRunner` from `@deepseek-ai/dsh-cordis-host-runner`, which owns the definition registry and the vm sandbox; a composition missing it never activates the tools. A running package may register ADDITIONAL model-visible tools until it is stopped, undefined, or DSH restarts; a full changed request header logs those tool-set changes. |
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
@@ -41,6 +42,1581 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+
+<a id="cuti-aitool-video"></a>
+
+## `@cuti-ai/tool-video`
+
+### `video_artifact_list`
+
+List the currently selected, project-owned Artifacts that may be used as inputs to a dynamic edit. Call this before proposing any edit to an existing video; use only returned artifactVersionId values.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_artifact_select`
+
+Select one artifact version and atomically create a new immutable project version.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "version_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "version_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_cancel`
+
+Request cancellation of a durable video build.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_retry_checkpoint`
+
+Retry automatic delivery of a failed semantic checkpoint. This does not regenerate media or create a new build.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_status`
+
+Read the authoritative status of a durable video build.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_change_preview`
+
+Preview the deterministic impact of a requested project change without modifying the project.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "change": {
+      "type": "string",
+      "description": "Concrete requested change."
+    },
+    "target_artifact_version_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "change",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_checkpoint_inspect`
+
+Inspect a durable planning checkpoint. For a user edit during an active continuous build, use checkpoint_id="live" to open or reuse a planning snapshot without waiting for task completion. Submit the returned checkpoint id and revisions in video_plan_patch_submit.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_checkpoint_resolve`
+
+Resolve a planning checkpoint with creative fields and tasks. Continuous builds accept additions and pending-task cancellations while unrelated work is running; staged builds use their Workflow compiler.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "base_plan_revision": {
+      "type": "integer"
+    },
+    "base_spec_revision": {
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "video_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "Installed Video Runtime workflow id. Legacy Cuti workflow SKILL.md names are valid when installed."
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "description": "Optional helper Skills the user or a project lock explicitly pinned. Do not list helpers that a workflow named via video_skill_load.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "description": "Project-owned uploaded source artifact ids. Never invent ids or pass arbitrary URLs.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "description": "Workflow-specific structured parameters returned by video_workflow_load.",
+          "additionalProperties": true
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "appearance": {
+                "type": "string"
+              },
+              "clothing": {
+                "type": "string"
+              },
+              "personality": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "appearance"
+            ]
+          }
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "order": {
+                "type": "integer"
+              },
+              "duration_seconds": {
+                "type": "number"
+              },
+              "beat": {
+                "type": "string"
+              },
+              "visual_prompt": {
+                "type": "string"
+              },
+              "narration": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "character_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reference_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "transition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "duration_seconds",
+              "beat",
+              "visual_prompt"
+            ]
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "narration_voice": {
+              "type": "string"
+            },
+            "bgm_prompt": {
+              "type": "string"
+            },
+            "subtitles": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "narration_voice",
+            "bgm_prompt",
+            "subtitles"
+          ]
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "characters",
+        "shots",
+        "audio",
+        "providers",
+        "automation"
+      ]
+    },
+    "video_spec_patch": {
+      "type": "object",
+      "description": "Partial VideoSpec fields resolved at this checkpoint. Use instead of video_spec.",
+      "additionalProperties": true
+    },
+    "phase_inputs": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "proposed_steps": {
+      "type": "array",
+      "description": "Tasks may depend on existing tasks or tasks added in this patch. Only ready tasks execute. Use an empty list to acknowledge an update while other tasks continue.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "validate"
+            ]
+          },
+          "capability": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "input_artifact_version_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_artifact_id": {
+            "type": "string"
+          },
+          "output_artifact_type": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "step_id",
+          "action",
+          "capability"
+        ]
+      }
+    },
+    "cancel_step_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "goal_satisfied": {
+      "type": "boolean"
+    },
+    "waiting_for_input": {
+      "type": "boolean"
+    },
+    "response": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id",
+    "base_plan_revision",
+    "base_spec_revision",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_edit_preview`
+
+Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "patch_character",
+              "patch_scene",
+              "patch_shot",
+              "regenerate_artifact",
+              "replace_music",
+              "patch_timeline"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "artifactVersionId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {}
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "description",
+    "edits"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_export`
+
+Export one exact immutable project version in the requested format.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "mp4",
+        "mov",
+        "webm",
+        "project"
+      ]
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "format"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_capability_list`
+
+List enabled capabilities with parameters_schema. Call this after loading the Workflow and before proposing PlanPatch tasks. Copy each capability's parameters_schema; do not invent keys. add_tasks must still be allowed on the current Workflow.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_preview`
+
+Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. This only previews impact and cost; wait for user confirmation before video_rebuild_apply. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "role": {
+                  "type": "string"
+                },
+                "artifact_version_id": {
+                  "type": "string"
+                },
+                "operation_step_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {}
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "capability",
+          "inputs"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "description",
+    "operations"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_submit`
+
+Submit a Cuti PlanPatch after a task completion, failure, or user edit. Add tasks and dependencies or cancel pending tasks while other work runs. For every video-generation task, parameters.prompt must be the duration-aware final provider prompt, not a synopsis; later and repaired clips must preserve the relevant specificity of prior comparable clips visible in task parameters and Artifact generation_context. Persist planning documents whose final content is already known with runtime.artifact.persist; do not call atomic.text.generate just to repeat the Agent planning already done. Reserve atomic.text.generate for genuinely independent text generation or transformation. For user edits, first call video_checkpoint_inspect with checkpoint_id="live", then submit its returned id and revisions. goal_satisfied requires a playable result and no active tasks.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "base_revision": {
+      "type": "integer"
+    },
+    "base_spec_revision": {
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "video_spec_patch": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "add_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_key": {
+            "type": "string"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "output_artifact_type": {
+            "type": "string"
+          },
+          "output_artifact_id": {
+            "type": "string"
+          },
+          "input_artifact_version_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "estimated_cost": {
+            "type": "number"
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "client_key",
+          "capability_id",
+          "objective"
+        ]
+      }
+    },
+    "cancel_task_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replace_failed_task_ids": {
+      "type": "object",
+      "description": "Map failed task IDs to new client_keys (string values) in add_tasks with corrected parameters. Runtime clones and rewires pending descendants atomically. For a failed Build, inspect checkpoint_id=live first; old work does not restart before this patch commits.",
+      "additionalProperties": true
+    },
+    "goal_satisfied": {
+      "type": "boolean"
+    },
+    "waiting_for_input": {
+      "type": "boolean"
+    },
+    "response": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id",
+    "base_revision",
+    "base_spec_revision",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_build`
+
+Start a persisted initial video BuildPlan immediately in fully automatic mode.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "plan_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_create`
+
+Create a durable empty video project and bind it to the current session.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_inspect`
+
+Inspect the current video project version, artifact count, active builds, and concise status.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_open`
+
+Open an existing video project and return its current immutable version summary.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Opaque video project id."
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_plan`
+
+Create the first durable phase of a video BuildPlan. Prefer project_intent when later creative decisions depend on generated media; provide exactly one of project_intent or video_spec.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "project_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "brief": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "title",
+        "brief",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "providers",
+        "automation"
+      ]
+    },
+    "video_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "Installed Video Runtime workflow id. Legacy Cuti workflow SKILL.md names are valid when installed."
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "description": "Optional helper Skills the user or a project lock explicitly pinned. Do not list helpers that a workflow named via video_skill_load.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "description": "Project-owned uploaded source artifact ids. Never invent ids or pass arbitrary URLs.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "description": "Workflow-specific structured parameters returned by video_workflow_load.",
+          "additionalProperties": true
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "appearance": {
+                "type": "string"
+              },
+              "clothing": {
+                "type": "string"
+              },
+              "personality": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "appearance"
+            ]
+          }
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "order": {
+                "type": "integer"
+              },
+              "duration_seconds": {
+                "type": "number"
+              },
+              "beat": {
+                "type": "string"
+              },
+              "visual_prompt": {
+                "type": "string"
+              },
+              "narration": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "character_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reference_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "transition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "duration_seconds",
+              "beat",
+              "visual_prompt"
+            ]
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "narration_voice": {
+              "type": "string"
+            },
+            "bgm_prompt": {
+              "type": "string"
+            },
+            "subtitles": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "narration_voice",
+            "bgm_prompt",
+            "subtitles"
+          ]
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "characters",
+        "shots",
+        "audio",
+        "providers",
+        "automation"
+      ]
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_rebuild_apply`
+
+Apply an approved rebuild plan against its exact base project version.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "plan_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_skill_load`
+
+Load one installed Skill's full Markdown instructions after it is selected, named by another Skill, or explicitly requested. Returns resourceOwnerSkillId and bundled paths; read each path with video_skill_read_resource using that exact owner id.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "skill_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "skill_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_skill_read_resource`
+
+Read one bundled text file from an installed Skill when its instructions require that file. Pass the resourceOwnerSkillId returned alongside the path; never substitute a dependency or the most recently loaded Skill id.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "skill_id": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "skill_id",
+    "path"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_workflow_list`
+
+List Video Runtime workflows before planning. In automatic mode choose only an available user-selectable workflow whose description matches the user request. Never use a hidden compatibility workflow or invent a compiler.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_workflow_load`
+
+Load the authoritative instructions and execution contract for one selected available video workflow. Call this before constructing VideoSpec. Then call video_skill_load for every returned skillDependencies entry and for any additional Skill named by the instructions. Any returned resource path belongs to resourceOwnerSkillId (normally the workflow id), not to the most recently loaded dependency.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workflow_id"
+  ]
+}
+```
+
+Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+Video tools expose durable projects, versioned plans, artifact editing, checkpoints, and builds. Provider execution remains behind the Runtime HTTP API.
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -499,7 +2075,7 @@ Permanently remove a dynamic Plugin owned by the current Session. If it is runni
 
 Source: [`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)
 
-Not in any shipped tree (a deliberate opt-in — dynamic package code reaches the real runtime, see .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md). The toolset injects `ctx.dynamicCordisRunner` from `@deepseek-ai/dsh-cordis-host-runner`, which owns the definition registry and the vm sandbox; a composition missing it never activates the tools. A running package may register ADDITIONAL model-visible tools until it is stopped, undefined, or DSH restarts; a full changed request header logs those tool-set changes.
+Not in any shipped tree (a deliberate opt-in — dynamic package code reaches the real runtime, see https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md). The toolset injects `ctx.dynamicCordisRunner` from `@deepseek-ai/dsh-cordis-host-runner`, which owns the definition registry and the vm sandbox; a composition missing it never activates the tools. A running package may register ADDITIONAL model-visible tools until it is stopped, undefined, or DSH restarts; a full changed request header logs those tool-set changes.
 
 <a id="deepseek-aidsh-tool-bash-persistent"></a>
 

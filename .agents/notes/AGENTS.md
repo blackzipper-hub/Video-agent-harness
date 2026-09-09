@@ -4,4 +4,4 @@ Agent Notes are effectively RFCs written by agents: durable proposals and decisi
 
 **Every new Agent Note triggers a supersession check.** Search the active tree for older notes covering the same decision or mechanism, classify any full or partial supersession with [`dsh-archive-agent-notes`](../skills/dsh-archive-agent-notes/SKILL.md), and archive every qualifying implemented triplet in the same PR. Keep partial supersessions active and cross-linked.
 
-Files under [`archived/`](archived/AGENTS.md) are frozen historical snapshots: never edit them or treat them as current authority.
+Files under [`archived/`](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/archived/AGENTS.md) are frozen historical snapshots: never edit them or treat them as current authority.

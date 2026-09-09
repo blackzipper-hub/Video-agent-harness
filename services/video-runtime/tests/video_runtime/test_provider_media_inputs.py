@@ -57,10 +57,14 @@ class ProviderMediaInputTest(unittest.IsolatedAsyncioTestCase):
     async def test_atomic_uses_same_order_and_explicit_id_resolution(self):
         payload = self.payload()
         payload["step"]["parameters"]["images"] = [payload["step"]["input_artifact_version_ids"][0]]
+        payload["step"]["parameters"]["generation_mode"] = "i2v"
         fake = AsyncMock(return_value=("job", {"uri": "https://cdn.example.test/out.mp4"}))
         await self.call(payload, "atomic.video.generate", fake)
-        self.assertEqual(fake.call_args.kwargs["task"].parameters["images"],
+        task_parameters = fake.call_args.kwargs["task"].parameters
+        self.assertEqual(task_parameters["images"],
                          [f"https://cdn.example.test/{i}.png" for i in range(4)])
+        self.assertEqual(task_parameters["generation_mode"], "t2v")
+        self.assertNotIn("start_image_url", task_parameters)
 
     async def test_missing_reference_rejected_before_provider(self):
         for change in ("id", "uri", "step", "slot"):
@@ -72,6 +76,24 @@ class ProviderMediaInputTest(unittest.IsolatedAsyncioTestCase):
             with patch("app.integrations.providers.provider_bridge.generate_video", AsyncMock()) as fake:
                 with self.assertRaisesRegex(ValueError, "unavailable|no URI|missing images"): await self.call(payload)
                 fake.assert_not_called()
+
+    async def test_continuation_keeps_original_references_separate_from_tail(self):
+        payload = self.payload()
+        tail = MediaArtifactVersion(project_id="p", artifact_id="shot:one:tail",
+                                    type="image", uri="https://cdn.example.test/tail.png")
+        payload["completed_artifacts"]["tail"] = tail.model_dump(mode="json")
+        payload["step"]["input_artifact_version_ids"].append(tail.id)
+        payload["step"]["parameters"].update({
+            "start_image_from_step": "tail", "reference_from_steps": ["0", "1", "2", "3"],
+        })
+        fake = AsyncMock(return_value={"uri": "https://cdn.example.test/out.mp4"})
+        with patch("app.integrations.providers.provider_bridge.generate_video", fake):
+            await self.call(payload)
+        profile = fake.call_args.args[0]
+        self.assertEqual(profile["start_image_url"], tail.uri)
+        # The bridge removes explicit frame URLs from the general input list.
+        self.assertEqual([url for url in profile["images"] if url != tail.uri],
+                         [f"https://cdn.example.test/{i}.png" for i in range(4)])
 
     async def test_shared_reference_policy_cannot_degrade_to_text_to_video(self):
         payload = self.payload()

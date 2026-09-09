@@ -1,7 +1,7 @@
 /**
  * Bump one release family's version and commit it, so the published version is
  * readable from the repository rather than derived inside CI
- * ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+ * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  *
  * The dsh family shares one version across its publishable members, private
  * package manifests, and the workspace root:

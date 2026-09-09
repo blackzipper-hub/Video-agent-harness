@@ -44,6 +44,7 @@ python/**/.pytest_cache/
 **/.pytest_cache/
 **/*.py[cod]
 apps/web/dist/
+website/.vitepress/.temp/
 .artifacts/
 .dsh-build/
 .playwright-mcp/

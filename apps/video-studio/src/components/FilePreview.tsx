@@ -14,9 +14,9 @@ interface FilePreviewProps {
 export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove, onCropAudio }) => {
   const { t } = useLanguage()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [, setError] = useState<string | null>(null)
   const [audioPlaying, setAudioPlaying] = useState(false)
-  const [audioUrlReady, setAudioUrlReady] = useState(false)
+  const [, setAudioUrlReady] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
   const lastAudioFileRef = useRef<File | null>(null)
@@ -28,7 +28,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
       // 图片预览
       const url = URL.createObjectURL(file)
       setPreviewUrl(url)
-      cleanup = () => URL.revokeObjectURL(url)
+      cleanup = () =>{  URL.revokeObjectURL(url) }
     } else if (file.type.startsWith('audio/')) {
       if (lastAudioFileRef.current === file && audioUrlRef.current) {
         cleanup = () => {}
@@ -45,7 +45,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
         }
       }
     } else if (file.type.startsWith('video/')) {
-      extractVideoThumbnail(file)
+      void extractVideoThumbnail(file)
     }
 
     return () => {
@@ -135,7 +135,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
             console.error('Error extracting video thumbnail:', err)
             setError('Failed to extract thumbnail')
             cleanup()
-            reject(err)
+            reject(err instanceof Error ? err : new Error('Failed to extract thumbnail', { cause: err }))
           }
         }
 
@@ -183,12 +183,12 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
       audio.pause()
       setAudioPlaying(false)
     } else {
-      audio.play().catch(() => setAudioPlaying(false))
+      audio.play().catch(() =>{  setAudioPlaying(false) })
       setAudioPlaying(true)
     }
   }
 
-  const handleAudioEnded = () => setAudioPlaying(false)
+  const handleAudioEnded = () =>{  setAudioPlaying(false) }
 
   const getFileIcon = () => {
     if (file.type.startsWith('image/')) {
@@ -205,7 +205,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
   const getDisplayName = (): string => {
     const name = file.name
     const charMatch = name.match(/^character-(.+)\.(png|jpg|jpeg|webp)$/i)
-    if (charMatch) {
+    if (charMatch?.[1]) {
       const id = charMatch[1].toLowerCase()
       const map: Record<string, string> = {
         cuti: 'Cuti', ducky: 'Ducky', hana: 'Hana', jay: 'Jay',
@@ -235,7 +235,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, index, onRemove,
                   src={previewUrl}
                   alt={file.name}
                   className="w-full h-full object-cover"
-                  onError={() => setError('Failed to load preview')}
+                  onError={() =>{  setError('Failed to load preview') }}
                 />
                 {file.type.startsWith('video/') && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-md">

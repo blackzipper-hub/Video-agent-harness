@@ -1,3 +1,4 @@
+import { arrayItem } from '../../utils/arrayItem'
 import { translations, type TranslationKey } from '@/i18n/translations'
 
 export type Translate = (key: TranslationKey) => string
@@ -10,7 +11,7 @@ export function interpolate(template: string, vars: Record<string, string | numb
 }
 
 export function hasTranslation(key: string): key is TranslationKey {
-  return Object.prototype.hasOwnProperty.call(translations.en, key)
+  return Object.hasOwn(translations.en, key)
 }
 
 export function lookup(t: Translate, key: string): string | undefined {
@@ -45,7 +46,7 @@ export function capabilityLabel(capabilityId: string, t: Translate): string {
 function numberedShotPart(value: string): string | null {
   const match = value.match(/^(?:(?:shot|segment)[-_]?)?(\d+)$/i)
   if (!match) return null
-  return String(Number.parseInt(match[1], 10))
+  return String(Number.parseInt(arrayItem(match, 1), 10))
 }
 
 export type StepEntityNames = Readonly<Record<string, string>>
@@ -66,37 +67,37 @@ export function planStepLabel(
 
   const shotVideo = id.match(/^shot-(.+)-video$/i)
   if (shotVideo) {
-    const n = numberedShotPart(shotVideo[1])
+    const n = numberedShotPart(arrayItem(shotVideo, 1))
     return n
       ? interpolate(t('da.step.shotVideo'), { n })
-      : interpolate(t('da.step.shotVideoNamed'), { id: entityName(shotVideo[1], entityNames) })
+      : interpolate(t('da.step.shotVideoNamed'), { id: entityName(arrayItem(shotVideo, 1), entityNames) })
   }
   const shotKeyframe = id.match(/^shot-(.+)-keyframe$/i)
   if (shotKeyframe) {
-    const n = numberedShotPart(shotKeyframe[1])
-    return interpolate(t('da.step.shotKeyframe'), { n: n || entityName(shotKeyframe[1], entityNames) })
+    const n = numberedShotPart(arrayItem(shotKeyframe, 1))
+    return interpolate(t('da.step.shotKeyframe'), { n: n || entityName(arrayItem(shotKeyframe, 1), entityNames) })
   }
   const characterRef = id.match(/^character-(.+)-reference$/i)
   if (characterRef) {
     return interpolate(t('da.step.characterReferenceNamed'), {
-      id: entityName(characterRef[1], entityNames),
+      id: entityName(arrayItem(characterRef, 1), entityNames),
     })
   }
   const sceneRef = id.match(/^scene-(.+)-reference$/i)
   if (sceneRef) {
     return interpolate(t('da.step.sceneReferenceNamed'), {
-      id: entityName(sceneRef[1], entityNames),
+      id: entityName(arrayItem(sceneRef, 1), entityNames),
     })
   }
   const source = id.match(/^source-(\d+)$/i)
   if (source) {
-    return interpolate(t('da.step.sourceNamed'), { n: source[1] })
+    return interpolate(t('da.step.sourceNamed'), { n: arrayItem(source, 1) })
   }
   const productValidation = id.match(/^shot-(.+)-product-validation$/i)
   if (productValidation) {
-    const n = numberedShotPart(productValidation[1])
+    const n = numberedShotPart(arrayItem(productValidation, 1))
     return interpolate(t('da.step.shotProductValidation'), {
-      n: n || entityName(productValidation[1], entityNames),
+      n: n || entityName(arrayItem(productValidation, 1), entityNames),
     })
   }
   return id.replace(/[-_]/g, ' ')
@@ -135,25 +136,25 @@ export function runtimeMessage(message: string, t: Translate): string {
   if (exact) return t(exact)
   const requestFailed = text.match(/Video Runtime request failed \((\d+)\)/i)
   if (requestFailed) {
-    return interpolate(t('da.runtime.requestFailed'), { status: requestFailed[1] })
+    return interpolate(t('da.runtime.requestFailed'), { status: arrayItem(requestFailed, 1) })
   }
   const wavespeed = text.match(/^Waiting for wavespeed operation for (.+)$/i)
   if (wavespeed) {
     return interpolate(t('da.runtime.waitingWavespeed'), {
-      step: planStepLabel(wavespeed[1], t),
+      step: planStepLabel(arrayItem(wavespeed, 1), t),
     })
   }
   const waiting = text.match(/^Waiting for .+ operation for (.+)$/i)
   if (waiting) {
     return interpolate(t('da.runtime.waitingProvider'), {
-      step: planStepLabel(waiting[1], t),
+      step: planStepLabel(arrayItem(waiting, 1), t),
     })
   }
   const completed = text.match(/^Completed (\d+) of (\d+) (?:media |build )?steps$/i)
   if (completed) {
     return interpolate(t('da.runtime.completedSteps'), {
-      done: completed[1],
-      total: completed[2],
+      done: arrayItem(completed, 1),
+      total: arrayItem(completed, 2),
     })
   }
   return planStepLabel(text, t)

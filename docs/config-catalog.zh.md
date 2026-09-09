@@ -11,6 +11,26 @@
 
 `Requires:` 行列出插件通过 `inject` 注入的服务键：其 `cordis.yml` 树还必须加载这些服务的提供者。范围限定为 harness 层级（`packages/`）；配置树还可能加载的 vendored cordis 插件（`hmr`、控制台日志记录器等）固定为上游源代码（参见 [vendoring policy](../vendor/README.md)），未收录于此目录。
 
+<a id="cuti-aivideo-runtime-http"></a>
+
+## `@cuti-ai/video-runtime-http`
+
+```ts config-catalog
+/** Connection and request bounds for the Python Video Runtime HTTP provider. */
+export interface Config {
+  /** Runtime origin, without a project-specific API path. */
+  baseUrl: string
+  /** Optional service credential sent with Runtime requests. */
+  serviceToken?: string
+  /** Default user attribution when a request supplies none. */
+  userId?: string
+  /** Per-request timeout in milliseconds; defaults to 30000. */
+  timeoutMs?: number
+}
+```
+
+来源： [`packages/video/video-runtime-http/src/index.ts:33`](../packages/video/video-runtime-http/src/index.ts)
+
 <a id="deepseek-aidsh-acp"></a>
 
 ## `@deepseek-ai/dsh-acp`
@@ -3224,6 +3244,8 @@ export interface Config {
 
 这些插件通过 `cordis.yml` 中不含 `config:` 块的条目加载；它们未声明任何配置接口。
 
+- `@cuti-ai/tool-video` — 需要 `tools` · `videoRuntime` ([`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts))
+- `@cuti-ai/video-agent-bundle` ([`packages/bundle/video-agent/src/index.ts`](../packages/bundle/video-agent/src/index.ts))
 - `@deepseek-ai/dsh-agent`（[`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts)）
 - `@deepseek-ai/dsh-api-gateway` — 需要 `typert`（[`packages/api/gateway/src/index.ts`](../packages/api/gateway/src/index.ts)）
 - `@deepseek-ai/dsh-api-remotes`（[`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts)）
@@ -3297,8 +3319,9 @@ export interface Config {
 
 ## Seam 包（不可直接加载）
 
-抽象服务类——部署时应改为加载具体的实现包（参见[能力 seam](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.zh.md)）。
+抽象服务类——部署时应改为加载具体的实现包（参见[能力 seam](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)）。
 
+- `@cuti-ai/video-runtime` — 抽象 `VideoRuntime` ([`packages/video/video-runtime/src/index.ts`](../packages/video/video-runtime/src/index.ts))
 - `@deepseek-ai/dsh-attachment` — 抽象 `AttachmentStore`（[`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts)）
 - `@deepseek-ai/dsh-code-runtime` — 抽象 `CodeRuntime`（[`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts)）
 - `@deepseek-ai/dsh-compaction` — 抽象 `CompactionEngine`（[`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts)）

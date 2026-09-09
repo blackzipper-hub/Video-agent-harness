@@ -3,27 +3,27 @@
  * 仅从 DOM remove 不足以释放显存，必须在卸载时调用此函数。
  */
 export function hardCleanupVideo(el: HTMLVideoElement | null | undefined): void {
-  if (!el) return;
+  if (!el) return
   try {
-    el.pause();
+    el.pause()
   } catch (_) {}
   try {
     // Break media pipeline immediately.
-    el.srcObject = null;
-    el.src = "";
-    el.removeAttribute("src");
-    const sources = el.querySelectorAll("source");
+    el.srcObject = null
+    el.src = ''
+    el.removeAttribute('src')
+    const sources = el.querySelectorAll('source')
     sources.forEach((source) => {
-      source.removeAttribute("src");
-    });
+      source.removeAttribute('src')
+    })
     // Drop inline handlers to avoid retaining closures.
-    el.onloadeddata = null;
-    el.onloadedmetadata = null;
-    el.oncanplay = null;
-    el.oncanplaythrough = null;
-    el.onplay = null;
-    el.onpause = null;
-    el.onerror = null;
-    el.load();
+    el.onloadeddata = null
+    el.onloadedmetadata = null
+    el.oncanplay = null
+    el.oncanplaythrough = null
+    el.onplay = null
+    el.onpause = null
+    el.onerror = null
+    el.load()
   } catch (_) {}
 }

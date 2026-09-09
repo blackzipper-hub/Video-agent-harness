@@ -1,3 +1,4 @@
+import { asyncEvent } from '../utils/asyncEvent'
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Loader2, RefreshCw } from 'lucide-react'
@@ -94,7 +95,7 @@ export default function IncrementalVideoWorkspacePage() {
     // it until either an active Build or committed artifacts become visible.
     if (!projectId || build || (artifactCount !== undefined && artifactCount > 0)) return
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 2000)
-    return () => window.clearInterval(timer)
+    return () =>{  window.clearInterval(timer) }
   }, [artifactCount, build, projectId, refresh])
   useEffect(() => {
     if (!projectId || !activeBuildId || !activeBuildStatus || !['queued', 'running', 'waiting_external'].includes(activeBuildStatus)) return
@@ -110,7 +111,7 @@ export default function IncrementalVideoWorkspacePage() {
     })
     void poll()
     const timer = window.setInterval(() => void poll(), 2000)
-    return () => window.clearInterval(timer)
+    return () =>{  window.clearInterval(timer) }
   }, [activeBuildId, activeBuildStatus, projectId, refresh])
 
   const create = async (event: FormEvent) => {
@@ -150,17 +151,17 @@ export default function IncrementalVideoWorkspacePage() {
     finally { setBusy(false) }
   }
 
-  const buckets = useMemo(() => preview ? [
+  const buckets = useMemo<ReadonlyArray<readonly [string, string[], string]>>(() => preview ? [
     [copy.reuse, preview.reusedArtifactIds, 'text-emerald-300'],
     [copy.validate, preview.validationArtifactIds, 'text-amber-300'],
     [copy.rebuild, preview.staleArtifactIds, 'text-red-300'],
   ] as const : [], [copy.rebuild, copy.reuse, copy.validate, preview])
 
   if (!projectId) return <main className="grid min-h-screen place-items-center bg-zinc-950 text-zinc-100">
-    <form onSubmit={create} className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-8">
+    <form onSubmit={asyncEvent(create)} className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-8">
       <p className="text-xs uppercase tracking-[0.25em] text-violet-300">Video Agent Harness</p>
       <h1 className="mt-2 text-2xl font-semibold">{copy.createTitle}</h1>
-      <input className="mt-6 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3" value={title} onChange={e => setTitle(e.target.value)} placeholder={copy.projectName} />
+      <input className="mt-6 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3" value={title} onChange={(e) =>{  setTitle(e.target.value) }} placeholder={copy.projectName} />
       <Button className="mt-4" disabled={busy}>{busy && <Loader2 className="animate-spin" />}{copy.create}</Button>
     </form>
   </main>
@@ -175,7 +176,7 @@ export default function IncrementalVideoWorkspacePage() {
         {project && project.artifactCount === 0 && <section className="rounded-xl border border-violet-400/30 bg-violet-400/[0.04] p-4">
           <h2 className="font-medium">{copy.fullVideo}</h2>
           <p className="mt-1 text-xs text-zinc-400">{automaticBuild && !build ? copy.automatic : copy.manual}</p>
-          <textarea className="mt-3 min-h-80 w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs" value={videoSpecJson} onChange={event => setVideoSpecJson(event.target.value)} />
+          <textarea className="mt-3 min-h-80 w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs" value={videoSpecJson} onChange={(event) =>{  setVideoSpecJson(event.target.value) }} />
           <div className="mt-3 flex items-center justify-between">
             <span className="text-sm text-zinc-400">{initialPlan ? `${initialPlan.shotCount} ${copy.shots} · ${copy.estimated} $${initialPlan.estimatedCost}` : copy.planFirst}</span>
             <div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => void planInitialBuild()}>{copy.makePlan}</Button><Button disabled={busy || !initialPlan} onClick={() => void startInitialBuild()}>{copy.makeVideo}</Button></div>
@@ -183,9 +184,9 @@ export default function IncrementalVideoWorkspacePage() {
         </section>}
         <section className="rounded-xl border border-white/10 p-4">
           <h2 className="font-medium">{copy.previewTitle}</h2>
-          <textarea className="mt-3 min-h-24 w-full rounded-lg border border-white/10 bg-black/30 p-3" value={change} onChange={e => setChange(e.target.value)} placeholder={copy.changePlaceholder} />
+          <textarea className="mt-3 min-h-24 w-full rounded-lg border border-white/10 bg-black/30 p-3" value={change} onChange={(e) =>{  setChange(e.target.value) }} placeholder={copy.changePlaceholder} />
           <p className="mt-3 text-xs text-zinc-400">{copy.selectChanged}</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">{project?.artifacts.map(artifact => <label key={artifact.id} className="flex gap-2 rounded border border-white/10 p-2 text-sm"><input type="checkbox" checked={targetIds.includes(artifact.id)} onChange={e => setTargetIds(ids => e.target.checked ? [...ids, artifact.id] : ids.filter(id => id !== artifact.id))} />{artifact.title || artifact.type} v{artifact.version}</label>)}</div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">{project?.artifacts.map(artifact => <label key={artifact.id} className="flex gap-2 rounded border border-white/10 p-2 text-sm"><input type="checkbox" checked={targetIds.includes(artifact.id)} onChange={(e) =>{  setTargetIds(ids => e.target.checked ? [...ids, artifact.id] : ids.filter(id => id !== artifact.id)) }} />{artifact.title || artifact.type} v{artifact.version}</label>)}</div>
           <Button className="mt-4" disabled={busy || targetIds.length === 0} onClick={() => void runPreview()}>{copy.analyze}</Button>
           {preview && <div className="mt-4 grid gap-3 sm:grid-cols-3">{buckets.map(([label, ids, color]) => <div key={label} className="rounded-lg bg-white/[0.04] p-3"><p className={color}>{label} · {ids.length}</p><p className="mt-2 break-all text-xs text-zinc-400">{ids.join('\n') || copy.none}</p></div>)}</div>}
           {preview && <div className="mt-4 flex items-center justify-between rounded-lg border border-violet-400/20 p-3"><span className="text-sm">{copy.estimatedCost}: {preview.estimatedCost}</span><Button onClick={() => void videoRuntimeClient.rebuild(preview, crypto.randomUUID()).then(setBuild).catch(() => toast.error(copy.buildFailed))}>{copy.confirmRebuild}</Button></div>}

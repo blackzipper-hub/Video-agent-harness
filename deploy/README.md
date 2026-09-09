@@ -1,30 +1,32 @@
-# 五个服务的 Dockerfile / Helm 放哪，以及本地 · dev · prod
+# Dockerfiles and Helm for five services: local, dev, and prod
 
-三套互不替换：
+English | [中文](README.zh.md)
 
-| 套 | 谁用 | 怎么起 | 能不能改 |
+Three separate setups; none replaces another:
+
+| Setup | Audience | Startup | Change policy |
 |----|------|--------|----------|
-| **同事本地** | README 那一套 | 仓库根 `compose.video.yml` + 本机 `pnpm dsh` | **不能弄坏** |
-| **我们本地** | 自己测完整链路（含 Go 登录 + 容器里的 DSH） | `-f compose.video.yml -f deploy/local/compose.yml` | 只动 deploy/local |
-| **dev / prod** | EKS | 同一批 Helm chart + `deploy/overlays/{dev,prod}` | 新 namespace，先别动现网 Ingress |
+| **Colleague local** | Root README users | Root `compose.video.yml` + local `pnpm dsh` | **Must remain working** |
+| **Team local** | Full-chain testing (Go login + containerized DSH) | `-f compose.video.yml -f deploy/local/compose.yml` | Change deploy/local only |
+| **dev / prod** | EKS | Shared Helm charts + `deploy/overlays/{dev,prod}` | New namespaces; leave existing Ingress alone |
 
-`deploy/harness-test/` 是之前隔离试跑，正式三套不用它。
+`deploy/harness-test/` was an isolated trial and is not used by these three setups.
 
-## Dockerfile 跟服务走（不进 deploy）
+## Keep Dockerfiles with services, not in deploy
 
-同一份给同事 compose、我们 compose、GitHub 编镜像。
+The same Dockerfiles serve colleague compose, team compose, and GitHub image builds.
 
-| # | 服务 | Dockerfile | 本地（同事） | 本地（我们） | Helm chart |
+| # | Service | Dockerfile | Colleague local | Team local | Helm chart |
 |---|------|------------|--------------|--------------|------------|
-| 1 | Video Runtime | `services/video-runtime/Dockerfile.runtime` | compose.video.yml | 同一份，只改 DSH URL | `services/video-runtime/helm/cuti-videoagent` |
-| 2 | Media | `services/media-service/Dockerfile` | 同上 | 同上 | `services/media-service/helm/cuti-media-service` |
-| 3 | Video Studio | `apps/video-studio/Dockerfile` | 无登录、无需认证开关 | 同样无登录；对外访问由网关保护 | `deploy/charts/video-studio` |
-| 4 | DeepSeek Harness | `apps/dsh/Dockerfile` | **不编镜像**，本机 `pnpm dsh` | compose 里编 + sidecar | `deploy/charts/deepseek-harness` |
-| 5 | Go API | `Cuti-backend-go/Dockerfile` | 不启 | compose 编 `../Cuti-backend-go` | `Cuti-backend-go/helm/cuti-api-go` |
+| 1 | Video Runtime | `services/video-runtime/Dockerfile.runtime` | compose.video.yml | Same file, different DSH URL | `services/video-runtime/helm/cuti-videoagent` |
+| 2 | Media | `services/media-service/Dockerfile` | Same as above | Same as above | `services/media-service/helm/cuti-media-service` |
+| 3 | Video Studio | `apps/video-studio/Dockerfile` | No login or authentication switch | No login; gateway protects external access | `deploy/charts/video-studio` |
+| 4 | DeepSeek Harness | `apps/dsh/Dockerfile` | **No image build**, local `pnpm dsh` | Compose build + sidecar | `deploy/charts/deepseek-harness` |
+| 5 | Go API | `Cuti-backend-go/Dockerfile` | Not started | Compose builds `../Cuti-backend-go` | `Cuti-backend-go/helm/cuti-api-go` |
 
-数据面：Postgres / Redis 没有自己的业务 Dockerfile（官方镜像）。同事本地只有 Postgres。我们本地和 EKS 有 Postgres + Redis（Go 启动必连 Redis）。
+Data services: Postgres and Redis use official images, without business-specific Dockerfiles. Colleague local uses only Postgres. Team local and EKS use Postgres + Redis; Go requires a Redis connection on startup.
 
-**Helm 环境差异只放 overlay，不改 chart 默认当环境。** Runtime / Media 的 chart 仍在 `services/*/helm`，因为现网旧 release 也是这份；新栈 helm 时 **只** `-f deploy/overlays/...`，不要再叠 `services/*/helm/values-dev.yaml`（那是旧 :8000 Chat 进程）。
+**Put Helm environment differences only in overlays, not chart defaults.** Runtime and Media charts remain in `services/*/helm` because existing releases use them too. For the new stack, use **only** `-f deploy/overlays/...`; do not layer `services/*/helm/values-dev.yaml`, which belongs to the old :8000 Chat process.
 
 ```text
 cuti-video-agent
@@ -46,27 +48,27 @@ Cuti-backend-go
   helm/values-prod.yaml
 ```
 
-每个仓只留一个 **Build and deploy** workflow：Helm 检查 → 编镜像进 ECR → helm upgrade。推 `dev` 会上 `vda-dev`，推 `main` 会上 `vda-prod`。镜像打 **git SHA**（Helm 用这个滚 Pod），同时再打浮动别名 `dev` / `main` 方便人在 ECR 里找，**不要**用别名做 `--set image.tag`。也可以在 Actions 里手动 Run，选 dev 或 prod（Video Agent 还可勾服务，默认全勾）。
+Each repository keeps one **Build and deploy** workflow: Helm checks → build images into ECR → helm upgrade. Pushing `dev` deploys to `vda-dev`; pushing `main` deploys to `vda-prod`. Images use the **git SHA** tag for Helm Pod rollouts, with floating `dev` / `main` aliases for browsing ECR. **Do not** use an alias for `--set image.tag`. Actions also supports manual runs for dev or prod; Video Agent allows selecting services, all selected by default.
 
-两个仓要分别点一次 **Build and deploy**（Video Agent 的 Studio / Runtime / Media / DSH，和 Go 仓的 API）。prod 建议 GitHub Environment `vda-prod` 开 required reviewers。GitHub 托管 runner 需要仓库 Secret `AWS_ROLE_ARN`（OIDC）；EC2 上的 instance role 只给那台机器用，GitHub 的虚机用不了。没配好之前镜像和 helm 仍走跳板机。GitHub 调用的是 `deploy/vda-upgrade.sh`，**不会**跑 `vda-apply.sh`（那是第一次装 namespace 用的，不要删）。DeepSeek 自带的 CI / Release / Issue / 文档那些 workflow 已去掉。
+Run **Build and deploy** separately in both repositories: Studio / Runtime / Media / DSH in Video Agent, and API in the Go repository. For prod, enable required reviewers on GitHub Environment `vda-prod`. GitHub-hosted runners need repository secret `AWS_ROLE_ARN` for OIDC; an EC2 instance role cannot authenticate GitHub's machines. Until configured, build images and run Helm from the bastion. GitHub runs `deploy/vda-upgrade.sh`, **not** `vda-apply.sh`, which initializes namespaces and must remain. The original DeepSeek CI / Release / Issue / documentation workflows have been removed.
 
-本地点一次（和 Actions 同一脚本）：
+Run locally using the same script as Actions:
 
 ```bash
 ./deploy/vda-upgrade.sh dev --tag "$GITHUB_SHA"
 ./deploy/vda-upgrade.sh prod --tag "$GITHUB_SHA" --studio
 ```
 
-Go：`Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
+Go: `Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
 
-## 现在可以打开
+## Available endpoints
 
-| 环境 | 打开 | 集群 |
+| Environment | Open | Cluster |
 |------|------|------|
 | **Dev** | http://k8s-vdadev-cutistud-9e1f0bbc43-61600723.ap-southeast-2.elb.amazonaws.com | `vda-dev` |
 | **Prod** | http://k8s-vdaprod-cutistud-084c8e4334-770037228.ap-southeast-2.elb.amazonaws.com | `vda-prod` |
 
-本机隧道（不改公网 DNS）：
+Local tunnels without changing public DNS:
 
 ```bash
 ./deploy/port-forward.sh           # vda-dev Studio → http://127.0.0.1:3000
@@ -74,18 +76,17 @@ Go：`Cuti-backend-go/helm/vda-upgrade.sh prod --tag main`
 ./deploy/port-forward.sh compose   # 跳板机 colleague-video compose（3000/8001/3080/8443/18080）
 ```
 
-`compose` 走 `songsong_ap_southeast_2` 的 SSH `-L`；换机器时设 `COMPOSE_SSH_HOST`。
+`compose` uses SSH `-L` through `songsong_ap_southeast_2`; set `COMPOSE_SSH_HOST` for a different machine.
 
-ALB 已挂悉尼 ACM（443）。`dev.newai.land` 指 `vda-dev` ALB，`www.cuti.land` 指 `vda-prod` ALB。HTTPS 用这些域名；ALB 长域名走 https 会证书名对不上。
+The ALBs have Sydney ACM certificates on port 443. `dev.newai.land` points to the `vda-dev` ALB, and `www.cuti.land` to the `vda-prod` ALB. Use these domains for HTTPS; the long ALB hostname does not match the certificate.
 
+## Colleague local (preserve this setup)
 
-## 同事本地（不要改）
+Follow the root README: `docker compose --env-file .env -f compose.video.yml up`, then `pnpm dsh web …` in another terminal. Single-user, no Go, no Redis.
 
-根目录 README：`docker compose --env-file .env -f compose.video.yml up`，另开终端 `pnpm dsh web …`。单用户、无 Go、无 Redis。
+## Team local (all five services)
 
-## 我们本地（完整五件套）
-
-`Cuti-backend-go` 和 `cuti-video-agent` 放在同一父目录。然后：
+Place `Cuti-backend-go` and `cuti-video-agent` under the same parent directory. Then:
 
 ```sh
 cd cuti-video-agent
@@ -95,23 +96,23 @@ cp deploy/local/go.env.dev.example deploy/local/go-env/.env.dev
 docker compose --env-file .env -f compose.video.yml -f deploy/local/compose.yml up --build -d
 ```
 
-| 端口 | 服务 |
+| Port | Service |
 |------|------|
-| 3000 | Studio（Go 登录，不是单用户） |
+| 3000 | Studio (Go login, not single-user) |
 | 8001 | Runtime |
-| 3080 | DSH（容器 sidecar，不必再本机 pnpm dsh） |
+| 3080 | DSH (container sidecar; no local pnpm dsh needed) |
 | 8443 | Go |
 | 18080 | Media |
 
-Studio 的 `nginx.conf` 走 hostname `video-runtime` / `cuti-api-go`，与 compose 服务名一致。DSH 仍 bind 127.0.0.1，sidecar 听 8080。
+Studio's `nginx.conf` uses hostnames `video-runtime` / `cuti-api-go`, matching compose service names. DSH still binds to 127.0.0.1; the sidecar listens on 8080.
 
-## 部署 dev / prod
+## Deploy dev / prod
 
-新 namespace：`cuti-dev`、`cuti-prod`。Ingress 默认关。现网旧 release 先别 upgrade。
+New namespaces: `cuti-dev`, `cuti-prod`. Ingress is disabled by default. Do not upgrade the existing production releases yet.
 
-Secret 先自己 apply（example 在对应 overlay 目录）：`cuti-postgres`、`cuti-go-dsn`、`cuti-videoagent-secrets`、`cuti-media-service-secrets`、`cuti-api-go-env`。
+Apply secrets yourself first; examples are in the corresponding overlay directories: `cuti-postgres`, `cuti-go-dsn`, `cuti-videoagent-secrets`, `cuti-media-service-secrets`, `cuti-api-go-env`.
 
-DSH 的 `VIDEO_RUNTIME_USER_ID` 必须等于 Runtime 的 `VIDEO_RUNTIME_LOCAL_USER_ID`（dev：`cuti-dev-user`，prod：`cuti-prod-user`）。
+DSH's `VIDEO_RUNTIME_USER_ID` must equal Runtime's `VIDEO_RUNTIME_LOCAL_USER_ID`: `cuti-dev-user` for dev, `cuti-prod-user` for prod.
 
 ```bash
 ENV=dev          # 或 prod
@@ -134,24 +135,24 @@ helm upgrade --install cuti-studio deploy/charts/video-studio -n "$NS" -f deploy
 helm upgrade --install cuti-dsh deploy/charts/deepseek-harness -n "$NS" -f deploy/overlays/$ENV/dsh.yaml
 ```
 
-Go 仓：
+Go repository:
 
 ```bash
 helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-dev -f ./helm/values-dev.yaml
 helm upgrade --install cuti-go ./helm/cuti-api-go -n cuti-prod -f ./helm/values-prod.yaml
 ```
 
-`--set image.tag=<git SHA>` 钉这次 CI 推进 ECR 的不可变标签。浮动 `dev` / `main` 只给人看。
+`--set image.tag=<git SHA>` pins the immutable tag pushed to ECR by this CI run. Floating `dev` / `main` aliases are for humans only.
 
-## 第三方依赖
+## Third-party dependencies
 
-| | 同事本地 | 我们本地 | EKS dev/prod |
+| | Colleague local | Team local | EKS dev/prod |
 |--|----------|----------|--------------|
-| Postgres | compose 卷 | 同左 + 多一个 `storybook_dev` | **PVC**（chart）或继续 RDS |
-| Redis | 无 | compose 卷 | **PVC** 或 ElastiCache。**Go 必有** |
-| S3 | 不用（local 盘） | 不用 | 成片用 S3 |
-| Runtime Redis | 不用 | 不用 | 不用（`ENABLE_TASK_WORKER=false`） |
+| Postgres | Compose volume | Same, plus `storybook_dev` | **PVC** (chart) or existing RDS |
+| Redis | None | Compose volume | **PVC** or ElastiCache; **required by Go** |
+| S3 | Not used (local disk) | Not used | Final videos use S3 |
+| Runtime Redis | Not used | Not used | Not used (`ENABLE_TASK_WORKER=false`) |
 
-现网旧 Go 仍在 EC2，进程就是 `-env cuti-api-go.dev`（:8443）和 `-env cuti-api-go.prod`（:2096）。新栈 Helm 也只用这两个名字；库不在本机时用 Secret 里的 `CUTI_DATABASE_DSN` 覆盖 yaml 里的 `127.0.0.1`。
+The existing Go services still run on EC2 with `-env cuti-api-go.dev` (:8443) and `-env cuti-api-go.prod` (:2096). The new Helm stack uses the same two names. For a remote database, override the YAML's `127.0.0.1` using secret `CUTI_DATABASE_DSN`.
 
-PVC 重启 Pod **不丢**；删 PVC 才丢。Media `/workspace` 是 emptyDir，本来就该丢。成片走 S3。
+Restarting Pods **preserves** PVC data; deleting a PVC removes it. Media `/workspace` is emptyDir and intentionally disposable. Final videos go to S3.

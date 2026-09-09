@@ -107,7 +107,7 @@ export interface SubmitOutcome {
  * Unified pick return. `undefined` = miss → default sink; `'handled'` = the
  * source dealt with it internally (e.g. opened its popup shell). The `text`
  * arm is the plain-text reference path (decision recorded in
- * .agents/notes/implemented/architecture/2026-07-25-web-input-machine-and-slash-pipeline.md):
+ * https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-07-25-web-input-machine-and-slash-pipeline.md):
  * the token span is
  * replaced with literal text — no occurrence identity, no placeholder; any
  * chip visual is derived downstream by scanning the draft against the

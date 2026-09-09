@@ -31,8 +31,8 @@ import type {
 } from '../types/api'
 
 // Imported Cuti endpoints have heterogeneous responses until each legacy API is retired.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LegacyApiValue = any
+
+type LegacyApiValue = unknown
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -65,7 +65,7 @@ const probeAgentRouterSubmitUrl = async (): Promise<string> => {
   }
 
   const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), 1200)
+  const timeoutId = window.setTimeout(() =>{  controller.abort() }, 1200)
   const currentLang = localStorage.getItem('language') || 'en'
 
   try {
@@ -148,6 +148,18 @@ export type PublishCreationRequest = {
 
 // submitTask 请求去重：同一 thread_id 的并发 POST 只发送一次
 const _submitTaskPending = new Map<string, Promise<AgentSubmitTaskResult>>()
+
+/** Validate the shared API envelope; each endpoint supplies its payload type. */
+async function readApiResponse<T>(response: Response): Promise<ResponseModel<T>> {
+  const value: unknown = await response.json()
+  if (typeof value !== 'object' || value === null || !('code' in value) || typeof value.code !== 'number'
+    || !('message' in value) || typeof value.message !== 'string') {
+    throw new Error('Invalid API response envelope')
+  }
+  if (value.code !== 0) throw new ApiBusinessError(value.code, value.message || 'Request failed')
+  if (!('data' in value)) throw new Error('API response is missing data')
+  return { code: value.code, message: value.message, data: value.data as T }
+}
 /** 当前进行中的 submitTask POST（directStream SSE） */
 let _activeSubmitAbortController: AbortController | null = null
 let _activeSubmitDedupeKey: string | null = null
@@ -178,7 +190,7 @@ async function makeRequest<T>(
     const response = await fetch(url, defaultOptions)
 
     // 解析响应
-    const result: ResponseModel<T> = await response.json()
+    const result = await readApiResponse<T>(response)
 
     // 检查业务逻辑错误
     if (result.code !== 0) {
@@ -226,7 +238,7 @@ export const userApi = {
       },
     })
 
-    return response.json()
+    return response.json() as Promise<CreditHistoryResponse>
   },
 
   async getCreditBreakdown(): Promise<ResponseModel<CreditBreakdown>> {
@@ -529,7 +541,7 @@ export const audioApi = {
       credentials: 'include',
       headers: { 'X-App-Language': currentLang },
     })
-    const result = await response.json()
+    const result = await readApiResponse<{ status: string; recommended?: { start_sec: number; end_sec: number } | null; error?: string }>(response)
     if (result.code !== 0) {
       throw new ApiBusinessError(result.code, result.message || 'Smart clip recommend failed')
     }
@@ -680,8 +692,12 @@ export const agentApi = {
         try {
           const contentType = (response.headers.get('content-type') || '').toLowerCase()
           if (contentType.includes('application/json')) {
-            const result = await response.json()
-            errorMessage = result?.message || result?.detail || result?.error || errorMessage
+            const result: unknown = await response.json()
+            if (typeof result === 'object' && result !== null) {
+              const fields = result as Record<string, unknown>
+              const detail = [fields.message, fields.detail, fields.error].find(value => typeof value === 'string' && value)
+              if (typeof detail === 'string') errorMessage = detail
+            }
           } else {
             const text = await response.text()
             errorMessage = text || errorMessage
@@ -706,7 +722,7 @@ export const agentApi = {
         } as AgentSubmitTaskResult
       }
 
-      const result = await response.json()
+      const result = await readApiResponse<AgentSubmitTaskResult['data']>(response)
       if (result.code !== 0) {
         throw new Error(result.message || 'Request failed')
       }
@@ -719,7 +735,7 @@ export const agentApi = {
     if (dedupeKey) {
       _submitTaskPending.set(dedupeKey, promise)
     }
-    promise.finally(() => {
+    void promise.finally(() => {
       _submitTaskPending.delete(submitDedupeKey)
       if (dedupeKey) {
         _submitTaskPending.delete(dedupeKey)
@@ -756,7 +772,7 @@ export const agentApi = {
     runId: string,
     usePost: boolean = true,
   ): Promise<ReadableStream<Uint8Array>> {
-    if (!runId || !String(runId).trim()) {
+    if (!runId || !runId.trim()) {
       throw new Error('Missing run_id for message stream')
     }
     // 同一 run_id 新连接时先 abort 掉上一次（本 tab 内只保留一个 stream）
@@ -905,6 +921,7 @@ export const agentApi = {
     // 向后兼容：先提交任务，再获取消息流
     const taskResponse = await this.submitTask(data)
     const { run_id } = taskResponse.data
+    if (!run_id) throw new Error('Task response did not include a run id')
     return this.getMessageStream(run_id)
   },
 
@@ -963,17 +980,17 @@ export const agentApi = {
         'X-App-Language': currentLang,
       },
     })
-    const result = await response.json()
+    const result = await readApiResponse<AgentSubmitTaskResult['data']>(response)
     if (!response.ok) {
-      throw new Error(result?.message || `VideoAgent resume failed: ${response.status}`)
+      throw new Error(result.message || `VideoAgent resume failed: ${response.status}`)
     }
     if (result.code !== 0) {
       throw new ApiBusinessError(result.code, result.message || 'Request failed')
     }
-    if (!result.data?.run_id) {
-      throw new ApiBusinessError(result.code ?? -1, result.message || 'missing run_id')
+    if (!result.data.run_id) {
+      throw new ApiBusinessError(result.code, result.message || 'missing run_id')
     }
-    return result as AgentSubmitTaskResult
+    return result
   },
 
   /**
@@ -1186,18 +1203,18 @@ export const adminApi = {
     if (params.thread_id) q.set('thread_id', params.thread_id)
     if (params.user_id) q.set('user_id', params.user_id)
     if (params.agent_type != null) {
-      if (Array.isArray(params.agent_type)) params.agent_type.forEach(v => q.append('agent_type', v))
+      if (Array.isArray(params.agent_type)) params.agent_type.forEach((v) =>{  q.append('agent_type', v) })
       else if (params.agent_type) q.set('agent_type', params.agent_type)
     }
     if (params.run_type != null) {
-      if (Array.isArray(params.run_type)) params.run_type.forEach(v => q.append('run_type', v))
+      if (Array.isArray(params.run_type)) params.run_type.forEach((v) =>{  q.append('run_type', v) })
       else if (params.run_type) q.set('run_type', params.run_type)
     }
     if (params.status != null) {
-      if (Array.isArray(params.status)) params.status.forEach(v => q.append('status', v))
+      if (Array.isArray(params.status)) params.status.forEach((v) =>{  q.append('status', v) })
       else if (params.status) q.set('status', params.status)
     }
-    return makeRequest<LegacyApiValue>(`/admin/user-inputs-and-runs?${q}`, { method: 'GET' })
+    return makeRequest(`/admin/user-inputs-and-runs?${q}`, { method: 'GET' })
   },
 
   /**
@@ -1423,7 +1440,7 @@ export const adminApi = {
         'X-App-Language': currentLang,
       },
     })
-    const result: ResponseModel<{ url: string }> = await response.json()
+    const result = await readApiResponse<{ url: string }>(response)
     if (result.code !== 0) throw new Error(result.message || '上传失败')
     return result
   },
@@ -1437,7 +1454,7 @@ export const adminApi = {
     disk?: { percent: number; used_gb: number; total_gb: number; path: string; description: string }
     disk_io?: { read_mb: number | null; write_mb: number | null; read_count: number | null; write_count: number | null; description: string; read_mb_per_s?: number; write_mb_per_s?: number; rate_note?: string; cumulative_note?: string }
   }>> {
-    return makeRequest<LegacyApiValue>('/admin/monitoring/system-load', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/monitoring/system-load', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
 
   /** 监控：SQS、Worker、Redis 限流（以 AppConfig 为基准完整展示） */
@@ -1454,7 +1471,7 @@ export const adminApi = {
       reason?: string
     }
   }>> {
-    return makeRequest<LegacyApiValue>('/admin/monitoring', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/monitoring', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
 
   /** Prompt Shield 审计：越狱/套取等命中记录（shield_events 表） */
@@ -1486,7 +1503,7 @@ export const adminApi = {
     q.set('size', String(params?.size ?? 50))
     if (params?.user_id) q.set('user_id', params.user_id)
     if (params?.layer) q.set('layer', params.layer)
-    return makeRequest<LegacyApiValue>(`/admin/shield-events?${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/shield-events?${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
 
   /** 智能测试 - 基准 Tool 类型列表 */
@@ -1516,31 +1533,31 @@ export const adminApi = {
     report_url?: string
     error?: string
   }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/baseline-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/baseline-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出指定场景(t2i/i2i/i2v/t2v)下的 baseline prompt 批次（每个场景独立 dataset） */
   async listSmartTestingBaselineBatches(scenario: string): Promise<ResponseModel<Array<{ batch_id: string; name: string; prompts_count: number; created_at?: string; has_image_urls?: boolean }>>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/baseline-prompts/batches?scenario=${encodeURIComponent(scenario)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/baseline-prompts/batches?scenario=${encodeURIComponent(scenario)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出基准运行（最新在前） */
   async listSmartTestingBaselineRuns(limit?: number): Promise<ResponseModel<Array<{ run_id: string; status: string; created_at?: string; report_url?: string; results_count?: number; prompts_count?: number; tool_types?: string[] }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/baseline-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/baseline-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 获取某场景下某批次详情（含 items 时为 prompt+url 对） */
   async getSmartTestingBaselineBatch(scenario: string, batchId: string): Promise<ResponseModel<{ batch_id: string; name: string; prompts: string[]; items?: Array<{ prompt: string; image_url?: string }>; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/baseline-prompts/batches/${encodeURIComponent(scenario)}/${encodeURIComponent(batchId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/baseline-prompts/batches/${encodeURIComponent(scenario)}/${encodeURIComponent(batchId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 创建 baseline 批次，归属到指定场景的 dataset */
   async createSmartTestingBaselineBatch(params: { scenario: string; name: string; prompts?: string[]; items?: Array<{ prompt: string; image_url?: string }> }): Promise<ResponseModel<{ batch_id: string; name: string; prompts_count: number; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/baseline-prompts/batches', {
+    return makeRequest('/admin/smart-testing/baseline-prompts/batches', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 更新某场景下某 baseline 批次（名称和/或 items） */
   async updateSmartTestingBaselineBatch(scenario: string, batchId: string, params: { name?: string; items?: Array<{ prompt: string; image_url?: string }> }): Promise<ResponseModel<{ batch_id: string; name: string; prompts_count: number; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/baseline-prompts/batches/${encodeURIComponent(scenario)}/${encodeURIComponent(batchId)}`, {
+    return makeRequest(`/admin/smart-testing/baseline-prompts/batches/${encodeURIComponent(scenario)}/${encodeURIComponent(batchId)}`, {
       method: 'PUT',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
@@ -1551,62 +1568,62 @@ export const adminApi = {
   },
   /** 智能测试 - AI 批量生成 prompt（仅文案，无图），可指定 scenario 保存到对应 dataset */
   async generateSmartTestingBaselinePrompts(params: { user_input: string; count: number; scenario?: string; save_batch_name?: string }): Promise<ResponseModel<{ batch_id: string; name: string; prompts_count: number; prompts: string[]; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/baseline-prompts/generate-with-agent', {
+    return makeRequest('/admin/smart-testing/baseline-prompts/generate-with-agent', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 根据图片 URL + 用户描述生成 (prompt, image_url) 列表 */
   async generateSmartTestingBaselinePromptsFromImages(params: { image_urls: string[]; user_input: string; count: number }): Promise<ResponseModel<{ items: Array<{ prompt: string; image_url?: string }> }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/baseline-prompts/generate-from-images', {
+    return makeRequest('/admin/smart-testing/baseline-prompts/generate-from-images', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 获取当前 Keyframe 三件套 + Video 三件套（6 份） */
   async getSmartTestingProductionPromptsCurrent(): Promise<ResponseModel<{ files: Record<string, string>; keyframe: Array<{ key: string; label: string }>; video: Array<{ key: string; label: string }> }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-prompts/current', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/production-prompts/current', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 用 AI 修改某份 prompt（返回草稿） */
   async modifySmartTestingProductionPrompt(params: { key: string; user_input: string; current_content?: string }): Promise<ResponseModel<{ key: string; draft_content: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-prompts/modify-with-agent', {
+    return makeRequest('/admin/smart-testing/production-prompts/modify-with-agent', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 保存变体（files: key -> content） */
   async saveSmartTestingProductionVariant(params: { variant_name: string; files: Record<string, string> }): Promise<ResponseModel<{ variant_id: string; name: string; created_at: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-prompts/save-variant', {
+    return makeRequest('/admin/smart-testing/production-prompts/save-variant', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出 prompt 变体 */
   async listSmartTestingProductionVariants(): Promise<ResponseModel<Array<{ variant_id: string; name: string; created_at?: string; keys?: string[] }>>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-prompts/variants', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/production-prompts/variants', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 获取某变体内容 */
   async getSmartTestingProductionVariant(variantId: string): Promise<ResponseModel<{ variant_id: string; name: string; created_at?: string; files: Record<string, string> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/production-prompts/variants/${encodeURIComponent(variantId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/production-prompts/variants/${encodeURIComponent(variantId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出 mock 数据集 */
   async listSmartTestingProductionDatasets(): Promise<ResponseModel<Array<{ dataset_id: string; name: string; created_at?: string; shots_count?: number }>>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-datasets', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/production-datasets', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 创建 mock 数据集 */
   async createSmartTestingProductionDataset(params: { name: string; shots: Record<string, unknown>[]; character_images?: Record<string, unknown> }): Promise<ResponseModel<{ dataset_id: string; name: string; created_at: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/production-datasets', {
+    return makeRequest('/admin/smart-testing/production-datasets', {
       method: 'POST',
       body: JSON.stringify(params),
     }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 获取 mock 数据集详情 */
   async getSmartTestingProductionDataset(datasetId: string): Promise<ResponseModel<{ dataset_id: string; name: string; created_at?: string; shots: unknown[]; character_images: Record<string, unknown> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/production-datasets/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/production-datasets/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 获取 baseline 参考图数据集 */
   async getSmartTestingBaselineDatasetImages(): Promise<ResponseModel<{ urls: string[]; description?: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/baseline-datasets/images', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/baseline-datasets/images', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 写入 baseline 参考图数据集 */
   async putSmartTestingBaselineDatasetImages(params: { urls: string[]; description?: string }): Promise<ResponseModel<LegacyApiValue>> {
@@ -1618,78 +1635,78 @@ export const adminApi = {
 
   /** 智能测试 - 获取合格组合（aspect_ratio + resolution + image_tool + video_tool） */
   async getSmartTestingEligibleCombinations(): Promise<ResponseModel<Array<{ case_id: string; aspect_ratio: string; resolution: string; image_tool: string; video_tool: string; duration: number }>>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/eligible-combinations', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/eligible-combinations', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 启动完整测试（功能 + 效果）或仅效果测试 */
   async startSmartTestingFullRun(params: { function_case_ids?: string[]; effect_dataset_ids: string[]; effect_times: number; effect_tool_combo_ids?: string[] }): Promise<ResponseModel<{ full_run_id: string; message: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/full-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/full-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 查询完整/效果测试运行进度 */
   async getSmartTestingFullRun(runId: string): Promise<ResponseModel<{ full_run_id: string; status: string; function_cases?: Array<{ case_id: string; run_id?: string; thread_id?: string; status: string }>; effect_cases?: Array<{ effect_case_id: string; run_id?: string; thread_id?: string; status: string }> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/full-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/full-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 对效果测试中指定 effect case 强制重新校验一次（与功能测试一致） */
   async reverifySmartTestingFullRunEffectCase(fullRunId: string, effectCaseId: string): Promise<ResponseModel<{ case: Record<string, unknown>; message: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/full-runs/${encodeURIComponent(fullRunId)}/effect-cases/${encodeURIComponent(effectCaseId)}/reverify`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/full-runs/${encodeURIComponent(fullRunId)}/effect-cases/${encodeURIComponent(effectCaseId)}/reverify`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出完整/效果测试运行记录（历史） */
   async listSmartTestingFullRuns(limit?: number): Promise<ResponseModel<Array<{ full_run_id: string; status: string; created_at?: string }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/full-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/full-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 全面测试 case 列表 */
   async getSmartTestingComprehensiveCases(): Promise<ResponseModel<Array<{ case_id: string; type: string; params: Record<string, unknown>; index: number }>>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/comprehensive-cases', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/comprehensive-cases', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 启动全面测试运行 */
   async startSmartTestingComprehensiveRun(params: { case_ids?: string[] }): Promise<ResponseModel<{ comprehensive_run_id: string; message: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/comprehensive-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/comprehensive-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 查询全面测试运行进度 */
   async getSmartTestingComprehensiveRun(runId: string): Promise<ResponseModel<{ comprehensive_run_id: string; status: string; cases: Array<{ case_id: string; run_id?: string; status: string; error?: string }> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 对指定 case 强制重新校验一次（下载真实尺寸比对） */
   async reverifySmartTestingComprehensiveCase(comprehensiveRunId: string, caseId: string): Promise<ResponseModel<{ case: Record<string, unknown>; message: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/cases/${encodeURIComponent(caseId)}/reverify`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/cases/${encodeURIComponent(caseId)}/reverify`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 对指定 case 跑 3 个 regenerate（角色/关键帧/视频）并校验，结果写入 manifest */
   async runRegenerateTestForCase(comprehensiveRunId: string, caseId: string): Promise<ResponseModel<{ case: Record<string, unknown>; message: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/cases/${encodeURIComponent(caseId)}/regenerate-test`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/cases/${encodeURIComponent(caseId)}/regenerate-test`, { method: 'POST' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 对选中的多个 case 依次跑 regenerate 测试 */
   async runRegenerateTestBatch(comprehensiveRunId: string, caseIds: string[]): Promise<ResponseModel<{ updated: number; results: Array<{ case_id: string; ok?: boolean; skipped?: boolean; reason?: string; error?: string }>; message: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/regenerate-test-batch`, { method: 'POST', body: JSON.stringify({ case_ids: caseIds }) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/comprehensive-runs/${encodeURIComponent(comprehensiveRunId)}/regenerate-test-batch`, { method: 'POST', body: JSON.stringify({ case_ids: caseIds }) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 列出全面测试运行 */
   async listSmartTestingComprehensiveRuns(limit?: number): Promise<ResponseModel<Array<{ comprehensive_run_id: string; status: string; created_at?: string }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/comprehensive-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/comprehensive-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：列出一致性测试集（image | video） */
   async listConsistencyDatasets(datasetType: 'image' | 'video', limit?: number): Promise<ResponseModel<Array<{ dataset_id: string; name: string; dataset_type: string; created_at?: string; updated_at?: string; items?: unknown[] }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/${datasetType}${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/${datasetType}${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：创建测试集 */
   async createConsistencyDataset(params: { name: string; dataset_type: 'image' | 'video' }): Promise<ResponseModel<{ dataset_id: string; name: string; dataset_type: string; created_at: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/consistency-datasets', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/consistency-datasets', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：获取测试集详情 */
   async getConsistencyDataset(datasetType: 'image' | 'video', datasetId: string): Promise<ResponseModel<{ dataset_id: string; name: string; items: unknown[]; created_at?: string; updated_at?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：更新测试集名称 */
   async updateConsistencyDataset(datasetType: 'image' | 'video', datasetId: string, params: { name: string }): Promise<ResponseModel<unknown>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'PATCH', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'PATCH', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：删除测试集 */
   async deleteConsistencyDataset(datasetType: 'image' | 'video', datasetId: string): Promise<ResponseModel<unknown>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：删除测试集中一条条目 */
   async deleteConsistencyDatasetItem(datasetType: 'image' | 'video', datasetId: string, itemId: string): Promise<ResponseModel<unknown>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：更新测试集中一条条目（可编辑字段） */
   async updateConsistencyDatasetItem(
@@ -1698,7 +1715,7 @@ export const adminApi = {
     itemId: string,
     payload: Record<string, unknown>,
   ): Promise<ResponseModel<{ item: unknown }>> {
-    return makeRequest<LegacyApiValue>(
+    return makeRequest(
       `/admin/smart-testing/consistency-datasets/${datasetType}/${encodeURIComponent(datasetId)}/items/${encodeURIComponent(itemId)}`,
       { method: 'PATCH', body: JSON.stringify(payload) },
       CUTI_VIDEO_API_BASE_URL,
@@ -1714,15 +1731,15 @@ export const adminApi = {
       resolution: Array<{ value: string; label: string }>
     }>
   > {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/consistency-options', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/consistency-options', { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：添加图片一致性 item */
   async addConsistencyImageItem(datasetId: string, params: { keyframe_version_uuid: string; run_id?: string; thread_id?: string; shot_number: number; prompt_source?: string }): Promise<ResponseModel<{ dataset_id: string; item: unknown }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/image/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/image/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：添加视频一致性 item */
   async addConsistencyVideoItem(datasetId: string, params: { video_generation_version_uuid: string; run_id?: string; thread_id?: string; shot_number: number; prompt_source?: string }): Promise<ResponseModel<{ dataset_id: string; item: unknown }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/video/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/video/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：按 thread_id 拉取候选（图/视频版本列表），供多选批量加入 dataset */
   async getConsistencyCandidatesFromThread(threadId: string): Promise<
@@ -1757,7 +1774,7 @@ export const adminApi = {
       }>
     }>
   > {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-datasets/from-thread?thread_id=${encodeURIComponent(threadId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-datasets/from-thread?thread_id=${encodeURIComponent(threadId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：将 from-thread 多选的候选批量加入对应 dataset */
   async batchAddConsistencyFromThread(params: {
@@ -1766,24 +1783,24 @@ export const adminApi = {
     image_selections: Array<{ keyframe_version_uuid: string; run_id?: string; thread_id?: string; shot_number: number; prompt_source?: string }>
     video_selections: Array<{ video_generation_version_uuid: string; run_id?: string; thread_id?: string; shot_number: number; prompt_source?: string }>
   }): Promise<ResponseModel<{ added_image_count: number; added_video_count: number; image_items: unknown[]; video_items: unknown[] }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/consistency-datasets/batch-add-from-thread', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/consistency-datasets/batch-add-from-thread', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：启动运行 */
   async startConsistencyRun(params: { dataset_ids: Array<{ type: string; dataset_id: string }>; concurrency?: number }): Promise<ResponseModel<{ consistency_run_id: string; message: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/consistency-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/consistency-runs/start', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：列出运行 */
   async listConsistencyRuns(limit?: number): Promise<ResponseModel<Array<{ consistency_run_id: string; status: string; created_at?: string; cases?: unknown[] }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-runs${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 一致性测试：获取运行详情 */
   async getConsistencyRun(runId: string): Promise<ResponseModel<{ run_id: string; status: string; created_at?: string; cases?: Array<{ item_id: string; type: string; passed?: boolean; reason?: string }> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/consistency-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/consistency-runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 管理员通用 - 按 run_id 获取该次任务用户可见内容（用户输入、图/音/视、生成的故事/音乐/图片/视频），与智能测试无关 */
   async getRunContent(runId: string): Promise<ResponseModel<{ agent_type?: string; user_input?: string; user_input_files?: unknown; story_content?: string | null; music_content?: string | null; image_content?: string | null; story_title?: string; story_description?: string; story_themes?: string[]; music_urls?: string[]; image_urls?: string[]; video_url?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/run-content/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/run-content/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 上传媒体（图/音/视）到 S3，返回 URL。本地 demo 上传后用此 URL 即可。 */
   async uploadSmartTestingMedia(file: File): Promise<ResponseModel<{ url: string }>> {
@@ -1796,13 +1813,13 @@ export const adminApi = {
       credentials: 'include',
       headers: { 'X-App-Language': currentLang },
     })
-    const result: ResponseModel<{ url: string }> = await response.json()
+    const result = await readApiResponse<{ url: string }>(response)
     if (result.code !== 0) throw new Error(result.message || '上传失败')
     return result
   },
   /** 智能测试 - 全自动运行（仅 API，不暴露前端） */
   async startSmartTestingFullAutoRun(params: { user_input: string; thread_id: string; user_option?: Record<string, unknown>; agent_type?: string; user_input_files?: Record<string, unknown> }): Promise<ResponseModel<{ run_id: string; thread_id: string; message: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/full-auto-run', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/full-auto-run', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 基准数据集：按 thread 维度列出已完成 video 任务（仅非 admin，分页；每 thread 一行，代表 run 为该 thread 下完成时间最新） */
   async listSmartTestingBenchmarkThreads(params?: { page?: number; page_size?: number }): Promise<ResponseModel<{ items: Array<{ run_id: string; thread_id: string; user_id: string; conversation_id?: number; status: string; user_input?: string; user_option?: Record<string, unknown>; user_input_files?: { images?: unknown[]; audio_files?: unknown[]; video_files?: unknown[] }; created_at?: string; completed_at?: string; agent_type?: string; run_type?: string }>; total: number; page: number; page_size: number }>> {
@@ -1810,44 +1827,44 @@ export const adminApi = {
     if (params?.page != null) sp.set('page', String(params.page))
     if (params?.page_size != null) sp.set('page_size', String(params.page_size))
     const q = sp.toString() ? `?${sp.toString()}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/threads${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/threads${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 基准数据集：获取 run 详情 */
   async getSmartTestingBenchmarkRunDetail(runId: string): Promise<ResponseModel<{ run_id: string; run: Record<string, unknown>; task: Record<string, unknown>; character_versions_by_character: unknown[]; keyframe_versions: unknown[]; video_versions: unknown[] }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/runs/${encodeURIComponent(runId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 基准数据集：创建（按 thread 维度） */
   async createSmartTestingBenchmarkDataset(params: { name: string; thread_ids: string[] }): Promise<ResponseModel<{ dataset_id: string; name: string; thread_ids: string[]; created_at: string }>> {
-    return makeRequest<LegacyApiValue>('/admin/smart-testing/benchmark-dataset', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest('/admin/smart-testing/benchmark-dataset', { method: 'POST', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 基准数据集：列表 */
   async listSmartTestingBenchmarkDatasets(limit?: number): Promise<ResponseModel<Array<{ dataset_id: string; name: string; thread_ids?: string[]; run_ids?: string[]; created_at?: string }>>> {
     const q = limit != null ? `?limit=${limit}` : ''
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset${q}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：详情 */
   async getSmartTestingBenchmarkDataset(datasetId: string): Promise<ResponseModel<{ dataset_id: string; name: string; thread_ids?: string[]; run_ids?: string[]; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：更新名称 */
   async updateSmartTestingBenchmarkDataset(datasetId: string, params: { name: string }): Promise<ResponseModel<{ dataset_id: string; name: string; thread_ids?: string[]; created_at?: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'PATCH', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'PATCH', body: JSON.stringify(params) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：删除 */
   async deleteSmartTestingBenchmarkDataset(datasetId: string): Promise<ResponseModel<{ dataset_id: string; deleted: boolean }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}`, { method: 'DELETE' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：获取内部 thread 列表详情（展示数据集内容） */
   async getSmartTestingBenchmarkDatasetThreads(datasetId: string): Promise<ResponseModel<{ items: Array<{ run_id: string; thread_id: string; user_id: string; user_input?: string; user_option?: Record<string, unknown>; user_input_files?: { images?: { url?: string }[]; audio_files?: { url?: string }[]; video_files?: { url?: string }[] }; created_at?: string }>; dataset_id: string; name: string }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/threads`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/threads`, { method: 'GET' }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：手动添加一条（不必来自 run） */
   async addSmartTestingBenchmarkDatasetItem(datasetId: string, body: { user_input: string; user_option?: Record<string, unknown>; user_input_files?: { images?: { url?: string }[]; audio_files?: { url?: string }[]; video_files?: { url?: string }[] } }): Promise<ResponseModel<{ dataset_id: string; item: { thread_id: string; run_id: string; user_id: string; user_input: string; user_option: Record<string, unknown>; user_input_files: Record<string, unknown>; created_at: string } }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(body) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/items`, { method: 'POST', body: JSON.stringify(body) }, CUTI_VIDEO_API_BASE_URL)
   },
   /** 智能测试 - 效果测试数据集：更新一条的 user_option（仅手动添加的条目可改） */
   async updateSmartTestingBenchmarkDatasetItem(datasetId: string, body: { thread_id: string; user_option: Record<string, unknown> }): Promise<ResponseModel<{ dataset_id: string; thread_id: string; user_option: Record<string, unknown> }>> {
-    return makeRequest<LegacyApiValue>(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/items`, { method: 'PATCH', body: JSON.stringify(body) }, CUTI_VIDEO_API_BASE_URL)
+    return makeRequest(`/admin/smart-testing/benchmark-dataset/${encodeURIComponent(datasetId)}/items`, { method: 'PATCH', body: JSON.stringify(body) }, CUTI_VIDEO_API_BASE_URL)
   },
 
   /** 错误追踪 - 管理员代理「合并视频」，与用户端 video-assembly 一致：先 sync 再合成最终视频 */
@@ -2154,9 +2171,10 @@ async function convertFileToBase64(file: File): Promise<string> {
     reader.onload = () => {
       const result = reader.result as string
       const base64 = result.split(',')[1]
+      if (base64 === undefined) { reject(new Error('Invalid file data URL')); return }
       resolve(base64)
     }
-    reader.onerror = error => reject(error)
+    reader.onerror = () => { reject(reader.error ?? new Error('Failed to read file')) }
   })
 }
 
@@ -2231,7 +2249,7 @@ export const mediaHistoryApi = {
     const queryString = queryParams.toString()
     const endpoint = queryString ? `/vault/media?${queryString}` : '/vault/media'
 
-    return makeRequest<LegacyApiValue>(endpoint, {
+    return makeRequest(endpoint, {
       method: 'GET',
     }, API_BASE_URL) as Promise<MediaHistoryV1PagedResponse>
   },
@@ -2271,7 +2289,7 @@ export const subscriptionApi = {
         },
       })
 
-      const data = await response.json()
+      const data: unknown = await response.json()
 
       if (data && typeof data === 'object' && 'code' in data) {
         return data as ResponseModel<SubscriptionPlan[]>
@@ -2306,13 +2324,13 @@ export const subscriptionApi = {
         },
       })
 
-      const result = await response.json()
+      const result: unknown = await response.json()
 
       if (result && typeof result === 'object' && 'code' in result) {
         return result as ResponseModel<UserSubscription>
       }
 
-      if (result && 'plan_id' in result) {
+      if (result && typeof result === 'object' && 'plan_id' in result) {
         return {
           code: 0,
           message: 'success',
@@ -2342,13 +2360,13 @@ export const subscriptionApi = {
         body: JSON.stringify(data),
       })
 
-      const result = await response.json()
+      const result: unknown = await response.json()
 
       if (result && typeof result === 'object' && 'code' in result) {
         return result as ResponseModel<CreateSubscriptionResponse>
       }
 
-      if (result && 'checkout_url' in result) {
+      if (result && typeof result === 'object' && 'checkout_url' in result) {
         return {
           code: 0,
           message: 'success',
@@ -2378,12 +2396,13 @@ export const subscriptionApi = {
       })
 
       // Try to parse as JSON
-      const data = await response.json()
+      const data: unknown = await response.json()
 
       // Handle various response formats
       if (response.ok) {
         // If response is successful but doesn't have standard structure
-        if (!data.code && data.message) {
+        if (typeof data === 'object' && data !== null && (!('code' in data) || !data.code)
+          && 'message' in data && typeof data.message === 'string' && data.message) {
           return {
             code: 0,
             message: data.message,
@@ -2396,7 +2415,8 @@ export const subscriptionApi = {
       }
 
       // Error response
-      throw new Error(data.message || 'Failed to cancel subscription')
+      throw new Error(typeof data === 'object' && data !== null && 'message' in data && typeof data.message === 'string'
+        ? data.message : 'Failed to cancel subscription')
     } catch (error) {
       console.error('Failed to cancel subscription:', error)
       throw error
@@ -2417,10 +2437,11 @@ export const subscriptionApi = {
         },
       })
 
-      const data = await response.json()
+      const data: unknown = await response.json()
 
       if (response.ok) {
-        if (!data.code && data.message) {
+        if (typeof data === 'object' && data !== null && (!('code' in data) || !data.code)
+          && 'message' in data && typeof data.message === 'string' && data.message) {
           return {
             code: 0,
             message: data.message,
@@ -2430,7 +2451,8 @@ export const subscriptionApi = {
         return data as ResponseModel<RestoreSubscriptionResponse>
       }
 
-      throw new Error(data.message || 'Failed to restore subscription')
+      throw new Error(typeof data === 'object' && data !== null && 'message' in data && typeof data.message === 'string'
+        ? data.message : 'Failed to restore subscription')
     } catch (error) {
       console.error('Failed to restore subscription:', error)
       throw error

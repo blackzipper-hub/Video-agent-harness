@@ -1,5 +1,7 @@
 # `@cuti-ai/video-agent-harness`
 
+English | [中文](README.zh.md)
+
 Portable local launcher for Video Agent Harness. It starts DeepSeek Harness, the Python Video Runtime, Media Service, local Sandbox Worker, and Video Studio without Docker. Project state and generated media live under one user data directory.
 
 ```sh

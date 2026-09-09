@@ -157,7 +157,7 @@ export class AgentPresets extends Service {
     // below, and the ACP, SDK-server, and headless entry points all create one.
     // The invariant companion is the check that fails loud, at assembly. Why an
     // unjoined agent matters at all has one home: the [Agent
-    // Note](../../../../.agents/notes/implemented/architecture/2026-08-10-host-plane-ownership-after-presets.md).
+    // Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-08-10-host-plane-ownership-after-presets.md).
     //
     // Known false positive: a session created bare and bound later by
     // `recompose` is warned about once, before its first bind. No shipped flow

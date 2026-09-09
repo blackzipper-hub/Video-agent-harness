@@ -54,6 +54,7 @@ export { REGION_BEGIN, REGION_END }
  * errors, so the partition can never silently drift from the service API.
  */
 export const SERVICE_PAGE: Record<string, string> = {
+  videoRuntime: 'video.md',
   agentLoop: 'core.md',
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
@@ -223,6 +224,29 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  ProjectSnapshot: 'video.md',
+  RequestIdentity: 'video.md',
+  CreateProjectRequest: 'video.md',
+  WorkflowSummary: 'video.md',
+  WorkflowDetail: 'video.md',
+  SkillDetail: 'video.md',
+  SkillResourceDetail: 'video.md',
+  ChangePreviewRequest: 'video.md',
+  ChangePreview: 'video.md',
+  EditPreviewRequest: 'video.md',
+  BuildPlanSnapshot: 'video.md',
+  MediaArtifactSummary: 'video.md',
+  CapabilityPromptView: 'video.md',
+  PlanPatchPreviewRequest: 'video.md',
+  BuildPlanRequest: 'video.md',
+  RebuildRequest: 'video.md',
+  BuildSnapshot: 'video.md',
+  PlanCheckpoint: 'video.md',
+  CheckpointResolutionRequest: 'video.md',
+  ArtifactSelectionRequest: 'video.md',
+  ArtifactSelectionResult: 'video.md',
+  ExportRequest: 'video.md',
+  ExportResult: 'video.md',
   Agent: 'core.md',
   AgentCancelCause: 'core.md',
   AgentFactory: 'core.md',

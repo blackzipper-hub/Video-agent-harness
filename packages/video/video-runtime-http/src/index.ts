@@ -29,10 +29,15 @@ import type {
   CheckpointResolutionRequest,
 } from '@cuti-ai/video-runtime'
 
+/** Connection and request bounds for the Python Video Runtime HTTP provider. */
 export interface Config {
+  /** Runtime origin, without a project-specific API path. */
   baseUrl: string
+  /** Optional service credential sent with Runtime requests. */
   serviceToken?: string
+  /** Default user attribution when a request supplies none. */
   userId?: string
+  /** Per-request timeout in milliseconds; defaults to 30000. */
   timeoutMs?: number
 }
 

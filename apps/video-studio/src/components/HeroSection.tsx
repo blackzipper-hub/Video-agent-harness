@@ -1,7 +1,7 @@
-import { useLanguage } from "@/i18n/LanguageContext";
+import { useLanguage } from '@/i18n/LanguageContext'
 
 const HeroSection = () => {
-  const { language } = useLanguage();
+  const { language } = useLanguage()
 
   return (
     <div className="text-center mb-12 md:mb-20 lg:mb-24">
@@ -11,14 +11,14 @@ const HeroSection = () => {
             Cuti.land
           </span>
           <span className="font-space-grotesk text-lg sm:text-2xl md:text-3xl font-light bg-gradient-to-r from-pink-500 via-purple-500 to-violet-600 bg-clip-text text-transparent">
-            {language === "zh"
-              ? "让你的角色出演MV"
-              : "Create Music Videos with Your Characters"}
+            {language === 'zh'
+              ? '让你的角色出演MV'
+              : 'Create Music Videos with Your Characters'}
           </span>
         </div>
       </h1>
     </div>
-  );
-};
+  )
+}
 
-export default HeroSection;
+export default HeroSection

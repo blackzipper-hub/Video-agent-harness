@@ -1,3 +1,4 @@
+import { asyncEvent } from '../utils/asyncEvent'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Image as ImageIcon } from 'lucide-react'
@@ -45,7 +46,7 @@ const SelectionHub = () => {
     const id = setInterval(() => {
       setGuonianImageIndex(i => (i === 0 ? 1 : 0))
     }, 2000)
-    return () => clearInterval(id)
+    return () =>{  clearInterval(id) }
   }, [newYearAvatarModalOpen])
 
   // Load demo audio for Lip-sync template (same pattern as Kill This Love)
@@ -179,7 +180,7 @@ const SelectionHub = () => {
       const generationBox = document.querySelector('[data-generation-box]')
       if (generationBox) generationBox.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 100)
-    setTimeout(() => setAutoSendTrigger(t => t + 1), 800)
+    setTimeout(() =>{  setAutoSendTrigger(t => t + 1) }, 800)
   }
 
   return (
@@ -235,7 +236,7 @@ const SelectionHub = () => {
               <p className="text-sm sm:text-base font-semibold text-center text-foreground order-first md:order-2">{t('selectionHubCardMusicVideo')}</p>
               <button
                 type="button"
-                onClick={loadLipsyncDemoAssets}
+                onClick={asyncEvent(loadLipsyncDemoAssets)}
                 disabled={isLipsyncDemoLoading}
                 className="relative overflow-hidden rounded-2xl border border-border/50 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group cursor-pointer aspect-video disabled:opacity-60 disabled:cursor-not-allowed w-full order-2 md:order-1"
               >
@@ -258,7 +259,7 @@ const SelectionHub = () => {
               <p className="text-sm sm:text-base font-semibold text-center text-foreground order-first md:order-2">{t('selectionHubCardStoryVideo')}</p>
               <button
                 type="button"
-                onClick={loadStorytellingDemoAssets}
+                onClick={asyncEvent(loadStorytellingDemoAssets)}
                 disabled={isStorytellingDemoLoading}
                 className="relative overflow-hidden rounded-2xl border border-border/50 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group cursor-pointer aspect-video disabled:opacity-60 disabled:cursor-not-allowed w-full order-2 md:order-1"
               >
@@ -281,7 +282,7 @@ const SelectionHub = () => {
               <p className="text-sm sm:text-base font-semibold text-center text-foreground order-first md:order-2">{t('selectionHubCardProductLaunch')}</p>
               <button
                 type="button"
-                onClick={loadProductLaunchDemoAssets}
+                onClick={asyncEvent(loadProductLaunchDemoAssets)}
                 disabled={isProductLaunchDemoLoading}
                 className="relative overflow-hidden rounded-2xl border border-border/50 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group cursor-pointer aspect-video disabled:opacity-60 disabled:cursor-not-allowed w-full order-2 md:order-1"
               >
@@ -304,7 +305,7 @@ const SelectionHub = () => {
               <p className="text-sm sm:text-base font-semibold text-center text-foreground order-first md:order-2">{t('selectionHubCardNewYearAvatar')}</p>
               <button
                 type="button"
-                onClick={() => setNewYearAvatarModalOpen(true)}
+                onClick={() =>{  setNewYearAvatarModalOpen(true) }}
                 className="relative overflow-hidden rounded-2xl border-2 border-transparent hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group cursor-pointer aspect-video disabled:opacity-60 disabled:cursor-not-allowed w-full order-2 md:order-1"
               >
                 <img
@@ -351,7 +352,7 @@ const SelectionHub = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewYearAvatarModalOpen(false)}
+                  onClick={() =>{  setNewYearAvatarModalOpen(false) }}
                   className="text-sm text-muted-foreground hover:text-foreground"
                 >
                   {t('cancel')}

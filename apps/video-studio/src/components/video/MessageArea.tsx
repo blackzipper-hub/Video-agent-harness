@@ -1,10 +1,9 @@
+import { asyncEvent } from '../../utils/asyncEvent'
+import { displayValue } from '@/utils/displayValue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Slider } from '@/components/ui/slider'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { validateFiles, createDragDropHandler, normalizeClipboardFile } from '@/utils/fileUploadUtils'
 import {
@@ -68,10 +67,9 @@ import {
 } from './SmartClipPanel'
 import { resolveAutoCropTargetDurationSec } from '@/utils/targetVideoDuration'
 import ReactMarkdown from 'react-markdown'
-import { Send, MessageSquare, ImagePlus, X, Paperclip, Loader2, Square, RectangleHorizontal, RectangleVertical, Clock, ChevronDown, Upload, CheckCircle2, CheckCircle, Plus, Download, Share2, Scissors, ZoomIn, Minus, Copy, ArrowLeft, ArrowRight, MessageCircle, Sparkles, AlertTriangle, Wallet } from 'lucide-react'
+import { Send, MessageSquare, X, Loader2, Square, Clock, ChevronDown, Upload, CheckCircle2, CheckCircle, Plus, Download, Share2, Scissors, ZoomIn, Minus, Copy, ArrowLeft, ArrowRight, MessageCircle, Sparkles, AlertTriangle, Wallet } from 'lucide-react'
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useLanguage } from '@/i18n/LanguageContext'
-import { getEventDisplayMessage } from '@/utils/eventMessages'
 import { getDisplayPromptForUserMessage, PROMPT_MAPPINGS, PROMPT_MAPPINGS_FOR_CREATE_PAGE } from '@/utils/promptMapping'
 import { toast } from 'sonner'
 import { FilePreview } from '@/components/FilePreview'
@@ -82,19 +80,12 @@ import { agentApi, videoEditingApi } from '@/services/api'
 import aiAvatar from '@/assets/ai-avatar-capybara.png'
 import userPromptAvatar from '@/assets/user-prompt-avatar.png'
 
-interface Message {
-  id?: string
-  role: string
-  content: string
-  timestamp?: string
-  event_type?: string
-  event_data?: any
-  message_id?: string | number
-  run_id?: string
-  interrupt_type?: string
-  interrupt_data?: any
-  isOptimistic?: boolean
-}
+import type {
+  ChatMessage as Message, ChatEventData, InterruptData, MediaRecord, MediaVersion,
+  KeyframeData, VideoData, CharacterData, MusicData, RegenerationItem,
+} from './chatTypes'
+import type { ComponentProps } from 'react'
+import type { TranslationKey } from '@/i18n/translations'
 
 /** 暂停点倒计时：依赖后端 auto_resume_at，与 worker 入队延迟对齐。 */
 function InterruptCountdown({
@@ -130,7 +121,7 @@ function InterruptCountdown({
     }
     tick()
     const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
+    return () =>{  clearInterval(id) }
   }, [deadlineAt])
 
   if (!deadlineAt || left == null) {
@@ -149,7 +140,7 @@ function InterruptCountdown({
 }
 
 /** 与 LazyStoryboardsSection 同源：keyframes-by-thread 轮询数据，供 todo 在 DB 无 keyframe_generation_progress 时回填分母/分子 */
-function keyframeTodoFallbackFromApi(keyframesData: any): {
+function keyframeTodoFallbackFromApi(keyframesData: KeyframeData | undefined): {
   completed: number
   total: number
 } | null {
@@ -159,28 +150,28 @@ function keyframeTodoFallbackFromApi(keyframesData: any): {
   if (expectedTotal <= 0) return null
   let completed = 0
   for (const kf of list) {
-    const cur = kf?.versions?.[kf?.current_version_index ?? 0]
+    const cur = kf.versions?.[kf.current_version_index ?? 0]
     if (cur?.keyframe_url) completed += 1
   }
   return { completed, total: expectedTotal }
 }
 
 /** 与 LazyShotsSection 同源：video-generations-by-thread 轮询数据，todo「镜头」行以 DB 为准，避免 mergeExistingTodoProgress 保留过期 SSE 的 11/11 */
-function videoTodoFallbackFromApi(videosData: any, scenesCount?: number): {
+function videoTodoFallbackFromApi(videosData: VideoData | undefined, scenesCount?: number): {
   completed: number
   total: number
 } | null {
   const videos = videosData?.video_generations || []
   const totalVideos =
-    Number.isFinite(videosData?.total) && videosData.total > 0
+    typeof videosData?.total === 'number' && Number.isFinite(videosData.total) && videosData.total > 0
       ? videosData.total
-      : Number.isFinite(scenesCount) && scenesCount > 0
+      : typeof scenesCount === 'number' && Number.isFinite(scenesCount) && scenesCount > 0
         ? scenesCount
         : videos.length
   if (totalVideos <= 0) return null
-  const videoMap = new Map<number, any>()
-  videos.forEach((video: any, idx: number) => {
-    const shotNumber = video?.shot_number ?? idx + 1
+  const videoMap = new Map<number, MediaRecord>()
+  videos.forEach((video, idx: number) => {
+    const shotNumber = video.shot_number ?? idx + 1
     if (!videoMap.has(shotNumber)) {
       videoMap.set(shotNumber, video)
     }
@@ -190,8 +181,8 @@ function videoTodoFallbackFromApi(videosData: any, scenesCount?: number): {
   )
   let completed = 0
   for (const v of displayVideos) {
-    const vers = v?.versions || []
-    if (vers.some((ver: any) => !!ver?.video_url)) completed += 1
+    const vers = v.versions || []
+    if (vers.some(ver => !!ver.video_url)) completed += 1
   }
   return { completed, total: totalVideos }
 }
@@ -203,19 +194,19 @@ type WorkflowPathEntry = { id: string; label_key?: string; est_seconds?: number 
  * 而 workflow_state 只挂在 VA 主 run），则使用本会话内最新一条 workflow_state，与 detail 一致。
  */
 function pickWorkflowStateMessageForTodo(
-  messages: any[] | undefined,
+  messages: Message[] | undefined,
   currentRunId: string | null | undefined,
-): any | null {
-  const wfList = [...(messages || [])].reverse().filter((m: any) => m?.event_type === 'workflow_state')
+): Message | null {
+  const wfList = [...(messages ?? [])].reverse().filter(m => m.event_type === 'workflow_state')
   if (wfList.length === 0) return null
   if (currentRunId != null && currentRunId !== '') {
-    const hit = wfList.find((m: any) => {
-      const rid = m?.event_data?.run_id ?? m?.run_id
-      return rid != null && String(rid) === String(currentRunId)
+    const hit = wfList.find((m) => {
+      const rid = m.event_data?.run_id ?? m.run_id
+      return rid != null && rid === currentRunId
     })
     if (hit) return hit
   }
-  return wfList[0]
+  return wfList[0] ?? null
 }
 
 function buildVideoTodoStepsFromPath(
@@ -223,7 +214,7 @@ function buildVideoTodoStepsFromPath(
   t: (key: string) => string,
   hasAnyOrCompleted: (types: string[]) => boolean,
   storyboardsActuallyDone: boolean,
-  musicData: any,
+  musicData: MusicData | undefined,
 ): { id: string; name: string; done: boolean; est_seconds?: number }[] {
   const legacySteps = [
     { id: 'analysis', name: t('analysis') || 'Analysis', done: hasAnyOrCompleted(['video_analysis']) },
@@ -279,8 +270,8 @@ function buildVideoTodoStepsFromPath(
       done = hasAnyOrCompleted(['video_completed'])
     }
     const est =
-      typeof (entry as any).est_seconds === 'number' && (entry as any).est_seconds > 0
-        ? (entry as any).est_seconds
+      typeof entry.est_seconds === 'number' && entry.est_seconds > 0
+        ? entry.est_seconds
         : undefined
     return { id, name, done, est_seconds: est }
   })
@@ -288,7 +279,7 @@ function buildVideoTodoStepsFromPath(
 
 /** 与后端 workflow path / gate_after_music payload（music_mode、paused_intent_key）对齐 */
 function resolveVideoInterruptDisplayText(
-  interruptData: any,
+  interruptData: InterruptData | undefined,
   t: (k: string) => string,
   variant: 'pause' | 'pausedIntent',
 ): string {
@@ -305,25 +296,30 @@ function resolveVideoInterruptDisplayText(
   return t('continue')
 }
 
-function versionUuidMatches(v: any, versionUuid: string): boolean {
-  const u = String(versionUuid || '').trim()
+function versionUuidMatches(v: MediaVersion, versionUuid: string): boolean {
+  const u = (versionUuid || '').trim()
   if (!u) return false
-  const vu = String(v?.uuid ?? '').trim()
-  const vid = String(v?.id ?? '').trim()
+  const vu = (v.uuid ?? '').trim()
+  const vid = displayValue(v.id ?? '').trim()
   return vu === u || vid === u
 }
 
-function displayVersionNumber(ver: any, versions: any[]): number {
-  const n = Number(ver?.version_number)
+function completionPredicate(eventTypes: ReadonlySet<string>, completedSteps: ReadonlySet<string>) {
+  return (types: string[]) => types.some(type => completedSteps.has(type) || eventTypes.has(type))
+}
+
+function displayVersionNumber(ver: MediaVersion | undefined, versions: MediaVersion[]): number {
+  if (!ver) return versions.length || 1
+  const n = Number(ver.version_number)
   if (Number.isFinite(n) && n > 0) return Math.floor(n)
-  const needle = String(ver?.uuid ?? ver?.id ?? '').trim()
+  const needle = displayValue(ver.uuid ?? ver.id ?? '').trim()
   if (!needle) return 1
-  const idx = (versions || []).findIndex((v: any) => versionUuidMatches(v, needle))
+  const idx = versions.findIndex(v => versionUuidMatches(v, needle))
   return idx >= 0 ? idx + 1 : 1
 }
 
 function frameSlotLabel(shot: number, frameIndex: number | null | undefined, isZh: boolean): string {
-  const fi = frameIndex == null || Number.isNaN(Number(frameIndex)) ? 0 : Number(frameIndex)
+  const fi = frameIndex == null || Number.isNaN(frameIndex) ? 0 : frameIndex
   if (isZh) {
     if (fi === -1) return `镜头${shot}·尾帧`
     if (fi === 0) return `镜头${shot}·首帧`
@@ -335,7 +331,7 @@ function frameSlotLabel(shot: number, frameIndex: number | null | undefined, isZ
 }
 
 function joinSummaryParts(parts: string[], isZh: boolean, maxParts: number = 4): string {
-  const clean = parts.map(p => String(p || '').trim()).filter(Boolean)
+  const clean = parts.map(p => (p || '').trim()).filter(Boolean)
   if (clean.length === 0) return ''
   const max = maxParts > 0 ? maxParts : 4
   const sep = isZh ? '；' : '; '
@@ -349,36 +345,36 @@ function joinSummaryParts(parts: string[], isZh: boolean, maxParts: number = 4):
 /** §2.3.3：payload 锚点 + 已加载列表 join；摘要只含镜头/帧位/版本号，不用 prompt。 */
 function buildPostRegenerateSummarySlot(params: {
   kind: string
-  items: any[]
-  keyframesData?: any
-  videosData?: any
-  charactersData?: any
+  items: RegenerationItem[]
+  keyframesData?: KeyframeData
+  videosData?: VideoData
+  charactersData?: CharacterData
   language: string
 }): string {
   const { kind, items, keyframesData, videosData, charactersData, language } = params
-  const list = Array.isArray(items) ? items.filter(x => x && typeof x === 'object') : []
+  const list = Array.isArray(items) ? items.filter(x => typeof x === 'object') : []
   const isZh = language === 'zh'
 
   if (kind === 'regenerate_keyframes' && keyframesData?.keyframes?.length) {
     const parts: string[] = []
     for (const it of list) {
-      const kfu = String((it as any).keyframe_uuid || '').trim()
-      const nvu = String((it as any).new_version_uuid || '').trim()
+      const kfu = ((it).keyframe_uuid || '').trim()
+      const nvu = ((it).new_version_uuid || '').trim()
       if (!kfu) continue
       const kf = keyframesData.keyframes.find(
-        (k: any) => String(k.uuid || '') === kfu || String(k.id || '') === kfu,
+        k => (k.uuid || '') === kfu || displayValue(k.id || '') === kfu,
       )
       if (!kf?.versions?.length) continue
       const ver =
-        (nvu ? kf.versions.find((v: any) => versionUuidMatches(v, nvu)) : null) ||
-        kf.versions[Number.isFinite(kf.current_version_index) ? kf.current_version_index : kf.versions.length - 1]
+        (nvu ? kf.versions.find(v => versionUuidMatches(v, nvu)) : null) ||
+        kf.versions[typeof kf.current_version_index === 'number' && Number.isFinite(kf.current_version_index) ? kf.current_version_index : kf.versions.length - 1]
       const shotRaw =
-        (it as any).shot_number != null && (it as any).shot_number !== ''
-          ? Number((it as any).shot_number)
+        (it).shot_number != null && (it).shot_number !== ''
+          ? Number((it).shot_number)
           : Number(kf.shot_number)
       const shot = Number.isFinite(shotRaw) ? shotRaw : NaN
       if (!Number.isFinite(shot)) continue
-      const fi = (it as any).frame_index
+      const fi = (it).frame_index
       const vnum = displayVersionNumber(ver, kf.versions)
       const label = frameSlotLabel(shot, fi, isZh)
       parts.push(isZh ? `${label}（v${vnum}）` : `${label} (v${vnum})`)
@@ -389,19 +385,19 @@ function buildPostRegenerateSummarySlot(params: {
   if (kind === 'regenerate_videos' && videosData?.video_generations?.length) {
     const parts: string[] = []
     for (const it of list) {
-      const vgu = String((it as any).video_uuid || '').trim()
-      const nvu = String((it as any).new_version_uuid || '').trim()
+      const vgu = ((it).video_uuid || '').trim()
+      const nvu = ((it).new_version_uuid || '').trim()
       if (!vgu) continue
       const vg = videosData.video_generations.find(
-        (v: any) => String(v.uuid || '') === vgu || String(v.id || '') === vgu,
+        v => (v.uuid || '') === vgu || displayValue(v.id || '') === vgu,
       )
       if (!vg?.versions?.length) continue
       const ver =
-        (nvu ? vg.versions.find((v: any) => versionUuidMatches(v, nvu)) : null) ||
-        vg.versions[Number.isFinite(vg.current_version_index) ? vg.current_version_index : vg.versions.length - 1]
+        (nvu ? vg.versions.find(v => versionUuidMatches(v, nvu)) : null) ||
+        vg.versions[typeof vg.current_version_index === 'number' && Number.isFinite(vg.current_version_index) ? vg.current_version_index : vg.versions.length - 1]
       const shotRaw =
-        (it as any).shot_number != null && (it as any).shot_number !== ''
-          ? Number((it as any).shot_number)
+        (it).shot_number != null && (it).shot_number !== ''
+          ? Number((it).shot_number)
           : Number(vg.shot_number)
       const shot = Number.isFinite(shotRaw) ? shotRaw : NaN
       if (!Number.isFinite(shot)) continue
@@ -414,17 +410,17 @@ function buildPostRegenerateSummarySlot(params: {
   if (kind === 'regenerate_characters' && charactersData?.characters?.length) {
     const parts: string[] = []
     for (const it of list) {
-      const cu = String((it as any).character_uuid || '').trim()
-      const nvu = String((it as any).new_version_uuid || '').trim()
+      const cu = ((it).character_uuid || '').trim()
+      const nvu = ((it).new_version_uuid || '').trim()
       if (!cu) continue
       const ch = charactersData.characters.find(
-        (c: any) => String(c.uuid || '') === cu || String(c.id || '') === cu,
+        c => (c.uuid || '') === cu || displayValue(c.id || '') === cu,
       )
       if (!ch?.versions?.length) continue
       const ver =
-        (nvu ? ch.versions.find((v: any) => versionUuidMatches(v, nvu)) : null) ||
-        ch.versions[Number.isFinite(ch.current_version_index) ? ch.current_version_index : ch.versions.length - 1]
-      const name = String(ch.name || '').trim() || (isZh ? '角色' : 'Character')
+        (nvu ? ch.versions.find(v => versionUuidMatches(v, nvu)) : null) ||
+        ch.versions[typeof ch.current_version_index === 'number' && Number.isFinite(ch.current_version_index) ? ch.current_version_index : ch.versions.length - 1]
+      const name = (ch.name || '').trim() || (isZh ? '角色' : 'Character')
       const vnum = displayVersionNumber(ver, ch.versions)
       parts.push(isZh ? `「${name}」v${vnum}` : `"${name}" v${vnum}`)
     }
@@ -437,14 +433,14 @@ function buildPostRegenerateSummarySlot(params: {
 /** payload.propagate.items（后端在 regenerate 完成写 msg 时附上）+ 面板 join；表示「点同步后会跑什么」，与 items 表示「刚改了什么」对称。 */
 function buildPostRegeneratePropagateSummarySlot(params: {
   kind: string
-  propagateItems: any[]
-  keyframesData?: any
-  videosData?: any
+  propagateItems: RegenerationItem[]
+  keyframesData?: KeyframeData
+  videosData?: VideoData
   language: string
   maxParts?: number
 }): string {
   const { kind, propagateItems, keyframesData, videosData, language, maxParts } = params
-  const list = Array.isArray(propagateItems) ? propagateItems.filter(x => x && typeof x === 'object') : []
+  const list = Array.isArray(propagateItems) ? propagateItems.filter(x => typeof x === 'object') : []
   const isZh = language === 'zh'
   const cap = maxParts ?? 4
   if (list.length === 0) return ''
@@ -452,15 +448,15 @@ function buildPostRegeneratePropagateSummarySlot(params: {
   if (kind === 'regenerate_characters' && keyframesData?.keyframes?.length) {
     const parts: string[] = []
     for (const it of list) {
-      const kfu = String((it as any).keyframe_uuid || '').trim()
-      const kvu = String((it as any).keyframe_version_uuid || '').trim()
-      const shotRaw = Number((it as any).shot_number)
-      const fi = (it as any).frame_index
+      const kfu = ((it).keyframe_uuid || '').trim()
+      const kvu = ((it).keyframe_version_uuid || '').trim()
+      const shotRaw = Number((it).shot_number)
+      const fi = (it).frame_index
       const kf = kfu
-        ? keyframesData.keyframes.find((k: any) => String(k.uuid || '') === kfu || String(k.id || '') === kfu)
+        ? keyframesData.keyframes.find(k => (k.uuid || '') === kfu || displayValue(k.id || '') === kfu)
         : null
       if (kf?.versions?.length && kvu) {
-        const ver = kf.versions.find((v: any) => versionUuidMatches(v, kvu))
+        const ver = kf.versions.find(v => versionUuidMatches(v, kvu))
         if (!ver) continue
         const shot = Number.isFinite(shotRaw) ? shotRaw : Number(kf.shot_number)
         if (!Number.isFinite(shot)) continue
@@ -477,9 +473,9 @@ function buildPostRegeneratePropagateSummarySlot(params: {
   if (kind === 'regenerate_characters') {
     const parts: string[] = []
     for (const it of list) {
-      const shotRaw = Number((it as any).shot_number)
+      const shotRaw = Number((it).shot_number)
       if (Number.isFinite(shotRaw)) {
-        parts.push(frameSlotLabel(shotRaw, (it as any).frame_index, isZh))
+        parts.push(frameSlotLabel(shotRaw, (it).frame_index, isZh))
       }
     }
     return joinSummaryParts(parts, isZh, cap)
@@ -487,7 +483,7 @@ function buildPostRegeneratePropagateSummarySlot(params: {
 
   if (kind === 'regenerate_keyframes') {
     const shots = list
-      .map(r => Number((r as any).shot_number))
+      .map(r => Number((r).shot_number))
       .filter(n => Number.isFinite(n))
       .sort((a, b) => a - b)
     const uniq = [...new Set(shots)]
@@ -499,18 +495,18 @@ function buildPostRegeneratePropagateSummarySlot(params: {
   if (kind === 'regenerate_videos' && videosData?.video_generations?.length) {
     const parts: string[] = []
     for (const it of list) {
-      const vgu = String((it as any).video_generation_uuid || '').trim()
-      const nvu = String((it as any).video_generation_version_uuid || '').trim()
+      const vgu = ((it).video_generation_uuid || '').trim()
+      const nvu = ((it).video_generation_version_uuid || '').trim()
       if (!vgu) continue
       const vg = videosData.video_generations.find(
-        (v: any) => String(v.uuid || '') === vgu || String(v.id || '') === vgu,
+        v => (v.uuid || '') === vgu || displayValue(v.id || '') === vgu,
       )
       if (!vg?.versions?.length) continue
-      const ver = nvu ? vg.versions.find((v: any) => versionUuidMatches(v, nvu)) : null
+      const ver = nvu ? vg.versions.find(v => versionUuidMatches(v, nvu)) : null
       if (!ver) continue
       const shotRaw =
-        (it as any).shot_number != null && (it as any).shot_number !== ''
-          ? Number((it as any).shot_number)
+        (it).shot_number != null && (it).shot_number !== ''
+          ? Number((it).shot_number)
           : Number(vg.shot_number)
       const shot = Number.isFinite(shotRaw) ? shotRaw : NaN
       if (!Number.isFinite(shot)) continue
@@ -522,7 +518,7 @@ function buildPostRegeneratePropagateSummarySlot(params: {
 
   if (kind === 'regenerate_videos') {
     const shots = list
-      .map(r => Number((r as any).shot_number))
+      .map(r => Number((r).shot_number))
       .filter(n => Number.isFinite(n))
       .sort((a, b) => a - b)
     const uniq = [...new Set(shots)]
@@ -537,8 +533,8 @@ function buildPostRegeneratePropagateSummarySlot(params: {
 /** 与 LazyStoryboardsSection 的 dice key 一致；仅用于 post-regenerate regenerate_characters（下游关键帧 I2I） */
 function computeKeyframeDiceKeysFromPropagate(
   kind: string,
-  propagateItems: any[],
-  keyframesData?: any,
+  propagateItems: RegenerationItem[],
+  keyframesData?: KeyframeData  ,
 ): string[] {
   const keys: string[] = []
   const list = Array.isArray(propagateItems) ? propagateItems : []
@@ -547,16 +543,16 @@ function computeKeyframeDiceKeysFromPropagate(
 
   if (kind === 'regenerate_characters') {
     for (const row of list) {
-      const kfu = String((row as any).keyframe_uuid || '').trim()
-      const kvu = String((row as any).keyframe_version_uuid || '').trim()
+      const kfu = ((row).keyframe_uuid || '').trim()
+      const kvu = ((row).keyframe_version_uuid || '').trim()
       if (!kfu || !kvu) continue
-      const kf = kfs.find((k: any) => String(k.uuid || '') === kfu || String(k.id || '') === kfu)
+      const kf = kfs.find(k => (k.uuid || '') === kfu || displayValue(k.id || '') === kfu)
       if (!kf?.versions?.length) continue
-      const vIdx = kf.versions.findIndex((v: any) => versionUuidMatches(v, kvu))
+      const vIdx = kf.versions.findIndex(v => versionUuidMatches(v, kvu))
       if (vIdx < 0) continue
       const sn = Number(
-        (row as any).shot_number != null && (row as any).shot_number !== ''
-          ? (row as any).shot_number
+        (row).shot_number != null && (row).shot_number !== ''
+          ? (row).shot_number
           : kf.shot_number,
       )
       if (!Number.isFinite(sn)) continue
@@ -567,20 +563,18 @@ function computeKeyframeDiceKeysFromPropagate(
 }
 
 /** 与 LazyShotsSection 的 dice key `${shotNumber}-${vIdx}` 对齐。propagate 仅 shot_number（关键帧卡下游→regenerate_videos）或含 video_uuid + version。 */
-function computeVideoDiceKeysFromPropagate(propagateItems: any[], videosData?: any): string[] {
+function computeVideoDiceKeysFromPropagate(propagateItems: RegenerationItem[], videosData?: VideoData  ): string[] {
   const keys: string[] = []
   const list = Array.isArray(propagateItems) ? propagateItems : []
   const vgs = videosData?.video_generations
   if (!vgs?.length) return keys
   for (const row of list) {
-    const vgu = String((row as any).video_generation_uuid || (row as any).video_uuid || '').trim()
-    const vvru = String(
-      (row as any).video_generation_version_uuid || (row as any).version_uuid || '',
-    ).trim()
-    let shot = Number((row as any).shot_number)
-    let vg = vgu ? vgs.find((v: any) => String(v.uuid || '') === vgu) : null
+    const vgu = ((row).video_generation_uuid || (row).video_uuid || '').trim()
+    const vvru = ((row).video_generation_version_uuid || (row).version_uuid || '').trim()
+    let shot = Number((row).shot_number)
+    let vg = vgu ? vgs.find(v => (v.uuid || '') === vgu) : null
     if (!vg && Number.isFinite(shot)) {
-      vg = vgs.find((v: any) => Number(v.shot_number) === shot)
+      vg = vgs.find(v => Number(v.shot_number) === shot)
     }
     if (!vg?.versions?.length) continue
     if (!vvru) {
@@ -593,7 +587,7 @@ function computeVideoDiceKeysFromPropagate(propagateItems: any[], videosData?: a
       keys.push(`${shot}-${vIdx}`)
       continue
     }
-    const vIdx = vg.versions.findIndex((v: any) => versionUuidMatches(v, vvru))
+    const vIdx = vg.versions.findIndex(v => versionUuidMatches(v, vvru))
     if (vIdx < 0) continue
     const sn = Number.isFinite(shot) ? shot : Number(vg.shot_number)
     if (!Number.isFinite(sn)) continue
@@ -622,7 +616,7 @@ function buildPostRegeneratePropagateConfirmBody(
   } else {
     base = t('postRegeneratePropagateKeyframesNoShots')
   }
-  const detail = String(propagateScopeSummary || '').trim()
+  const detail = (propagateScopeSummary || '').trim()
   if (!detail) return base
   return `${base}\n\n${t('postRegeneratePropagateScopeHeading')}\n${detail}`
 }
@@ -664,9 +658,9 @@ function PostRegenerateMessageBlock({
   onPostRegenerateVideoDiceKeys?: (keys: string[]) => void
   /** regenerate_videos 同步下游：时间线合并，镜头区「合并视频」loading */
   onPostRegenerateTimelineMergeBusy?: (busy: boolean) => void
-  keyframesData?: any
-  videosData?: any
-  charactersData?: any
+  keyframesData?: KeyframeData
+  videosData?: VideoData
+  charactersData?: CharacterData
 }) {
   const { language } = useLanguage()
   const [busy, setBusy] = useState(false)
@@ -674,13 +668,13 @@ function PostRegenerateMessageBlock({
   const ev = msg.event_data || {}
   const interaction = ev.interaction || {}
   const payload = interaction.payload || {}
-  const kind = String(payload.kind || '')
+  const kind = (payload.kind || '')
   const items = Array.isArray(payload.items) ? payload.items : []
-  const propagateItems = Array.isArray((payload as any).propagate?.items)
-    ? (payload as any).propagate.items
+  const propagateItems = Array.isArray((payload).propagate?.items)
+    ? (payload).propagate.items
     : []
   const mid = msg.message_id ?? (msg as { id?: number }).id
-  const cid = conversationId ? parseInt(String(conversationId), 10) : NaN
+  const cid = conversationId ? parseInt(conversationId, 10) : NaN
 
   const shotSummary = () => {
     const sep = language === 'zh' ? '、' : ', '
@@ -828,7 +822,7 @@ function PostRegenerateMessageBlock({
         >
           {t('postRegenerateOptionContinue')}
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmOpen(true)}>
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() =>{  setConfirmOpen(true) }}>
           {syncBaseLabel}
         </Button>
       </div>
@@ -841,7 +835,7 @@ function PostRegenerateMessageBlock({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex flex-row justify-end gap-2 sm:gap-2">
-            <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>
+            <Button type="button" variant="outline" disabled={busy} onClick={() =>{  setConfirmOpen(false) }}>
               {t('postRegenerateCancel')}
             </Button>
             <Button
@@ -884,7 +878,12 @@ interface MessageAreaProps {
   onFileUpload?: (files: File[]) => void
   onFileRemove?: (index: number) => void
   onFileReplace?: (index: number, file: File) => void
-  onInterruptOptionClick?: (option: any, threadId: string) => void
+  onInterruptOptionClick?: (option: string | {
+    type: string
+    run_id: string | null
+    interrupt_msgid?: string | number
+    smart_clip?: SmartClipDecision
+  }, threadId: string) => void
   isInputDisabled?: boolean
   showAssistantThinking?: boolean
   hideHeader?: boolean
@@ -916,7 +915,7 @@ interface MessageAreaProps {
   onEnableKeyframeReflectionChange?: (value: boolean) => void
   // Storyboard chat props
   storyboardChatMessage?: string
-  selectedStoryboard?: any
+  selectedStoryboard?: MediaRecord
   onStoryboardChatMessageChange?: (value: string) => void
   onStoryboardChatSend?: () => void
   // ✅ 控制 todo list 显示
@@ -928,13 +927,13 @@ interface MessageAreaProps {
   // ✅ 当前对话的 run_id（用于视频步骤「继续」时拼 resumeData）
   currentRunId?: string | null
   /** 详情轮询的关键帧数据（与右侧故事板同源），用于 todo 分镜进度在 DB 无 progress 事件时回填 */
-  keyframesData?: any
+  keyframesData?: KeyframeData
   /** 详情轮询的镜头视频数据（与右侧镜头区同源），用于 todo「镜头」行与 (8/11) 一致，避免仅信 SSE 合并值 */
-  videosData?: any
+  videosData?: VideoData
   /** 角色区数据：post_regenerate 卡片用锚点 join 展示摘要（§2.3.3） */
-  charactersData?: any
+  charactersData?: CharacterData
   /** 音乐区 / DB 数据：todo「背景音乐」完成态与 music_generations、_noMusic 对齐 */
-  musicData?: any
+  musicData?: MusicData
   /** 当前对话 id（conversations.id），用于 post-regenerate-action */
   conversationId?: string | null
   /** Regenerate 同步下游成功后刷新右侧/数据（建议拉 conversation/detail 以更新消息与任务） */
@@ -960,7 +959,7 @@ interface MessageAreaProps {
 }
 
 function getAssistantBubbleDisplayText(msg: Message): string {
-  const raw = String(msg.content ?? '').trim()
+  const raw = (msg.content).trim()
   if (!raw && msg.event_type) {
     return msg.event_type
   }
@@ -1038,6 +1037,7 @@ export const MessageArea = ({
   showActionSuggestions = true,
   streamedActionSuggestions,
 }: MessageAreaProps) => {
+  const composingRef = useRef(false)
   const { t, language } = useLanguage()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1066,10 +1066,10 @@ export const MessageArea = ({
   // 避免父层 isGenerating 与 SSE/detail 短暂不同步时 UI 来回切换。
   const latestTodoMessage = (() => {
     // 检查消息列表中是否有取消事件
-    const hasCancelledEvent = messages.some((msg: any) =>
-      msg?.event_type === 'generation_cancelled' ||
-      msg?.event_type === 'cancelled' ||
-      msg?.event_data?.status === TaskStatus.CANCELLED,
+    const hasCancelledEvent = messages.some(msg =>
+      msg.event_type === 'generation_cancelled' ||
+      msg.event_type === 'cancelled' ||
+      msg.event_data?.status === TaskStatus.CANCELLED,
     )
 
     if (hasCancelledEvent) {
@@ -1078,10 +1078,11 @@ export const MessageArea = ({
     }
 
     for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i] as any
-      if (m?.event_type === 'generation_todo') {
+      const m = messages[i]
+      if (!m) continue
+      if (m.event_type === 'generation_todo') {
         // ✅ 检查任务是否被取消
-        const status = m?.event_data?.status
+        const status = m.event_data?.status
         if (status === 'cancelled') {
           console.log('⏹️ Task was cancelled (todo status), hiding todo list')
           return null
@@ -1096,12 +1097,12 @@ export const MessageArea = ({
   const todoMessage = showTodoList ? latestTodoMessage : null
   // generation_todo / workflow_state 只通过底部 sticky todo 展示；关闭 todo 时也不应回退成普通消息气泡
   const displayMessages = messages.filter(
-    m => m?.event_type !== 'generation_todo' && m?.event_type !== 'workflow_state',
+    m => m.event_type !== 'generation_todo' && m.event_type !== 'workflow_state',
   )
   const messageScrollRootRef = useRef<HTMLDivElement>(null)
   const shouldFollowMessagesRef = useRef(true)
   const lastDisplayMessage = displayMessages[displayMessages.length - 1]
-  const messageRenderSignature = `${displayMessages.length}:${lastDisplayMessage?.id ?? lastDisplayMessage?.message_id ?? ''}:${lastDisplayMessage?.content?.length ?? 0}`
+  const messageRenderSignature = `${displayMessages.length}:${lastDisplayMessage?.id ?? lastDisplayMessage?.message_id ?? ''}:${lastDisplayMessage?.content.length ?? 0}`
 
   useEffect(() => {
     const viewport = messageScrollRootRef.current?.querySelector(
@@ -1114,7 +1115,7 @@ export const MessageArea = ({
     }
     updateFollowState()
     viewport.addEventListener('scroll', updateFollowState, { passive: true })
-    return () => viewport.removeEventListener('scroll', updateFollowState)
+    return () =>{  viewport.removeEventListener('scroll', updateFollowState) }
   }, [threadId])
 
   useEffect(() => {
@@ -1128,19 +1129,20 @@ export const MessageArea = ({
       viewport.scrollTop = viewport.scrollHeight
       shouldFollowMessagesRef.current = true
     })
-    return () => cancelAnimationFrame(frame)
+    return () =>{  cancelAnimationFrame(frame) }
   }, [messageRenderSignature, lastDisplayMessage?.role])
-  const isActionSuggestionsMessage = useCallback((m: any) => {
-    if (!m || m.role !== 'ai' || m.event_type === 'welcome') return false
+  const isActionSuggestionsMessage = useCallback((m: Message) => {
+    if (m.role !== 'ai' || m.event_type === 'welcome') return false
     if (m.event_type === 'insufficient_credits_notice') return true
     return showActionSuggestions
   }, [showActionSuggestions])
 
   const latestActionSuggestions = (() => {
     for (let i = displayMessages.length - 1; i >= 0; i--) {
-      const m = displayMessages[i] as any
+      const m = displayMessages[i]
+      if (!m) continue
       if (!isActionSuggestionsMessage(m)) continue
-      const parsed = parseActionSuggestions(m?.event_data?.action_suggestions)
+      const parsed = parseActionSuggestions(m.event_data?.action_suggestions)
       if (parsed.length === 0) continue
       return parsed
     }
@@ -1149,19 +1151,21 @@ export const MessageArea = ({
 
   const agentSuggestionsEverReceived = useMemo(() => {
     for (let i = displayMessages.length - 1; i >= 0; i--) {
-      const m = displayMessages[i] as any
+      const m = displayMessages[i]
+      if (!m) continue
       if (!isActionSuggestionsMessage(m)) continue
-      if (parseActionSuggestions(m?.event_data?.action_suggestions).length > 0) return true
+      if (parseActionSuggestions(m.event_data?.action_suggestions).length > 0) return true
     }
     return false
   }, [displayMessages, isActionSuggestionsMessage])
 
   const getLatestSuggestionSourceKey = useCallback((msgs: typeof displayMessages) => {
     for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i] as any
+      const m = msgs[i]
+      if (!m) continue
       if (!isActionSuggestionsMessage(m)) continue
-      if (parseActionSuggestions(m?.event_data?.action_suggestions).length === 0) continue
-      return String(m.message_id ?? `${m.timestamp ?? ''}-${i}`)
+      if (parseActionSuggestions(m.event_data?.action_suggestions).length === 0) continue
+      return displayValue(m.message_id ?? `${m.timestamp ?? ''}-${i}`)
     }
     return null
   }, [isActionSuggestionsMessage])
@@ -1212,15 +1216,15 @@ export const MessageArea = ({
   /** 本次 interrupt 已关闭 15s 自动继续（前端停表 + 后端 Redis 跳过 auto_resume） */
   const [dismissedAutoResumeByMsgId, setDismissedAutoResumeByMsgId] = useState<Record<number, boolean>>({})
   const activeTodoMessage = showTodoList ? latestTodoMessage : null
-  const todoStatus = String((activeTodoMessage as any)?.event_data?.status || '').toLowerCase()
-  const isTodoPendingUserInput = (activeTodoMessage as any)?.event_data?.todo_pending_user_input === true
+  const todoStatus = ((activeTodoMessage)?.event_data?.status || '').toLowerCase()
+  const isTodoPendingUserInput = (activeTodoMessage)?.event_data?.todo_pending_user_input === true
   const isTodoTaskRunning = todoStatus === 'running' || todoStatus === 'queued' || todoStatus === 'resume_queued' || todoStatus === 'pending'
   const effectiveIsGenerating = isGenerating || isTodoTaskRunning
   const latestVisibleMessage = displayMessages[displayMessages.length - 1]
   const latestAssistantHasContent =
     latestVisibleMessage?.role !== 'user' &&
     latestVisibleMessage?.role !== 'human' &&
-    Boolean(latestVisibleMessage?.content?.trim())
+    Boolean(latestVisibleMessage?.content.trim())
   const shouldShowAssistantThinking = showAssistantThinking && !latestAssistantHasContent
   const shouldShowCancelButton =
     isInFlight &&
@@ -1236,10 +1240,10 @@ export const MessageArea = ({
     if (!todoMessage || !effectiveIsGenerating || agentType !== 'video') return
     const kfFb = keyframeTodoFallbackFromApi(keyframesData)
     const kf =
-      (todoMessage as any)?.event_data?.keyframe_completed ??
+      (todoMessage).event_data?.keyframe_completed ??
       kfFb?.completed ??
-      (todoMessage as any)?.event_data?.keyframe_progress_percent
-    const refl = (todoMessage as any)?.event_data?.keyframe_reflection_completed ?? (todoMessage as any)?.event_data?.keyframe_reflection_progress_percent
+      (todoMessage).event_data?.keyframe_progress_percent
+    const refl = (todoMessage).event_data?.keyframe_reflection_completed ?? (todoMessage).event_data?.keyframe_reflection_progress_percent
     const prev = lastKeyframeProgressRef.current
     const changed = (kf != null && prev.kf !== kf) || (refl != null && prev.refl !== refl)
     if (changed) {
@@ -1297,9 +1301,9 @@ export const MessageArea = ({
   const lastElapsedTimeRef = useRef(0)
 
   // ✅ 读取后端 workflow_state 下发的耗时预估（缺失时回退本地经验公式）
-  const getBackendWorkflowTimeSource = useCallback((): any | null => {
+  const getBackendWorkflowTimeSource = useCallback((): ChatEventData | null => {
     try {
-      const wfMsg = pickWorkflowStateMessageForTodo(messages, currentRunId) as any
+      const wfMsg = pickWorkflowStateMessageForTodo(messages, currentRunId)
       return wfMsg ? (wfMsg.event_data ?? wfMsg) : null
     } catch {
       return null
@@ -1309,7 +1313,7 @@ export const MessageArea = ({
     const src = getBackendWorkflowTimeSource()
     const path = src?.path
     if (Array.isArray(path)) {
-      const entry = path.find((p: any) => p?.id === stepId)
+      const entry = path.find(p => p.id === stepId)
       if (entry && typeof entry.est_seconds === 'number' && entry.est_seconds > 0) {
         return entry.est_seconds
       }
@@ -1351,23 +1355,18 @@ export const MessageArea = ({
   const [musicCountdown, setMusicCountdown] = useState(MUSIC_COUNTDOWN_SECONDS)
   const isVideoMusicStepActive = (() => {
     if (agentType !== 'video' || !effectiveIsGenerating || !activeTodoMessage) return false
-    const todoStatus = String((activeTodoMessage as any)?.event_data?.status || '').toLowerCase()
+    const todoStatus = ((activeTodoMessage).event_data?.status || '').toLowerCase()
     if (todoStatus === 'cancelled' || todoStatus === 'failed' || todoStatus === 'interrupted') return false
 
-    const eventTypes = new Set((messages || []).map(m => m.event_type).filter(Boolean) as string[])
-    const completedSteps = new Set<string>((activeTodoMessage as any)?.event_data?.completed_steps || [])
-    const hasAnyOrCompleted = (types: string[]) => {
-      if (completedSteps.size > 0 && types.some(t => completedSteps.has(t))) {
-        return true
-      }
-      return types.some(t => eventTypes.has(t))
-    }
-    const reflTotal = (activeTodoMessage as any)?.event_data?.keyframe_reflection_total
-    const reflDone = (activeTodoMessage as any)?.event_data?.keyframe_reflection_completed ?? 0
+    const eventTypes = new Set(messages.map(m => m.event_type).filter(Boolean) as string[])
+    const completedSteps = new Set<string>((activeTodoMessage).event_data?.completed_steps || [])
+    const hasAnyOrCompleted = completionPredicate(eventTypes, completedSteps)
+    const reflTotal = (activeTodoMessage).event_data?.keyframe_reflection_total
+    const reflDone = (activeTodoMessage).event_data?.keyframe_reflection_completed ?? 0
     const storyboardsActuallyDone =
       hasAnyOrCompleted(['keyframes_generated']) &&
-      !(Number(reflTotal) > 0 && Number(reflDone) < Number(reflTotal))
-    const wfMsg = pickWorkflowStateMessageForTodo(messages, currentRunId) as any
+      !(Number(reflTotal) > 0 && reflDone < Number(reflTotal))
+    const wfMsg = pickWorkflowStateMessageForTodo(messages, currentRunId)
     const wfSrc = wfMsg ? (wfMsg.event_data ?? wfMsg) : null
     const pathEntries =
       wfSrc && Array.isArray(wfSrc.path) && wfSrc.path.length > 0
@@ -1394,7 +1393,7 @@ export const MessageArea = ({
     const timer = setInterval(() => {
       setMusicCountdown(prev => Math.max(0, prev - 1))
     }, 1000)
-    return () => clearInterval(timer)
+    return () =>{  clearInterval(timer) }
   }, [getBackendStepEstSeconds, isVideoMusicStepActive])
 
   // ✅ 简单 agent（image/music/story/video_gen）整体倒计时：优先后端 total_est_seconds，回退每 agent 经验值
@@ -1422,7 +1421,7 @@ export const MessageArea = ({
     const timer = setInterval(() => {
       setImageCountdown(prev => Math.max(0, prev - 1))
     }, 1000)
-    return () => clearInterval(timer)
+    return () =>{  clearInterval(timer) }
   }, [effectiveIsGenerating, isSimpleAgentType, simpleAgentEstSeconds])
 
   // ✅ 追踪已用时间和生成开始时间（每秒更新，仅在 video 模式下）
@@ -1447,7 +1446,7 @@ export const MessageArea = ({
       setElapsedTime(prev => prev + 1)
     }, 1000)
 
-    return () => clearInterval(timer)
+    return () =>{  clearInterval(timer) }
   }, [effectiveIsGenerating, agentType])
 
   const [showCutiAvatarLightbox, setShowCutiAvatarLightbox] = useState(false)
@@ -1474,11 +1473,11 @@ export const MessageArea = ({
   const [isDragOver, setIsDragOver] = useState(false)
   const [audioCropOpen, setAudioCropOpen] = useState(false)
   const [audioCropTarget, setAudioCropTarget] = useState<{ index: number; file: File } | null>(null)
-  const previousUploadedFilesLengthRef = useRef(uploadedFiles?.length || 0)
+  const previousUploadedFilesLengthRef = useRef(uploadedFiles.length || 0)
   const suggestedCropDurationSec = useMemo(
     () =>
       resolveAutoCropTargetDurationSec(
-        Number(duration?.[0] ?? DEFAULT_VIDEO_OPTIONS.duration),
+        (duration[0] ?? DEFAULT_VIDEO_OPTIONS.duration),
         message,
         { panelDurationExplicit: durationPanelExplicit },
       ),
@@ -1509,18 +1508,19 @@ export const MessageArea = ({
       setChatShareWatermarkedBlob(null)
       return
     }
-    let cancelled = false;
-    (async () => {
+    let cancelled = false
+    const isCancelled = () => cancelled
+    void (async () => {
       try {
         if (chatPreviewTile) {
           // tile 已经在 splitCollage 时带了水印，直接复用
-          if (!cancelled) {
+          if (!isCancelled()) {
             setChatShareWatermarkedUrl(chatPreviewTile.dataUrl)
             setChatShareWatermarkedBlob(chatPreviewTile.blob)
           }
         } else {
           const { blob, dataUrl } = await addLogoToImage(chatImageDetail.url)
-          if (!cancelled) {
+          if (!isCancelled()) {
             setChatShareWatermarkedUrl(dataUrl)
             setChatShareWatermarkedBlob(blob)
           }
@@ -1565,8 +1565,8 @@ export const MessageArea = ({
     } catch (e) {
       setChatSplitError(
         e instanceof Error && e.message.includes('cross-origin')
-          ? (t('splitCorsError' as any) || 'Image does not support cross-origin access.')
-          : (t('splitError' as any) || 'Failed to split image.'),
+          ? (t('splitCorsError') || 'Image does not support cross-origin access.')
+          : (t('splitError') || 'Failed to split image.'),
       )
     } finally {
       setChatSplitSplitting(false)
@@ -1581,7 +1581,7 @@ export const MessageArea = ({
       await navigator.clipboard.writeText(shareUrl)
       toast.success(t('copyLinkSuccess'))
     } catch (e) {
-      toast.error(String(e))
+      toast.error(displayValue(e))
     }
   }
 
@@ -1591,16 +1591,16 @@ export const MessageArea = ({
     const shareText = t('shareImageDescription') || 'Check out this image'
     const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
     const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=normal&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
-    if (navigator.share) {
+    if (typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
-          try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch { toast.error(String(e)) }
+          try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch { toast.error(displayValue(e)) }
         }
       }
     } else {
-      try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch (e) { toast.error(String(e)) }
+      try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch (e) { toast.error(displayValue(e)) }
     }
   }
 
@@ -1625,6 +1625,7 @@ export const MessageArea = ({
 
   const validateAndUploadFiles = (files: File[]) => {
     if (!onFileUpload) return
+
     const { validFiles } = validateFiles(files, uploadedFiles, t)
     if (validFiles.length > 0) {
       onFileUpload(validFiles)
@@ -1646,14 +1647,16 @@ export const MessageArea = ({
   }
 
   useEffect(() => {
-    const files = uploadedFiles || []
+    const files = uploadedFiles
     const previousLength = previousUploadedFilesLengthRef.current
     if (files.length > previousLength) {
       const addedFiles = files.slice(previousLength)
       const audioIndex = addedFiles.findIndex(file => file.type.startsWith('audio/'))
       if (audioIndex >= 0) {
         const index = previousLength + audioIndex
-        setAudioCropTarget({ index, file: files[index] })
+        const file = files[index]
+        if (!file) return
+        setAudioCropTarget({ index, file })
         setAudioCropOpen(true)
       }
     }
@@ -1673,7 +1676,7 @@ export const MessageArea = ({
     const textarea = textareaRef.current
     if (!textarea) return
     const lineCount = (message || '').split('\n').length
-    if (lineCount <= 1 && !message?.trim()) {
+    if (lineCount <= 1 && !message.trim()) {
       textarea.style.height = `${INPUT_MIN_H}px`
       return
     }
@@ -1688,11 +1691,13 @@ export const MessageArea = ({
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!onSwipeRight) return
     const t = e.touches[0]
+    if (!t) return
     swipeStartRef.current = { x: t.clientX, y: t.clientY }
   }, [onSwipeRight])
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!onSwipeRight || !swipeStartRef.current) return
     const t = e.changedTouches[0]
+    if (!t) return
     const dx = t.clientX - swipeStartRef.current.x
     const dy = t.clientY - swipeStartRef.current.y
     swipeStartRef.current = null
@@ -1704,7 +1709,7 @@ export const MessageArea = ({
   return (
     <div
       className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background"
-      onClick={(e) => {
+      onClick={() => {
         if (onContainerClick) {
           onContainerClick()
         }
@@ -1731,18 +1736,18 @@ export const MessageArea = ({
             <p className="text-sm text-muted-foreground font-inter">
               {messages.length > 0
                 ? agentType === "image"
-                  ? t('imageCreationChatInProgress' as any)
+                  ? t('imageCreationChatInProgress')
                   : agentType === "music"
-                  ? t('musicCreationChatInProgress' as any)
+                  ? t('musicCreationChatInProgress')
                   : agentType === "story"
-                  ? t('storyCreationChatInProgress' as any)
+                  ? t('storyCreationChatInProgress')
                   : t('videoCreationChatInProgress')
                 : agentType === "image"
-                ? t('startNewImageProject' as any)
+                ? t('startNewImageProject')
                 : agentType === "music"
-                ? t('startNewMusicProject' as any)
+                ? t('startNewMusicProject')
                 : agentType === "story"
-                ? t('startNewStoryProject' as any)
+                ? t('startNewStoryProject')
                 : t('startNewVideoProject')}
             </p>
             */}
@@ -1775,7 +1780,7 @@ export const MessageArea = ({
                   {msg.role !== 'user' && msg.role !== 'human' && (
                     <button
                       type="button"
-                      onClick={() => setShowCutiAvatarLightbox(true)}
+                      onClick={() =>{  setShowCutiAvatarLightbox(true) }}
                       className="mt-1 flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
                       title={t('da.composer.viewAvatar')}
                     >
@@ -1886,7 +1891,7 @@ export const MessageArea = ({
                                     />
                                   ),
                                   // 自定义音频组件（支持 HTML audio 标签）
-                                  audio: ({ src, children, ...props }: any) => (
+                                  audio: ({ src, children, ...props }: ComponentProps<'audio'>) => (
                                     <audio
                                       controls
                                       className="w-full my-2"
@@ -1898,13 +1903,13 @@ export const MessageArea = ({
                                     </audio>
                                   ),
                                   // 自定义 source 组件（用于 audio 标签内部）
-                                  source: ({ src, type, ...props }: any) => (
+                                  source: ({ src, type, ...props }: ComponentProps<'source'>) => (
                                     <source src={src} type={type || 'audio/mpeg'} {...props} />
                                   ),
                                   // 自定义音频链接，转换为可播放的音频组件
                                   p: ({ children, ...props }) => {
                                   // 检查是否包含音频链接
-                                    const text = children?.toString() || ''
+                                    const text = typeof children === 'string' ? children : ''
                                     const audioMatch = text.match(/\[([^\]]+)\]\((https:\/\/[^)]+\.mp3[^)]*)\)/)
 
                                     if (audioMatch) {
@@ -1956,8 +1961,8 @@ export const MessageArea = ({
                                   <span>{successText}</span>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {videos.map((v: any, idx: number) => (
-                                    v?.video_url ? (
+                                  {videos.map((v, idx: number) => (
+                                    v.video_url ? (
                                       <div key={idx} className="overflow-hidden rounded-lg border border-white/20 dark:border-gray-700/50 bg-black shadow-lg">
                                         <video
                                           src={v.video_url}
@@ -1989,16 +1994,20 @@ export const MessageArea = ({
                     ) : msg.event_type === 'image_agent_generated' ? (
                     // ✅ 图片生成完成：手机端 showImageResultsInChat 时在对话中直接显示图片；否则仅文案，图片在右侧创作空间
                       (() => {
-                        const content = msg.event_data?.image_content as string | undefined
+                        const content = msg.event_data?.image_content
                         const urls: string[] = []
                         if (content && showImageResultsInChat) {
                           const markdownRegex = /!?\[([^\]]*)\]\(([^\s)]+\.(jpg|jpeg|png|gif|webp)[^\s)]*)\)/gi
-                          let m
-                          while ((m = markdownRegex.exec(content)) !== null) urls.push(m[2].trim())
+                          let m: RegExpExecArray | null
+                          while ((m = markdownRegex.exec(content)) !== null) {
+                            if (m[2]) urls.push(m[2].trim())
+                          }
                           if (urls.length === 0) {
                             const directRegex = /((?:https?:\/\/)?[^\s]+\.(jpg|jpeg|png|gif|webp))/gi
-                            let d
-                            while ((d = directRegex.exec(content)) !== null) urls.push(d[1].trim())
+                            let d: RegExpExecArray | null
+                            while ((d = directRegex.exec(content)) !== null) {
+                              if (d[1]) urls.push(d[1].trim())
+                            }
                           }
                         }
                         return (
@@ -2016,7 +2025,7 @@ export const MessageArea = ({
                                         src={src}
                                         alt=""
                                         className="w-full h-auto object-contain max-h-64 cursor-pointer hover:opacity-90 transition-opacity"
-                                        onClick={() => setChatImageDetail({ url: src, title: t('generatedImage') + ` ${idx + 1}` })}
+                                        onClick={() =>{  setChatImageDetail({ url: src, title: t('generatedImage') + ` ${idx + 1}` }) }}
                                       />
                                     </div>
                                   ))}
@@ -2072,7 +2081,7 @@ export const MessageArea = ({
                                   // 自定义段落组件，处理图像链接
                                   p: ({ children, ...props }) => {
                                   // 检查是否包含图像链接
-                                    const text = children?.toString() || ''
+                                    const text = typeof children === 'string' ? children : ''
                                     const imageMatch = text.match(/!?\[([^\]]*)\]\((https:\/\/[^)]+\.(jpg|jpeg|png|gif|webp)[^)]*)\)/i)
 
                                     if (imageMatch) {
@@ -2116,8 +2125,8 @@ export const MessageArea = ({
                     ) : msg.event_type === 'generation_failed' ? (
                     // 生成失败卡片：展示官方原因（已脱敏）+ 失败项明细，不暴露内部信息
                       (() => {
-                        const fd: any = msg.event_data || {}
-                        const items: any[] = Array.isArray(fd.failed_items) ? fd.failed_items : []
+                        const fd = msg.event_data || {}
+                        const items = Array.isArray(fd.failed_items) ? fd.failed_items : []
                         const headline = fd.message || msg.content || t('generationFailed.title')
                         // 失败明细仅对逐镜头阶段（keyframe/video）有意义；音乐/角色等单依赖阶段标题已含原因，明细纯属重复，隐藏。
                         const showItemDetails =
@@ -2140,18 +2149,18 @@ export const MessageArea = ({
                                     {t('generationFailed.itemsHeader')}
                                   </p>
                                   <ul className="space-y-1">
-                                    {items.map((it: any, idx: number) => {
-                                      const hasIndex = it?.index != null && it?.index !== ''
+                                    {items.map((it, idx: number) => {
+                                      const hasIndex = it.index != null && it.index !== ''
                                       const idxLabel = hasIndex
-                                        ? String(it.index)
-                                        : t('generationFailed.itemFallbackIndex').replace('{index}', String(idx + 1))
+                                        ? displayValue(it.index)
+                                        : t('generationFailed.itemFallbackIndex').replace('{index}', displayValue(idx + 1))
                                       return (
                                         <li
                                           key={idx}
                                           className="text-xs text-rose-900/85 dark:text-rose-100/85 break-words"
                                         >
                                           <span className="font-medium">{idxLabel}</span>
-                                          {it?.reason ? <>：{it.reason}</> : null}
+                                          {it.reason ? <>：{it.reason}</> : null}
                                         </li>
                                       )
                                     })}
@@ -2187,24 +2196,24 @@ export const MessageArea = ({
                             run_id: runIdForResume,
                             interrupt_msgid: msgId,
                           }
-                          if (isSmartClipReadyForInterrupt(interruptData)) {
+                          if (interruptData?.smart_clip && isSmartClipReadyForInterrupt(interruptData)) {
                             return {
                               ...base,
                               smart_clip: buildRecommendedSmartClipDecision(
-                                interruptData!.smart_clip as SmartClipPayload,
+                                interruptData.smart_clip,
                               ),
                             }
                           }
                           return base
                         }
                         const autoResumeDismissedForMsg =
-                          !!(msg.event_data as any)?.auto_resume_dismissed ||
-                        (msgId != null && !!dismissedAutoResumeByMsgId[Number(msgId)])
-                        const autoResumeAt = interruptData?.auto_resume_at as string | undefined
+                          !!(msg.event_data)?.auto_resume_dismissed ||
+                        (msgId != null && dismissedAutoResumeByMsgId[Number(msgId)])
+                        const autoResumeAt = interruptData?.auto_resume_at
                         // 失败暂停：禁止 15s 自动继续，按钮改为「重试该步骤」
                         const suppressAutoResume =
                           interruptData?.disable_auto_resume === true ||
-                        String(interruptData?.step ?? '').startsWith('failed_')
+                        displayValue(interruptData?.step ?? '').startsWith('failed_')
                         // 失败暂停同样允许用户继续/重试：用户可在对话里调整后继续，这里仅关闭 15s 自动继续。
                         return (
                           <>
@@ -2214,14 +2223,14 @@ export const MessageArea = ({
                               <div className="mt-1 p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl border border-amber-200 dark:border-amber-800 w-full min-w-0 max-w-full overflow-hidden text-center">
                                 {continued ? (
                                   <p className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-3 break-words">
-                                    {resolveVideoInterruptDisplayText(interruptData, t as (k: string) => string, 'pause')}
+                                    {resolveVideoInterruptDisplayText(interruptData, t, 'pause')}
                                   </p>
                                 ) : null}
                                 {continued ? (
                                   <div className="flex flex-col items-center gap-2">
                                     <span className="inline-block text-sm text-amber-700 dark:text-amber-300">{t('continued') || '已继续'}</span>
                                     {(() => {
-                                      const est = interruptData?.credit_estimate
+                                      const est = interruptData.credit_estimate
                                       const rem = est?.remaining_credits_estimate
                                       const kf = est?.keyframe_credits_estimate
                                       const vid = est?.video_credits_estimate
@@ -2229,7 +2238,7 @@ export const MessageArea = ({
                                       return (
                                         <p className="text-xs text-amber-800/90 dark:text-amber-200/90 break-words max-w-full">
                                           {typeof rem === 'number' && rem > 0
-                                            ? t('interrupt.continueWillConsume').replace('{credits}', String(rem))
+                                            ? t('interrupt.continueWillConsume').replace('{credits}', displayValue(rem))
                                             : typeof rem === 'number' && rem === 0
                                               ? t('interrupt.noExtraCredits')
                                               : null}
@@ -2247,7 +2256,7 @@ export const MessageArea = ({
                                 ) : canContinue ? (
                                   <div className="flex flex-col items-center gap-3 w-full">
                                     {(() => {
-                                      const sc: SmartClipPayload | undefined = interruptData?.smart_clip
+                                      const sc: SmartClipPayload | undefined = interruptData.smart_clip
                                       if (!sc || sc.status !== 'ready') return null
                                       const handleSmartClipConfirm = (decision: SmartClipDecision) => {
                                         onInterruptOptionClick?.(
@@ -2265,7 +2274,7 @@ export const MessageArea = ({
                                           <SmartClipPanel
                                             smartClip={sc}
                                             onConfirm={handleSmartClipConfirm}
-                                            t={t as (k: string) => string}
+                                            t={t}
                                           />
                                         </div>
                                       )
@@ -2278,7 +2287,7 @@ export const MessageArea = ({
                                         <p className="text-sm text-amber-900/95 dark:text-amber-100 break-words max-w-full leading-relaxed">
                                           {resolveVideoInterruptDisplayText(
                                             interruptData,
-                                            t as (k: string) => string,
+                                            t,
                                             'pausedIntent',
                                           )}
                                         </p>
@@ -2291,7 +2300,7 @@ export const MessageArea = ({
                                         <p className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-1 break-words leading-relaxed">
                                           {resolveVideoInterruptDisplayText(
                                             interruptData,
-                                            t as (k: string) => string,
+                                            t,
                                             'pause',
                                           )}
                                         </p>
@@ -2300,7 +2309,7 @@ export const MessageArea = ({
                                       <p className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-1 break-words">
                                         {resolveVideoInterruptDisplayText(
                                           interruptData,
-                                          t as (k: string) => string,
+                                          t,
                                           'pause',
                                         )}
                                       </p>
@@ -2320,13 +2329,13 @@ export const MessageArea = ({
                                       >
                                         {(() => {
                                           // 失败暂停同样用「继续」文案：行为是继续往下走，用户可自行重试，标「重试该步骤」会误导。
-                                          const remainingCredits = interruptData?.credit_estimate?.remaining_credits_estimate
+                                          const remainingCredits = interruptData.credit_estimate?.remaining_credits_estimate
                                           if (typeof remainingCredits === 'number' && remainingCredits > 0) {
                                             return (
                                               <>
                                                 {t('continue')}
                                                 <span className="mx-2 opacity-70">|</span>
-                                                {t('interrupt.creditsPart').replace('{credits}', String(remainingCredits))}
+                                                {t('interrupt.creditsPart').replace('{credits}', displayValue(remainingCredits))}
                                               </>
                                             )
                                           }
@@ -2343,8 +2352,6 @@ export const MessageArea = ({
                                         })()}
                                       </Button>
                                       {autoContinueOnInterrupt &&
-                                canContinue &&
-                                msgId != null &&
                                 runIdForResume &&
                                 !autoResumeDismissedForMsg &&
                                 !suppressAutoResume && (
@@ -2357,7 +2364,7 @@ export const MessageArea = ({
                                                   variant="outline"
                                                   size="sm"
                                                   className="border-amber-300 text-amber-900 dark:text-amber-100 dark:border-amber-700"
-                                                  onClick={async () => {
+                                                  onClick={asyncEvent(async () => {
                                                     const tid = msg.event_data?.thread_id || threadId || ''
                                                     const mid = Number(msgId)
                                                     if (!tid || !runIdForResume || !Number.isFinite(mid)) {
@@ -2376,10 +2383,10 @@ export const MessageArea = ({
                                                       } else {
                                                         toast.error(res.message || t('interrupt.dismissAutoResumeFail'))
                                                       }
-                                                    } catch (e: any) {
-                                                      toast.error(e?.message || t('interrupt.dismissAutoResumeFail'))
+                                                    } catch (e: unknown) {
+                                                      toast.error(e instanceof Error && e.message ? e.message : t('interrupt.dismissAutoResumeFail'))
                                                     }
-                                                  }}
+                                                  })}
                                                 >
                                                   {t('interrupt.dismissAutoResume')}
                                                 </Button>
@@ -2404,7 +2411,7 @@ export const MessageArea = ({
                                 ) : (
                                   <p className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-3 break-words">
                                     {interruptData.message_key
-                                      ? (t as (k: string) => string)(interruptData.message_key)
+                                      ? t(interruptData.message_key as TranslationKey)
                                       : (interruptData.message_default || t('continue'))}
                                   </p>
                                 )}
@@ -2427,10 +2434,10 @@ export const MessageArea = ({
                                         <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
                                         <div className="flex-1 min-w-0">
                                           <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                                            {t(`agentType.${agent}` as any)}
+                                            {t(`agentType.${agent}` as TranslationKey)}
                                           </p>
                                           <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                                            {t(`agentType.${agent}.description` as any)}
+                                            {t(`agentType.${agent}.description` as TranslationKey)}
                                           </p>
                                         </div>
                                       </div>
@@ -2505,21 +2512,20 @@ export const MessageArea = ({
                     ) : msg.event_type === 'generation_todo' ? (
                     // ✅ lovable-style todo list, driven by real SSE events (/api/cuti)
                       (() => {
-                        const eventTypes = new Set((messages || []).map(m => m.event_type).filter(Boolean) as string[])
-                        const hasAny = (types: string[]) => types.some(t => eventTypes.has(t))
-                        const shotsProgressPercent = Number(
-                          msg.event_data?.progress_percent ??
+                        const eventTypes = new Set(messages.map(m => m.event_type).filter(Boolean) as string[])
+
+                        const shotsProgressPercent = (msg.event_data?.progress_percent ??
                           (() => {
                             // fallback: find last video_generation_progress message
-                            for (let i = (messages || []).length - 1; i >= 0; i--) {
-                              const m = messages[i] as any
-                              if (m?.event_type === 'video_generation_progress') {
-                                return m?.event_data?.progress_percent ?? 0
+                            for (let i = messages.length - 1; i >= 0; i--) {
+                              const m = messages[i]
+                              if (!m) continue
+                              if (m.event_type === 'video_generation_progress') {
+                                return m.event_data?.progress_percent ?? 0
                               }
                             }
                             return 0
-                          })(),
-                        ) || 0
+                          })()) || 0
                         const shotsCompleted = msg.event_data?.completed
                         const shotsTotal = msg.event_data?.total
                         const kfApiTodo = keyframeTodoFallbackFromApi(keyframesData)
@@ -2529,17 +2535,17 @@ export const MessageArea = ({
                           keyframeCompleted = kfApiTodo.completed
                           keyframeTotal = kfApiTodo.total
                         }
-                        const totalFromScenes = Number.isFinite(scenesCount) ? scenesCount : undefined
+                        const totalFromScenes = typeof scenesCount === 'number' && Number.isFinite(scenesCount) ? scenesCount : undefined
                         const effectiveShotsTotal = (shotsTotal != null && shotsTotal > 0)
                           ? shotsTotal
                           : totalFromScenes
                         const vidApiTodo = videoTodoFallbackFromApi(videosData, scenesCount)
                         let shotsProgressPercentForBar = shotsProgressPercent
                         let shotsCompletedForBar: number | undefined =
-                          shotsCompleted !== undefined && shotsCompleted !== null ? Number(shotsCompleted) : undefined
+                          shotsCompleted
                         let shotsTotalForBar: number | undefined =
-                          effectiveShotsTotal !== undefined && Number(effectiveShotsTotal) > 0
-                            ? Number(effectiveShotsTotal)
+                          effectiveShotsTotal !== undefined && effectiveShotsTotal > 0
+                            ? effectiveShotsTotal
                             : undefined
                         if (vidApiTodo && vidApiTodo.total > 0) {
                           shotsCompletedForBar = vidApiTodo.completed
@@ -2550,60 +2556,47 @@ export const MessageArea = ({
                         const effectiveKeyframeTotal = (keyframeTotal != null && keyframeTotal > 0)
                           ? keyframeTotal
                           : totalFromScenes
-                        const keyframeProgressPercent = Number(
-                          keyframeTotal != null && keyframeTotal > 0 && keyframeCompleted != null
-                            ? Math.round((keyframeCompleted / keyframeTotal) * 100 * 10) / 10
-                            : msg.event_data?.keyframe_progress_percent ??
+                        const keyframeProgressPercent = (keyframeTotal != null && keyframeTotal > 0 && keyframeCompleted != null
+                          ? Math.round((keyframeCompleted / keyframeTotal) * 100 * 10) / 10
+                          : msg.event_data?.keyframe_progress_percent ??
                             (() => {
-                              for (let i = (messages || []).length - 1; i >= 0; i--) {
-                                const m = messages[i] as any
-                                if (m?.event_type === 'keyframe_generation_progress' && m?.event_data) {
+                              for (let i = messages.length - 1; i >= 0; i--) {
+                                const m = messages[i]
+                                if (!m) continue
+                                if (m.event_type === 'keyframe_generation_progress' && m.event_data) {
                                   const c = m.event_data.completed
                                   const t = m.event_data.total
-                                  return t > 0 ? Math.round((c / t) * 100) : 0
+                                  return typeof t === 'number' && typeof c === 'number' && t > 0 ? Math.round((c / t) * 100) : 0
                                 }
                               }
                               return 0
-                            })(),
-                        ) || 0
+                            })()) || 0
                         const keyframeReflectionCompleted = msg.event_data?.keyframe_reflection_completed
                         const keyframeReflectionTotal = msg.event_data?.keyframe_reflection_total
-                        const keyframeReflectionProgressPercent = Number(
-                          msg.event_data?.keyframe_reflection_progress_percent ??
+                        const keyframeReflectionProgressPercent = (msg.event_data?.keyframe_reflection_progress_percent ??
                           (keyframeReflectionTotal != null && keyframeReflectionTotal > 0 && keyframeReflectionCompleted != null
                             ? Math.round((keyframeReflectionCompleted / keyframeReflectionTotal) * 100)
                             : (() => {
-                              for (let i = (messages || []).length - 1; i >= 0; i--) {
-                                const m = messages[i] as any
-                                if (m?.event_type === 'keyframe_reflection_progress' && m?.event_data) {
+                              for (let i = messages.length - 1; i >= 0; i--) {
+                                const m = messages[i]
+                                if (!m) continue
+                                if (m.event_type === 'keyframe_reflection_progress' && m.event_data) {
                                   const c = m.event_data.completed
                                   const t = m.event_data.total
-                                  return t > 0 ? Math.round((c / t) * 100) : 0
+                                  return typeof t === 'number' && typeof c === 'number' && t > 0 ? Math.round((c / t) * 100) : 0
                                 }
                               }
                               return 0
-                            })()),
-                        ) || 0
-                        const todoStatus = msg.event_data?.status // TaskStatus.CANCELLED | TaskStatus.FAILED | TaskStatus.INTERRUPTED | undefined
+                            })())) || 0
+                        const todoStatus = msg.event_data?.status
                         const isCancelled = todoStatus === TaskStatus.CANCELLED
                         const isFailed = todoStatus === TaskStatus.FAILED
                         const isInterrupted = todoStatus === TaskStatus.INTERRUPTED || todoStatus === 'interrupted'
 
                         // ✅ 支持从后端恢复的 completed_steps
                         const completedSteps = new Set<string>(msg.event_data?.completed_steps || [])
-                        const todoRunType = msg.event_data?.run_type
-                        const isCurrentRegenerateTask = msg.event_data?.is_regenerate_task || (typeof todoRunType === 'string' && todoRunType.startsWith('regenerate_'))
-                        const hasAnyOrCompleted = (types: string[]) => {
-                          if (isCurrentRegenerateTask) {
-                            return types.some(t => completedSteps.has(t))
-                          }
-                          // 优先检查 completed_steps（从后端恢复的进度）
-                          if (completedSteps.size > 0 && types.some(t => completedSteps.has(t))) {
-                            return true
-                          }
-                          // 否则检查当前会话的 eventTypes
-                          return types.some(t => eventTypes.has(t))
-                        }
+
+                        const hasAnyOrCompleted = completionPredicate(eventTypes, completedSteps)
 
                         // ✅ 关键帧反思进行中时「分镜」不算 done，这样 active 和百分比都显示在分镜下而非镜头下
                         const reflTotalForDone = keyframeReflectionTotal
@@ -2612,7 +2605,7 @@ export const MessageArea = ({
                           hasAnyOrCompleted(['keyframes_generated']) &&
                         !(Number(reflTotalForDone) > 0 && reflDoneForDone < Number(reflTotalForDone))
 
-                        const wfMsgExpanded = pickWorkflowStateMessageForTodo(messages, currentRunId) as any
+                        const wfMsgExpanded = pickWorkflowStateMessageForTodo(messages, currentRunId)
                         const wfSrcExpanded = wfMsgExpanded ? (wfMsgExpanded.event_data ?? wfMsgExpanded) : null
                         const pathEntriesExpanded =
                           wfSrcExpanded && Array.isArray(wfSrcExpanded.path) && wfSrcExpanded.path.length > 0
@@ -2627,24 +2620,27 @@ export const MessageArea = ({
                         )
 
                         const firstNotDone = steps.findIndex(s => !s.done)
-                        const activeIdx = effectiveIsGenerating && !isCancelled && !isFailed && !isInterrupted ? (firstNotDone === -1 ? steps.length - 1 : firstNotDone) : -1
+                        const activeIdx = effectiveIsGenerating && !isCancelled && !isFailed && !isInterrupted
+                          ? (firstNotDone === -1 ? steps.length - 1 : firstNotDone)
+                          : -1
                         const allDone = steps.every(s => s.done)
-                        const storyboardsStepIdx = steps.findIndex(s => s.id === 'storyboards')
-                        const shotsStepIdx = steps.findIndex(s => s.id === 'shots')
-                        const isActiveStoryboards = activeIdx === storyboardsStepIdx && !allDone
-                        const isActiveShots = activeIdx === shotsStepIdx && !allDone
+
+
+
+
                         const kfTotal = keyframeTotal ?? effectiveKeyframeTotal
-                        const kfDone = keyframeCompleted ?? 0
+
                         const reflTotal = keyframeReflectionTotal
-                        const reflDone = keyframeReflectionCompleted ?? 0
+
                         const shotsTotalNum = shotsTotalForBar ?? 0
                         const shotsPct = Math.max(0, Math.min(100, shotsProgressPercentForBar))
                         let narrationCompleted = msg.event_data?.narration_completed
                         let narrationTotal = msg.event_data?.narration_total
                         if (narrationCompleted == null || narrationTotal == null) {
-                          for (let i = (messages || []).length - 1; i >= 0; i--) {
-                            const m = messages[i] as any
-                            if (m?.event_type === 'narration_generation_progress' && m?.event_data) {
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            const m = messages[i]
+                            if (!m) continue
+                            if (m.event_type === 'narration_generation_progress' && m.event_data) {
                               narrationCompleted = m.event_data.completed
                               narrationTotal = m.event_data.total
                               break
@@ -2652,7 +2648,7 @@ export const MessageArea = ({
                           }
                         }
                         const narrationPct = Number(narrationTotal) > 0 && narrationCompleted != null
-                          ? Math.max(0, Math.min(100, Math.round((Number(narrationCompleted) / Number(narrationTotal)) * 100 * 10) / 10))
+                          ? Math.max(0, Math.min(100, Math.round((narrationCompleted / Number(narrationTotal)) * 100 * 10) / 10))
                           : 0
                         const progressTitle =
                           allDone
@@ -2687,11 +2683,11 @@ export const MessageArea = ({
                               const isPending = !isCompleted && !isActive && !isCancelledOrFailed
                               // ✅ 只在收到对应 progress event（todo 里有 total > 0）且该步骤为当前 active 步时才展示 bar
                               //   （shots 的 total 会在 per_shot routing 阶段被提前 seed，需用 idx===activeIdx 防止「分镜」还在跑时镜头就显示 0/N）
-                              const showShotsProgress = step.id === 'shots' && idx === activeIdx && Number(shotsTotalNum) > 0 && !isCompleted && !isCancelled && !isFailed
+                              const showShotsProgress = step.id === 'shots' && idx === activeIdx && shotsTotalNum > 0 && !isCompleted && !isCancelled && !isFailed
                               const showStoryboardsProgress = step.id === 'storyboards' && idx === activeIdx && Number(kfTotal) > 0 && !isCompleted && !isCancelled && !isFailed
                               const showReflectionProgress = step.id === 'storyboards' && idx === activeIdx && Number(reflTotal) > 0 && !isCompleted && !isCancelled && !isFailed
                               const showNarrationProgress = step.id === 'narration' && idx === activeIdx && Number(narrationTotal) > 0 && !isCompleted && !isCancelled && !isFailed
-                              const showMusicCountdown = step.id === 'music' && isActive && !isCompleted && !isCancelled && !isFailed
+                              const showMusicCountdown = step.id === 'music' && isActive && !isCompleted
                               const keyframePct = Math.max(0, Math.min(100, keyframeProgressPercent))
                               const reflectionPct = Math.max(0, Math.min(100, keyframeReflectionProgressPercent))
 
@@ -2882,7 +2878,7 @@ export const MessageArea = ({
                         {/* Display images array - now expects objects with url and filename */}
                         {msg.event_data.images && msg.event_data.images.length > 0 && (
                           <div className="flex flex-wrap gap-2 pb-2">
-                            {msg.event_data.images.map((image: any, idx: number) => {
+                            {msg.event_data.images.map((image, idx: number) => {
                             // Support both old format (string) and new format (object with url)
                               const imageUrl = typeof image === 'string' ? image : image.url
                               const filename = typeof image === 'object' ? image.filename : undefined
@@ -2902,7 +2898,7 @@ export const MessageArea = ({
                         {/* Display audio files array - now expects objects with url and filename */}
                         {msg.event_data.audio_files && msg.event_data.audio_files.length > 0 && (
                           <div className="space-y-2 min-w-0">
-                            {msg.event_data.audio_files.map((audio: any, idx: number) => {
+                            {msg.event_data.audio_files.map((audio, idx: number) => {
                             // Support both old format (string) and new format (object with url)
                               const audioUrl = typeof audio === 'string' ? audio : audio.url
                               const filename = typeof audio === 'object' ? audio.filename : undefined
@@ -2920,7 +2916,7 @@ export const MessageArea = ({
                         {/* Display video files array - expects objects with url and filename */}
                         {msg.event_data.video_files && msg.event_data.video_files.length > 0 && (
                           <div className="space-y-2 min-w-0">
-                            {msg.event_data.video_files.map((video: any, idx: number) => {
+                            {msg.event_data.video_files.map((video, idx: number) => {
                             // Support both old format (string) and new format (object with url)
                               const videoUrl = typeof video === 'string' ? video : video.url
                               const filename = typeof video === 'object' ? video.filename : undefined
@@ -2955,7 +2951,7 @@ export const MessageArea = ({
               <div
                 ref={todoStickyRef}
                 className={`sticky bottom-0 z-10 pt-4 ${todoCollapsed ? 'cursor-pointer' : ''}`}
-                onClick={todoCollapsed ? () => setTodoCollapsed(false) : undefined}
+                onClick={todoCollapsed ? () =>{  setTodoCollapsed(false) } : undefined}
                 role={todoCollapsed ? 'button' : undefined}
                 title={todoCollapsed ? 'Expand' : undefined}
               >
@@ -2964,18 +2960,18 @@ export const MessageArea = ({
                     {(() => {
                       // ✅ 图片、音乐、故事、视频直生(video_gen)：显示简化的单一项 todo list（video_gen 对齐 image，不走 workflow 多步条）
                       if (agentType === 'image' || agentType === 'music' || agentType === 'story' || agentType === 'video_gen') {
-                        const todoStatus = (todoMessage as any)?.event_data?.status
+                        const todoStatus = (todoMessage).event_data?.status
                         const isCancelled = todoStatus === TaskStatus.CANCELLED
                         const isFailed = todoStatus === TaskStatus.FAILED
                         // ⭐ 当前任务仍在 running 时，即使之前轮次有 completion 事件也不算 done
                         const isTaskRunning = todoStatus === 'running' || todoStatus === TaskStatus.RUNNING || todoStatus === TaskStatus.QUEUED
                         const isDone = !isTaskRunning && (agentType === 'image'
-                          ? (messages || []).some((m: any) => m?.event_type === 'image_agent_generated')
+                          ? messages.some(m => m.event_type === 'image_agent_generated')
                           : agentType === 'music'
-                            ? (messages || []).some((m: any) => m?.event_type === 'music_agent_generated')
+                            ? messages.some(m => m.event_type === 'music_agent_generated')
                             : agentType === 'video_gen'
-                              ? (messages || []).some((m: any) => m?.event_type === 'video_agent_generated')
-                              : (messages || []).some((m: any) => m?.event_type === 'story_agent_generated'))
+                              ? messages.some(m => m.event_type === 'video_agent_generated')
+                              : messages.some(m => m.event_type === 'story_agent_generated'))
 
                         const stepName = agentType === 'image'
                           ? (t('imageGenerating') || '图片生成中')
@@ -3045,40 +3041,39 @@ export const MessageArea = ({
                       }
 
                       // ✅ 视频生成：显示完整的多步骤 todo list
-                      const eventTypes = new Set((messages || []).map(m => m.event_type).filter(Boolean) as string[])
-                      const hasAny = (types: string[]) => types.some(t => eventTypes.has(t))
-                      const shotsProgressPercent = Number(
-                        (todoMessage as any)?.event_data?.progress_percent ??
+                      const eventTypes = new Set(messages.map(m => m.event_type).filter(Boolean) as string[])
+
+                      const shotsProgressPercent = ((todoMessage).event_data?.progress_percent ??
                           (() => {
-                            for (let i = (messages || []).length - 1; i >= 0; i--) {
-                              const m = messages[i] as any
-                              if (m?.event_type === 'video_generation_progress') {
-                                return m?.event_data?.progress_percent ?? 0
+                            for (let i = messages.length - 1; i >= 0; i--) {
+                              const m = messages[i]
+                              if (!m) continue
+                              if (m.event_type === 'video_generation_progress') {
+                                return m.event_data?.progress_percent ?? 0
                               }
                             }
                             return 0
-                          })(),
-                      ) || 0
-                      const shotsCompleted = (todoMessage as any)?.event_data?.completed
-                      const shotsTotal = (todoMessage as any)?.event_data?.total
+                          })()) || 0
+                      const shotsCompleted = (todoMessage).event_data?.completed
+                      const shotsTotal = (todoMessage).event_data?.total
                       const kfApiSticky = keyframeTodoFallbackFromApi(keyframesData)
-                      let keyframeCompleted = (todoMessage as any)?.event_data?.keyframe_completed
-                      let keyframeTotal = (todoMessage as any)?.event_data?.keyframe_total
+                      let keyframeCompleted = (todoMessage).event_data?.keyframe_completed
+                      let keyframeTotal = (todoMessage).event_data?.keyframe_total
                       if (kfApiSticky && kfApiSticky.total > 0) {
                         keyframeCompleted = kfApiSticky.completed
                         keyframeTotal = kfApiSticky.total
                       }
-                      const totalFromScenes = Number.isFinite(scenesCount) ? scenesCount : undefined
+                      const totalFromScenes = typeof scenesCount === 'number' && Number.isFinite(scenesCount) ? scenesCount : undefined
                       const effectiveShotsTotal = (shotsTotal != null && shotsTotal > 0)
                         ? shotsTotal
                         : totalFromScenes
                       const vidApiStickyTodo = videoTodoFallbackFromApi(videosData, scenesCount)
                       let shotsProgressPercentSticky = shotsProgressPercent
                       let shotsCompletedSticky: number | undefined =
-                        shotsCompleted !== undefined && shotsCompleted !== null ? Number(shotsCompleted) : undefined
+                        shotsCompleted
                       let shotsTotalSticky: number | undefined =
-                        effectiveShotsTotal !== undefined && Number(effectiveShotsTotal) > 0
-                          ? Number(effectiveShotsTotal)
+                        effectiveShotsTotal !== undefined && effectiveShotsTotal > 0
+                          ? effectiveShotsTotal
                           : undefined
                       if (vidApiStickyTodo && vidApiStickyTodo.total > 0) {
                         shotsCompletedSticky = vidApiStickyTodo.completed
@@ -3086,49 +3081,39 @@ export const MessageArea = ({
                         shotsProgressPercentSticky =
                           Math.round((vidApiStickyTodo.completed / vidApiStickyTodo.total) * 100 * 10) / 10
                       }
-                      const effectiveKeyframeTotal = (keyframeTotal != null && keyframeTotal > 0)
-                        ? keyframeTotal
-                        : totalFromScenes
-                      const keyframeProgressPercent = Number(
-                        keyframeTotal != null && keyframeTotal > 0 && keyframeCompleted != null
-                          ? Math.round((keyframeCompleted / keyframeTotal) * 100 * 10) / 10
-                          : (todoMessage as any)?.event_data?.keyframe_progress_percent ??
+
+                      const keyframeProgressPercent = (keyframeTotal != null && keyframeTotal > 0 && keyframeCompleted != null
+                        ? Math.round((keyframeCompleted / keyframeTotal) * 100 * 10) / 10
+                        : (todoMessage).event_data?.keyframe_progress_percent ??
                             (() => {
-                              for (let i = (messages || []).length - 1; i >= 0; i--) {
-                                const m = messages[i] as any
-                                if (m?.event_type === 'keyframe_generation_progress' && m?.event_data) {
+                              for (let i = messages.length - 1; i >= 0; i--) {
+                                const m = messages[i]
+                                if (!m) continue
+                                if (m.event_type === 'keyframe_generation_progress' && m.event_data) {
                                   const c = m.event_data.completed
                                   const t = m.event_data.total
-                                  return t > 0 ? Math.round((c / t) * 100) : 0
+                                  return typeof t === 'number' && typeof c === 'number' && t > 0 ? Math.round((c / t) * 100) : 0
                                 }
                               }
                               return 0
-                            })(),
-                      ) || 0
-                      const todoStatus = (todoMessage as any)?.event_data?.status // "cancelled" | "failed" | "interrupted" | undefined
+                            })()) || 0
+                      const todoStatus = (todoMessage).event_data?.status // "cancelled" | "failed" | "interrupted" | undefined
                       const isCancelled = todoStatus === 'cancelled'
                       const isFailed = todoStatus === 'failed'
                       const isInterrupted = todoStatus === 'interrupted'
 
                       // ✅ 支持从后端恢复的 completed_steps
-                      const completedSteps = new Set<string>((todoMessage as any)?.event_data?.completed_steps || [])
-                      const hasAnyOrCompleted = (types: string[]) => {
-                        // 优先检查 completed_steps（从后端恢复的进度）
-                        if (completedSteps.size > 0 && types.some(t => completedSteps.has(t))) {
-                          return true
-                        }
-                        // 否则检查当前会话的 eventTypes
-                        return types.some(t => eventTypes.has(t))
-                      }
+                      const completedSteps = new Set<string>((todoMessage).event_data?.completed_steps || [])
+                      const hasAnyOrCompleted = completionPredicate(eventTypes, completedSteps)
 
-                      const reflCompleted = (todoMessage as any)?.event_data?.keyframe_reflection_completed ?? 0
-                      const reflTotal = (todoMessage as any)?.event_data?.keyframe_reflection_total
+                      const reflCompleted = (todoMessage).event_data?.keyframe_reflection_completed ?? 0
+                      const reflTotal = (todoMessage).event_data?.keyframe_reflection_total
                       // ✅ 关键帧反思进行中时「分镜」不算 done，这样 active 和百分比都显示在分镜下而非镜头下
                       const storyboardsActuallyDoneCollapsed =
                         hasAnyOrCompleted(['keyframes_generated']) &&
-                        !(Number(reflTotal) > 0 && Number(reflCompleted) < Number(reflTotal))
+                        !(Number(reflTotal) > 0 && reflCompleted < Number(reflTotal))
 
-                      const wfMsgCollapsed = pickWorkflowStateMessageForTodo(messages, currentRunId) as any
+                      const wfMsgCollapsed = pickWorkflowStateMessageForTodo(messages, currentRunId)
                       const wfSrcCollapsed = wfMsgCollapsed ? (wfMsgCollapsed.event_data ?? wfMsgCollapsed) : null
                       const pathEntriesCollapsed =
                         wfSrcCollapsed && Array.isArray(wfSrcCollapsed.path) && wfSrcCollapsed.path.length > 0
@@ -3143,14 +3128,16 @@ export const MessageArea = ({
                       )
 
                       const firstNotDone = steps.findIndex(s => !s.done)
-                      const activeIdx = effectiveIsGenerating && !isCancelled && !isFailed && !isInterrupted ? (firstNotDone === -1 ? steps.length - 1 : firstNotDone) : -1
+                      const activeIdx = effectiveIsGenerating && !isCancelled && !isFailed && !isInterrupted
+                        ? (firstNotDone === -1 ? steps.length - 1 : firstNotDone)
+                        : -1
                       const allDone = steps.every(s => s.done)
                       const activeStep = activeIdx >= 0 ? steps[activeIdx] : null
                       const collapsedPct = Math.max(0, Math.min(100, shotsProgressPercentSticky))
                       const collapsedKeyframePct = Math.max(0, Math.min(100, keyframeProgressPercent))
                       const collapsedReflectionPct = Math.max(0, Math.min(100,
-                        (todoMessage as any)?.event_data?.keyframe_reflection_progress_percent ??
-                        (Number(reflTotal) > 0 ? Math.round((Number(reflCompleted) / Number(reflTotal)) * 100) : 0),
+                        (todoMessage).event_data?.keyframe_reflection_progress_percent ??
+                        (Number(reflTotal) > 0 ? Math.round((reflCompleted / Number(reflTotal)) * 100) : 0),
                       ))
                       const shotsCompletedCollapsed = shotsCompletedSticky ?? 0
                       const shotsTotalCollapsed = shotsTotalSticky
@@ -3172,7 +3159,7 @@ export const MessageArea = ({
                               : (t('generatingYourVideo') || 'Generating your video...')
 
                       // ✅ 计算总剩余时间（参考 instant 页面的智能算法）
-                      const videoDuration = duration?.[0] || 30
+                      const videoDuration = duration[0] || 30
                       const initialEstimatedTime = calculateTotalEstimatedTime(videoDuration)
 
                       // 计算整体进度百分比（基于已完成的步骤）
@@ -3279,7 +3266,7 @@ export const MessageArea = ({
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={(e) => { e.stopPropagation(); onCancelGeneration?.() }}
+                                onClick={(e) => { e.stopPropagation(); onCancelGeneration() }}
                                 className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                               >
                                 <X className="w-3.5 h-3.5 mr-1" />
@@ -3324,11 +3311,11 @@ export const MessageArea = ({
                                           <span>{formatTime(musicCountdown)}</span>
                                         </div>
                                       )}
-                                      {!allDone && !isCancelled && !isFailed && effectiveIsGenerating && activeStep?.id !== 'music' && (totalRemainingTime > 0 || Number((activeStep as any)?.est_seconds) > 0) && (
+                                      {!allDone && !isCancelled && !isFailed && effectiveIsGenerating && activeStep?.id !== 'music' && (totalRemainingTime > 0 || Number(activeStep?.est_seconds) > 0) && (
                                         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                                           <Clock className="w-3 h-3" />
                                           {/* 总剩余时间>0 时显示总剩余；被估算耗尽(=0)时回退显示当前步骤预估 ~Xs，避免折叠态无时间 */}
-                                          <span>{totalRemainingTime > 0 ? formatTime(totalRemainingTime) : `~${formatTime(Number((activeStep as any).est_seconds))}`}</span>
+                                          <span>{totalRemainingTime > 0 ? formatTime(totalRemainingTime) : `~${formatTime(Number(activeStep?.est_seconds))}`}</span>
                                         </div>
                                       )}
                                       {!allDone && !isCancelled && !isFailed && showCollapsedShotsProgress && (
@@ -3375,7 +3362,7 @@ export const MessageArea = ({
                                 const stepShowShotsProgress = step.id === 'shots' && idx === activeIdx && hasShotsProgress && !isCompleted && !isCancelled && !isFailed
                                 const stepShowStoryboardsProgress = step.id === 'storyboards' && idx === activeIdx && hasKeyframeProgress && !hasReflectionProgress && !isCompleted && !isCancelled && !isFailed
                                 const stepShowReflectionProgress = step.id === 'storyboards' && idx === activeIdx && hasReflectionProgress && !isCompleted && !isCancelled && !isFailed
-                                const stepShowMusicCountdown = step.id === 'music' && isActive && !isCompleted && !isCancelled && !isFailed
+                                const stepShowMusicCountdown = step.id === 'music' && isActive && !isCompleted
                                 const shotsPct = Math.max(0, Math.min(100, collapsedPct))
                                 const kfPct = Math.max(0, Math.min(100, collapsedKeyframePct))
                                 const reflPct = Math.max(0, Math.min(100, collapsedReflectionPct))
@@ -3439,10 +3426,10 @@ export const MessageArea = ({
                                               <span>{formatTime(musicCountdown)}</span>
                                             </div>
                                           )}
-                                          {!isCompleted && !isCancelledOrFailed && (step as any).est_seconds > 0 &&
+                                          {!isCompleted && !isCancelledOrFailed && typeof step.est_seconds === 'number' && step.est_seconds > 0 &&
                                             !stepShowShotsProgress && !stepShowStoryboardsProgress &&
                                             !stepShowReflectionProgress && !stepShowMusicCountdown && (
-                                            <span className="text-[10px] text-muted-foreground/70">~{formatTime((step as any).est_seconds)}</span>
+                                            <span className="text-[10px] text-muted-foreground/70">~{formatTime(step.est_seconds)}</span>
                                           )}
                                           {isCompleted && <span className="text-[10px] text-primary ml-2">{t('stepDone')}</span>}
                                         </div>
@@ -3501,7 +3488,7 @@ export const MessageArea = ({
               <div className="flex justify-start min-w-0 items-start gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowCutiAvatarLightbox(true)}
+                  onClick={() =>{  setShowCutiAvatarLightbox(true) }}
                   className="mt-1 flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
                   title={t('da.composer.viewAvatar')}
                 >
@@ -3604,7 +3591,7 @@ export const MessageArea = ({
                       <button
                         key={`${item.label}-${i}`}
                         type="button"
-                        onClick={() => handleActionSuggestionButtonClick(item)}
+                        onClick={() =>{  handleActionSuggestionButtonClick(item) }}
                         disabled={isInputDisabled}
                         className={`group flex w-full items-center gap-3 px-4 text-left transition disabled:opacity-50 ${
                           isTopUp
@@ -3648,7 +3635,8 @@ export const MessageArea = ({
               </div>
             )}
             {/* 提示词引导按钮：Create 页用 PROMPT_MAPPINGS_FOR_CREATE_PAGE（不含首页 demo），只显示功能名称。有 hint 的项点击后只填入 display 并显示小字提示；无 hint 可点击即发送 */}
-            {showActionSuggestions && !suppressActionSuggestionsUI && agentSuggestionsEverReceived && latestActionSuggestions.length === 0 && !streamedSuggestions && PROMPT_MAPPINGS_FOR_CREATE_PAGE.length > 0 && (
+            {showActionSuggestions && !suppressActionSuggestionsUI && agentSuggestionsEverReceived &&
+              latestActionSuggestions.length === 0 && !streamedSuggestions && PROMPT_MAPPINGS_FOR_CREATE_PAGE.length > 0 && (
               <div className="flex flex-wrap gap-2 px-1 pb-2">
                 {PROMPT_MAPPINGS_FOR_CREATE_PAGE.map((m, i) => (
                   <Button
@@ -3736,7 +3724,7 @@ export const MessageArea = ({
                               variant="ghost"
                               size="sm"
                               className="h-6 w-6 p-0 rounded-full shrink-0 text-muted-foreground hover:text-foreground"
-                              onClick={() => onMessageChange('')}
+                              onClick={() =>{  onMessageChange('') }}
                               title={t('clear') || '清除'}
                             >
                               <X className="w-3.5 h-3.5" />
@@ -3763,39 +3751,40 @@ export const MessageArea = ({
                                 }
                                 return
                               }
-                              const isComposing = e.nativeEvent?.isComposing || (e.target as any).composing
+                              const isComposing = e.nativeEvent.isComposing || composingRef.current
                               if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                                 e.preventDefault()
                                 onSendMessage()
                               }
                             }}
-                            onCompositionStart={(e) => {
-                              (e.target as any).composing = true
+                            onCompositionStart={() => {
+                              composingRef.current = true
                             }}
-                            onCompositionEnd={(e) => {
-                              (e.target as any).composing = false
+                            onCompositionEnd={() => {
+                              composingRef.current = false
                             }}
                             onPaste={(e) => {
                               if (isInputDisabled || !onFileUpload) return
                               const clipboardData = e.clipboardData
-                              if (!clipboardData) return
+
                               const rawFiles: File[] = []
                               for (let i = 0; i < clipboardData.items.length; i++) {
                                 const item = clipboardData.items[i]
+                                if (!item) continue
                                 if (item.kind !== 'file') continue
                                 const file = item.getAsFile()
                                 if (file) rawFiles.push(normalizeClipboardFile(file))
                               }
                               if (rawFiles.length === 0) return
                               e.preventDefault()
-                              if (!onFileUpload) return
+
                               const { validFiles } = validateFiles(rawFiles, uploadedFiles, t)
                               if (validFiles.length > 0) {
                                 onFileUpload(validFiles)
                                 toast.success(
                                   validFiles.length === 1
                                     ? t('pastedImage')
-                                    : t('pastedImages').replace('{count}', String(validFiles.length)),
+                                    : t('pastedImages').replace('{count}', displayValue(validFiles.length)),
                                 )
                               }
                             }}
@@ -3908,7 +3897,7 @@ export const MessageArea = ({
                       ) : (
                         <div className="group relative z-10 inline-flex">
                           <Button
-                            onClick={() => onSendMessage()}
+                            onClick={() =>{  onSendMessage() }}
                             disabled={(!message.trim() && uploadedFiles.length === 0) || isInputDisabled || effectiveIsGenerating}
                             className="h-11 w-11 max-sm:h-9 max-sm:w-9 rounded-full p-0 flex-shrink-0 text-white disabled:opacity-50 disabled:cursor-not-allowed bg-[image:var(--chat-gradient-brand)] transition active:scale-95"
                           >
@@ -3938,7 +3927,7 @@ export const MessageArea = ({
           </>
         )}
         {/* Uploaded Files Display - 放在 pill 下方，与 0211 一致 */}
-        {uploadedFiles && uploadedFiles.length > 0 && (
+        {uploadedFiles.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2 overflow-x-hidden pb-2">
             {uploadedFiles.map((file, index) => (
               <FilePreview
@@ -3966,8 +3955,8 @@ export const MessageArea = ({
               <MessageSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
                 {interpolate(t('da.composer.storyboardChat'), {
-                  shot: selectedStoryboard.shot_number,
-                  version: selectedStoryboard.version_number,
+                  shot: selectedStoryboard.shot_number ?? '',
+                  version: selectedStoryboard.version_number ?? '',
                 })}
               </span>
             </div>
@@ -3985,7 +3974,7 @@ export const MessageArea = ({
                 className="flex-1 text-xs"
               />
               <Button
-                onClick={() => onStoryboardChatSend && onStoryboardChatSend()}
+                onClick={() => { onStoryboardChatSend?.() }}
                 disabled={!storyboardChatMessage.trim()}
                 size="sm"
                 className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"
@@ -4006,7 +3995,7 @@ export const MessageArea = ({
             <>
               {/* 顶部返回按钮（图片上方） */}
               <div className="shrink-0 flex items-center px-4 py-3 border-b border-white/10">
-                <button type="button" onClick={() => { if (chatSplitMode) { setChatSplitMode(false); setChatSplitTiles(null); setChatPreviewTile(null); setChatSplitError(null) } else resetChatImageDetail() }} className="p-2 rounded-full hover:bg-white/10 text-white flex items-center justify-center" aria-label={t('back' as any) || 'Back'}>
+                <button type="button" onClick={() => { if (chatSplitMode) { setChatSplitMode(false); setChatSplitTiles(null); setChatPreviewTile(null); setChatSplitError(null) } else resetChatImageDetail() }} className="p-2 rounded-full hover:bg-white/10 text-white flex items-center justify-center" aria-label={t('back') || 'Back'}>
                   <ArrowLeft className="w-5 h-5" />
                 </button>
               </div>
@@ -4019,7 +4008,7 @@ export const MessageArea = ({
                     </div>
                     {/* 右侧竖排操作：图标+文字，与关闭按钮横向居中对齐 */}
                     <div className="absolute right-3 top-[34px] flex flex-col gap-5 z-10">
-                      <button type="button" onClick={() => setChatSplitMode(true)} className="flex flex-col items-center gap-1 text-white hover:opacity-80">
+                      <button type="button" onClick={() =>{  setChatSplitMode(true) }} className="flex flex-col items-center gap-1 text-white hover:opacity-80">
                         <Scissors className="w-5 h-5" />
                         <span className="text-xs">{t('splitCollage')}</span>
                       </button>
@@ -4049,10 +4038,10 @@ export const MessageArea = ({
                       gridPresets={CHAT_GRID_PRESETS}
                       splitRows={chatSplitRows}
                       splitCols={chatSplitCols}
-                      onRowsChange={rows => setChatSplitRows(rows)}
-                      onColsChange={cols => setChatSplitCols(cols)}
+                      onRowsChange={(rows) =>{  setChatSplitRows(rows) }}
+                      onColsChange={(cols) =>{  setChatSplitCols(cols) }}
                       onPresetSelect={(rows, cols) => { setChatSplitRows(rows); setChatSplitCols(cols) }}
-                      onSplit={handleChatSplitCollage}
+                      onSplit={asyncEvent(handleChatSplitCollage)}
                       isSplitting={chatSplitSplitting}
                       splitError={chatSplitError}
                       splitTiles={chatSplitTiles}
@@ -4072,7 +4061,7 @@ export const MessageArea = ({
               {/* 底部双按钮：下载(白色)、分享(粉紫色) */}
               {!chatSplitMode && (
                 <div className="shrink-0 flex gap-3 px-4 py-4 pb-6 border-t border-white/10">
-                  <Button type="button" className="flex-1 h-12 bg-white text-gray-900 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-2" onClick={() => handleChatImageDownload(chatImageDetail)}>
+                  <Button type="button" className="flex-1 h-12 bg-white text-gray-900 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-2" onClick={asyncEvent(() => handleChatImageDownload(chatImageDetail))}>
                     <Download className="w-4 h-4" />
                     <span>{t('save')}</span>
                   </Button>
@@ -4090,14 +4079,14 @@ export const MessageArea = ({
                       sideOffset={8}
                     >
                       <DropdownMenuItem
-                        onClick={handleCopyLink}
+                        onClick={asyncEvent(handleCopyLink)}
                         className="cursor-pointer rounded-lg px-4 py-3 text-base hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                       >
                         <Copy className="w-5 h-5 mr-3 text-gray-600 dark:text-gray-400" />
                         <span className="font-medium">{t('copyLink')}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={handleShareDirectly}
+                        onClick={asyncEvent(handleShareDirectly)}
                         className="cursor-pointer rounded-lg px-4 py-3 text-base hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                       >
                         <Share2 className="w-5 h-5 mr-3 text-gray-600 dark:text-gray-400" />
@@ -4161,7 +4150,7 @@ export const MessageArea = ({
                           </span>
                           <Button
                             variant="outline" size="icon" className="w-7 h-7 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600"
-                            onClick={() => setChatSplitRows(Math.max(1, chatSplitRows - 1))}
+                            onClick={() =>{  setChatSplitRows(Math.max(1, chatSplitRows - 1)) }}
                             disabled={chatSplitRows <= 1}
                           >
                             <Minus className="w-3 h-3 text-gray-900 dark:text-gray-100" />
@@ -4169,7 +4158,7 @@ export const MessageArea = ({
                           <span className="text-sm font-medium w-6 text-center text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 px-2 py-1 rounded">{chatSplitRows}</span>
                           <Button
                             variant="outline" size="icon" className="w-7 h-7 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600"
-                            onClick={() => setChatSplitRows(Math.min(10, chatSplitRows + 1))}
+                            onClick={() =>{  setChatSplitRows(Math.min(10, chatSplitRows + 1)) }}
                             disabled={chatSplitRows >= 10}
                           >
                             <Plus className="w-3 h-3 text-gray-900 dark:text-gray-100" />
@@ -4182,7 +4171,7 @@ export const MessageArea = ({
                           </span>
                           <Button
                             variant="outline" size="icon" className="w-7 h-7 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600"
-                            onClick={() => setChatSplitCols(Math.max(1, chatSplitCols - 1))}
+                            onClick={() =>{  setChatSplitCols(Math.max(1, chatSplitCols - 1)) }}
                             disabled={chatSplitCols <= 1}
                           >
                             <Minus className="w-3 h-3 text-gray-900 dark:text-gray-100" />
@@ -4190,7 +4179,7 @@ export const MessageArea = ({
                           <span className="text-sm font-medium w-6 text-center text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 px-2 py-1 rounded">{chatSplitCols}</span>
                           <Button
                             variant="outline" size="icon" className="w-7 h-7 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600"
-                            onClick={() => setChatSplitCols(Math.min(10, chatSplitCols + 1))}
+                            onClick={() =>{  setChatSplitCols(Math.min(10, chatSplitCols + 1)) }}
                             disabled={chatSplitCols >= 10}
                           >
                             <Plus className="w-3 h-3 text-gray-900 dark:text-gray-100" />
@@ -4201,7 +4190,7 @@ export const MessageArea = ({
                       {/* Split button */}
                       <Button
                         className="w-full"
-                        onClick={handleChatSplitCollage}
+                        onClick={asyncEvent(handleChatSplitCollage)}
                         disabled={chatSplitSplitting}
                       >
                         {chatSplitSplitting ? (
@@ -4225,13 +4214,13 @@ export const MessageArea = ({
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">{chatSplitTiles.length} {t('imagesSplit')}</span>
-                        <Button size="sm" onClick={async () => { const base = chatImageDetail.title.replace(/\s+/g, '_'); await downloadAllTiles(chatSplitTiles, base) }}>
+                        <Button size="sm" onClick={asyncEvent(async () => { const base = chatImageDetail.title.replace(/\s+/g, '_'); await downloadAllTiles(chatSplitTiles, base) })}>
                           <Download className="w-4 h-4 mr-2" />{t('downloadAll')}
                         </Button>
                       </div>
                       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${chatSplitCols}, 1fr)` }}>
                         {chatSplitTiles.map(tile => (
-                          <div key={tile.index} className="relative rounded-lg overflow-hidden border border-border cursor-pointer hover:ring-2 hover:ring-primary/50" onClick={() => setChatPreviewTile(tile)}>
+                          <div key={tile.index} className="relative rounded-lg overflow-hidden border border-border cursor-pointer hover:ring-2 hover:ring-primary/50" onClick={() =>{  setChatPreviewTile(tile) }}>
                             <img src={tile.dataUrl} alt={`${tile.index + 1}`} className="w-full h-auto object-contain" />
                             <span className="absolute top-1 left-1 bg-black/60 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{tile.index + 1}</span>
                           </div>
@@ -4251,14 +4240,14 @@ export const MessageArea = ({
                       </>
                     ) : (
                       <>
-                        <Button variant="outline" size="sm" onClick={() => setChatSplitMode(true)}>
+                        <Button variant="outline" size="sm" onClick={() =>{  setChatSplitMode(true) }}>
                           <Scissors className="w-4 h-4 mr-2" />{t('splitCollage')}
                         </Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={() => { setChatShareDialog(true) }}>
                             <Share2 className="w-4 h-4 mr-2" />{t('shareToFriends')}
                           </Button>
-                          <Button size="sm" onClick={() => handleChatImageDownload(chatImageDetail)}>
+                          <Button size="sm" onClick={asyncEvent(() => handleChatImageDownload(chatImageDetail))}>
                             <Download className="w-4 h-4 mr-2" />{t('download')}
                           </Button>
                         </div>
@@ -4304,7 +4293,7 @@ export const MessageArea = ({
           </DialogHeader>
           {chatImageDetail && (
             <>
-              <Tabs value={chatShareMode} onValueChange={v => setChatShareMode(v as 'normal' | 'gift')} className="px-4">
+              <Tabs value={chatShareMode} onValueChange={(v) =>{  setChatShareMode(v as 'normal' | 'gift') }} className="px-4">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="normal">{t('shareModeNormal')}</TabsTrigger>
                   <TabsTrigger value="gift">{t('shareModeGift')}</TabsTrigger>
@@ -4340,26 +4329,26 @@ export const MessageArea = ({
                 </TabsContent>
               </Tabs>
               <div className="p-4 pt-2 flex justify-end gap-2 border-t">
-                <Button size="sm" variant="outline" onClick={async () => {
+                <Button size="sm" variant="outline" onClick={asyncEvent(async () => {
                   try {
                     const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
                     const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(chatImageDetail.title)}`
                     await navigator.clipboard.writeText(shareUrl)
                     toast.success(t('copyLinkSuccess'))
                   } catch (e) {
-                    toast.error(String(e))
+                    toast.error(displayValue(e))
                   }
-                }}>
+                })}>
                   {t('copyLink')}
                 </Button>
-                <Button size="sm" onClick={async () => {
+                <Button size="sm" onClick={asyncEvent(async () => {
                   const shareTitle = chatImageDetail.title
                   const shareText = chatShareMode === 'gift' ? (t('giftForYou') || 'A gift for you') : (t('shareImageDescription') || 'Check out this image')
 
                   // 优先用带水印的图片文件直接分享
-                  if (chatShareWatermarkedBlob && navigator.share) {
+                  if (chatShareWatermarkedBlob && typeof navigator.share === 'function') {
                     const file = new File([chatShareWatermarkedBlob], `${shareTitle.replace(/\s+/g, '_')}.png`, { type: 'image/png' })
-                    if (navigator.canShare?.({ files: [file] })) {
+                    if (navigator.canShare({ files: [file] })) {
                       try {
                         await navigator.share({ title: shareTitle, text: shareText, files: [file] })
                         setChatShareDialog(false)
@@ -4374,19 +4363,19 @@ export const MessageArea = ({
                   // 降级：URL 分享
                   const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
                   const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
-                  if (navigator.share) {
+                  if (typeof navigator.share === 'function') {
                     try {
                       await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })
                       setChatShareDialog(false)
                     } catch (e) {
                       if ((e as Error).name !== 'AbortError') {
-                        try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch { toast.error(String(e)) }
+                        try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch { toast.error(displayValue(e)) }
                       }
                     }
                   } else {
-                    try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch (e) { toast.error(String(e)) }
+                    try { await navigator.clipboard.writeText(shareUrl); toast.success(t('copyLinkSuccess')) } catch (e) { toast.error(displayValue(e)) }
                   }
-                }}>
+                })}>
                   <Share2 className="w-4 h-4 mr-2" />{t('shareDirectly')}
                 </Button>
               </div>
@@ -4406,7 +4395,7 @@ export const MessageArea = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setShowSoraDialog(false)}>
+            <AlertDialogCancel onClick={() =>{  setShowSoraDialog(false) }}>
               {t('cancel') || 'Cancel'}
             </AlertDialogCancel>
             <AlertDialogAction

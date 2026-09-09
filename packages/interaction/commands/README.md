@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Plugin-owned human-command registry consumed by interactive UI adapters. The [plugin command registration Agent Note](../../../.agents/notes/implemented/feature/2026-07-19-plugin-command-registration.md) owns the boundary and dispatch contract.
+Plugin-owned human-command registry consumed by interactive UI adapters. The [plugin command registration Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-19-plugin-command-registration.md) owns the boundary and dispatch contract.
 
 ## Service contract
 

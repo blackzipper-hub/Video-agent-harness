@@ -56,14 +56,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${V2_BASE_URL}${path}`, {
     credentials: 'include',
     ...init,
-    headers: {
-      ...languageHeaders(!(init.body instanceof FormData)),
-      ...init.headers,
-    },
+    headers: requestHeaders(languageHeaders(!(init.body instanceof FormData)), init.headers),
   })
   const result = await parseResponse<T>(response, 'Deep Agent service returned an invalid response')
   if (!response.ok || result.code !== 0) {
-    throw new DeepAgentApiError(result.code ?? response.status, result.message || 'Deep Agent request failed')
+    throw new DeepAgentApiError(result.code, result.message || 'Deep Agent request failed')
   }
   return result.data
 }
@@ -72,20 +69,16 @@ async function studioRequest<T>(path: string, init: RequestInit = {}): Promise<T
   const response = await fetch(`${STUDIO_BASE_URL}${path}`, {
     credentials: 'include',
     ...init,
-    headers: {
-      ...languageHeaders(!(init.body instanceof FormData)),
-      ...init.headers,
-    },
+    headers: requestHeaders(languageHeaders(!(init.body instanceof FormData)), init.headers),
   })
   const result = await parseResponse<T>(response, 'Studio service returned an invalid response')
   if (!response.ok || result.code !== 0) {
-    throw new DeepAgentApiError(result.code ?? response.status, result.message || 'Studio request failed')
+    throw new DeepAgentApiError(result.code, result.message || 'Studio request failed')
   }
   return result.data
 }
 
-export const createIdempotencyKey = (): string =>
-  globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+export const createIdempotencyKey = createClientId
 
 export const deepAgentV2Client = {
   listRuns: (signal?: AbortSignal) => request<DeepAgentRunSummary[]>('/runs', { signal }),
@@ -215,7 +208,7 @@ export const deepAgentV2Client = {
 
   uploadFiles: async (files: File[]): Promise<DeepAgentInputFile[]> => {
     const form = new FormData()
-    files.forEach(file => form.append('files', file))
+    files.forEach((file) =>{  form.append('files', file) })
     const result = await request<{ files: DeepAgentInputFile[] }>('/uploads', {
       method: 'POST',
       body: form,
@@ -226,3 +219,5 @@ export const deepAgentV2Client = {
   eventsUrl: (runId: string, after: number) =>
     `${V2_BASE_URL}/runs/${encodeURIComponent(runId)}/events?after=${after}`,
 }
+import { requestHeaders } from '../../utils/requestHeaders'
+import { createClientId } from '../../utils/createClientId'

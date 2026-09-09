@@ -7,7 +7,7 @@
 
 已发布插件向 `ctx.tools` 提供的所有面向模型的工具：模型通过系统提示词组装获得的 `name`、`description` 和 JSON Schema `parameters`。本目录是[子系统页面](subsystems/core.zh.md)（类型及每页生成的 `cordis-surface` 接线区域）的补充；本页列出的是向 agent（智能体）提供的*工具*。
 
-英文源文件由系统**生成**，并通过 `pnpm run verify-tool-catalog`（`doc-sync`（文档同步门禁）的一部分）验证新鲜度；本中文文件作为经评审对侧通过双语配对维护。与 Cordis 目录（纯源码 AST 处理）不同，英文生成器会在真实上下文中**启动**每个工具插件并读取 `ctx.tools.schemas()`，因为工具 schema 无法通过静态分析完全确定，例如运行时展开的枚举、拼接的描述、由配置决定的名称以及使用原始 JSON Schema 的 MCP 工具。完整性守卫会 glob 匹配 `packages/*/tool-*`；如果生成器的启动 manifest（元数据清单）遗漏任何包，检查就会失败，因此新工具不会在无人察觉的情况下缺少文档。参见[工具 schema 目录 Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.zh.md)。
+英文源文件由系统**生成**，并通过 `pnpm run verify-tool-catalog`（`doc-sync`（文档同步门禁）的一部分）验证新鲜度；本中文文件作为经评审对侧通过双语配对维护。与 Cordis 目录（纯源码 AST 处理）不同，英文生成器会在真实上下文中**启动**每个工具插件并读取 `ctx.tools.schemas()`，因为工具 schema 无法通过静态分析完全确定，例如运行时展开的枚举、拼接的描述、由配置决定的名称以及使用原始 JSON Schema 的 MCP 工具。完整性守卫会 glob 匹配 `packages/*/tool-*`；如果生成器的启动 manifest（元数据清单）遗漏任何包，检查就会失败，因此新工具不会在无人察觉的情况下缺少文档。参见[工具 schema 目录 Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md)。
 
 范围：`packages/*/tool-*` 下已发布的产品工具，每个工具均使用其**默认**配置启动；但如果某个 Config 字段是**必填项**且没有默认值，生成器就必须作出选择，对应包的说明会记录本页展示的是哪个分支。注册的工具**名称**可以是加载时配置，例如 `tool-subagent` 的 `toolName`，因此部署可能以不同名称或额外名称提供某个包；如果存在随产品发布的别名，对应包的说明会予以记录。`examples/` 中的演示工具（例如 `echo`）不在范围内，这与 Cordis 目录仅涵盖包的范围一致。
 
@@ -19,12 +19,13 @@
 
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
+| `@cuti-ai/tool-video` | `video_artifact_list`, `video_artifact_select`, `video_build_cancel`, `video_build_retry_checkpoint`, `video_build_status`, `video_change_preview`, `video_checkpoint_inspect`, `video_checkpoint_resolve`, `video_edit_preview`, `video_export`, `video_plan_patch_capability_list`, `video_plan_patch_preview`, `video_plan_patch_submit`, `video_project_build`, `video_project_create`, `video_project_inspect`, `video_project_open`, `video_project_plan`, `video_rebuild_apply`, `video_skill_load`, `video_skill_read_resource`, `video_workflow_list`, `video_workflow_load` | `ctx.tools`, `ctx.videoRuntime` | `tool/call`, `tool/result` | - | 视频工具提供持久项目、版本化计划、产物编辑、检查点和构建。Provider 执行保留在 Runtime HTTP API 后端。 |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: code`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 Code Mode Agent Note）。在 `code` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
-| `@deepseek-ai/dsh-tool-cordis` | `cordis_define`、`cordis_inspect_list`、`cordis_inspect_query`、`cordis_inspect_self`、`cordis_run`、`cordis_stop`、`cordis_undefine` | `ctx.tools`、`ctx.dynamicCordisRunner` | `tool/call`、`tool/result`、`process-local dynamic package lifecycle` | - | 不在任何随产品发布的树中，需要显式选择启用；动态 Package 代码可以访问真实运行时，见 .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md。该工具集注入 `@deepseek-ai/dsh-cordis-host-runner` 提供的 `ctx.dynamicCordisRunner`，后者拥有定义注册表和 vm 沙箱；组合缺少它时这些工具不会激活。运行中的 Package 在停止、undefine 或 DSH 重启前可以注册**额外的**模型可见工具；发生这类工具集变化时，系统会记录完整且有变动的请求头。 |
+| `@deepseek-ai/dsh-tool-cordis` | `cordis_define`、`cordis_inspect_list`、`cordis_inspect_query`、`cordis_inspect_self`、`cordis_run`、`cordis_stop`、`cordis_undefine` | `ctx.tools`、`ctx.dynamicCordisRunner` | `tool/call`、`tool/result`、`process-local dynamic package lifecycle` | - | 不在任何随产品发布的树中，需要显式选择启用；动态 Package 代码可以访问真实运行时，见 <https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md>。该工具集注入 `@deepseek-ai/dsh-cordis-host-runner` 提供的 `ctx.dynamicCordisRunner`，后者拥有定义注册表和 vm 沙箱；组合缺少它时这些工具不会激活。运行中的 Package 在停止、undefine 或 DSH 重启前可以注册**额外的**模型可见工具；发生这类工具集变化时，系统会记录完整且有变动的请求头。 |
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 bash 工具；部署组合提供 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
@@ -45,6 +46,1581 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+
+<a id="cuti-aitool-video"></a>
+
+## `@cuti-ai/tool-video`
+
+### `video_artifact_list`
+
+列出当前选中且属于项目的产物，作为动态编辑输入。编辑已有视频前先调用此工具，仅使用返回的 artifactVersionId。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_artifact_select`
+
+选择一个产物版本，并原子创建新的不可变项目版本。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "version_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "version_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_cancel`
+
+请求取消持久视频构建。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_retry_checkpoint`
+
+重试失败语义检查点的自动投递，不重新生成媒体或创建新构建。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_build_status`
+
+读取持久视频构建的权威状态。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_change_preview`
+
+预览项目变更的确定性影响，不修改项目。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "change": {
+      "type": "string",
+      "description": "Concrete requested change."
+    },
+    "target_artifact_version_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "change",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_checkpoint_inspect`
+
+查看持久规划检查点。在活跃的持续构建中编辑时，使用 checkpoint_id="live" 打开或复用规划快照，无需等待任务完成。向 video_plan_patch_submit 提交返回的检查点 ID 和版本。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_checkpoint_resolve`
+
+使用创作字段和任务解决规划检查点。持续构建允许在无关任务运行时追加任务和取消待执行任务；分阶段构建使用其 Workflow 编译器。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "base_plan_revision": {
+      "type": "integer"
+    },
+    "base_spec_revision": {
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "video_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "Installed Video Runtime workflow id. Legacy Cuti workflow SKILL.md names are valid when installed."
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "description": "Optional helper Skills the user or a project lock explicitly pinned. Do not list helpers that a workflow named via video_skill_load.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "description": "Project-owned uploaded source artifact ids. Never invent ids or pass arbitrary URLs.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "description": "Workflow-specific structured parameters returned by video_workflow_load.",
+          "additionalProperties": true
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "appearance": {
+                "type": "string"
+              },
+              "clothing": {
+                "type": "string"
+              },
+              "personality": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "appearance"
+            ]
+          }
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "order": {
+                "type": "integer"
+              },
+              "duration_seconds": {
+                "type": "number"
+              },
+              "beat": {
+                "type": "string"
+              },
+              "visual_prompt": {
+                "type": "string"
+              },
+              "narration": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "character_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reference_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "transition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "duration_seconds",
+              "beat",
+              "visual_prompt"
+            ]
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "narration_voice": {
+              "type": "string"
+            },
+            "bgm_prompt": {
+              "type": "string"
+            },
+            "subtitles": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "narration_voice",
+            "bgm_prompt",
+            "subtitles"
+          ]
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "characters",
+        "shots",
+        "audio",
+        "providers",
+        "automation"
+      ]
+    },
+    "video_spec_patch": {
+      "type": "object",
+      "description": "Partial VideoSpec fields resolved at this checkpoint. Use instead of video_spec.",
+      "additionalProperties": true
+    },
+    "phase_inputs": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "proposed_steps": {
+      "type": "array",
+      "description": "Tasks may depend on existing tasks or tasks added in this patch. Only ready tasks execute. Use an empty list to acknowledge an update while other tasks continue.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "validate"
+            ]
+          },
+          "capability": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "input_artifact_version_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_artifact_id": {
+            "type": "string"
+          },
+          "output_artifact_type": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "step_id",
+          "action",
+          "capability"
+        ]
+      }
+    },
+    "cancel_step_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "goal_satisfied": {
+      "type": "boolean"
+    },
+    "waiting_for_input": {
+      "type": "boolean"
+    },
+    "response": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id",
+    "base_plan_revision",
+    "base_spec_revision",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_edit_preview`
+
+将 VideoSpec 创作编辑（角色、场景、镜头、音乐意图、时间线或重新生成）转换为可执行的增量计划，并保留选中的生成 Workflow。修改总时长时先查看项目，再同时提供 patch_timeline.patch.target_duration_seconds 和 patch.shots：调整已有镜头提供局部记录，新增镜头提供完整 id/order/duration_seconds/beat/visual_prompt。Runtime 不会拉伸片段或编造缺失创作内容。字幕、音频混合、提取、拼接或口型同步等后期操作使用 video_plan_patch_preview。此工具只预览影响与费用，用户确认前不要执行。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "patch_character",
+              "patch_scene",
+              "patch_shot",
+              "regenerate_artifact",
+              "replace_music",
+              "patch_timeline"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "artifactVersionId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {}
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "description",
+    "edits"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_export`
+
+按请求格式导出一个确定的不可变项目版本。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "mp4",
+        "mov",
+        "webm",
+        "project"
+      ]
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "format"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_capability_list`
+
+列出启用能力及 parameters_schema。在加载 Workflow 后、提出 PlanPatch 任务前调用。遵循各能力的 parameters_schema，不编造字段。add_tasks 仍须获得当前 Workflow 允许。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_preview`
+
+针对当前选中的项目产物预览 Harness 通用动态 PlanPatch。先调用 video_artifact_list 和 video_plan_patch_capability_list，再加载推荐 Skill。用 operation_step_id 串联步骤。此工具仅预览影响和费用；用户确认后才能调用 video_rebuild_apply。字幕、裁切、混音、拼接、抽帧或口型同步不应切换或重新编译生成 Workflow。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "role": {
+                  "type": "string"
+                },
+                "artifact_version_id": {
+                  "type": "string"
+                },
+                "operation_step_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {}
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "capability",
+          "inputs"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key",
+    "description",
+    "operations"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_plan_patch_submit`
+
+在任务完成、失败或用户编辑后提交 Cuti PlanPatch。其他任务运行时可追加任务与依赖，或取消待执行任务。每个视频生成任务的 parameters.prompt 必须是与时长匹配的完整 Provider 提示词，而非梗概；后续及修复片段应保留先前同类片段在任务参数和产物 generation_context 中体现的相关细节。已确定完整内容的规划文档使用 runtime.artifact.persist 持久化，不要调用 atomic.text.generate 重复 Agent 已完成的规划；后者仅用于独立文本生成或转换。用户编辑先以 checkpoint_id="live" 调用 video_checkpoint_inspect，再提交返回的 ID 与版本。goal_satisfied 要求可播放结果且没有活动任务。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "build_id": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "base_revision": {
+      "type": "integer"
+    },
+    "base_spec_revision": {
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "video_spec_patch": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "add_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_key": {
+            "type": "string"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "output_artifact_type": {
+            "type": "string"
+          },
+          "output_artifact_id": {
+            "type": "string"
+          },
+          "input_artifact_version_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "estimated_cost": {
+            "type": "number"
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "client_key",
+          "capability_id",
+          "objective"
+        ]
+      }
+    },
+    "cancel_task_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replace_failed_task_ids": {
+      "type": "object",
+      "description": "Map failed task IDs to new client_keys (string values) in add_tasks with corrected parameters. Runtime clones and rewires pending descendants atomically. For a failed Build, inspect checkpoint_id=live first; old work does not restart before this patch commits.",
+      "additionalProperties": true
+    },
+    "goal_satisfied": {
+      "type": "boolean"
+    },
+    "waiting_for_input": {
+      "type": "boolean"
+    },
+    "response": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "build_id",
+    "checkpoint_id",
+    "base_revision",
+    "base_spec_revision",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_build`
+
+在全自动模式下立即启动已持久化的首次视频 BuildPlan。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "plan_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_create`
+
+创建持久空视频项目，并绑定到当前 Session。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_inspect`
+
+查看当前视频项目版本、产物数量、活动构建和简洁状态。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_open`
+
+打开已有视频项目，返回当前不可变版本摘要。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Opaque video project id."
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_project_plan`
+
+创建视频 BuildPlan 的首个持久阶段。后续创作决策依赖生成媒体时优先提供 project_intent；project_intent 与 video_spec 必须且只能提供一个。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "project_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "brief": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "title",
+        "brief",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "providers",
+        "automation"
+      ]
+    },
+    "video_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "language_contract": {
+          "type": "object",
+          "description": "Persisted language choices. UI/content/speech/subtitles are independent; preserve this object in every PlanPatch.",
+          "additionalProperties": false,
+          "properties": {
+            "ui_locale": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "content_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "spoken_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "subtitle_language": {
+              "type": "string",
+              "enum": [
+                "zh-CN",
+                "en-US"
+              ]
+            },
+            "provider_prompt_language": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "zh-CN",
+                "en-US"
+              ]
+            }
+          },
+          "required": [
+            "ui_locale",
+            "content_language",
+            "spoken_language",
+            "subtitle_language",
+            "provider_prompt_language"
+          ]
+        },
+        "target_duration_seconds": {
+          "type": "number"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "Installed Video Runtime workflow id. Legacy Cuti workflow SKILL.md names are valid when installed."
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "activated_skill_ids": {
+          "type": "array",
+          "description": "Optional helper Skills the user or a project lock explicitly pinned. Do not list helpers that a workflow named via video_skill_load.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_asset_ids": {
+          "type": "array",
+          "description": "Project-owned uploaded source artifact ids. Never invent ids or pass arbitrary URLs.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflow_parameters": {
+          "type": "object",
+          "description": "Workflow-specific structured parameters returned by video_workflow_load.",
+          "additionalProperties": true
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "appearance": {
+                "type": "string"
+              },
+              "clothing": {
+                "type": "string"
+              },
+              "personality": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "appearance"
+            ]
+          }
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "order": {
+                "type": "integer"
+              },
+              "duration_seconds": {
+                "type": "number"
+              },
+              "beat": {
+                "type": "string"
+              },
+              "visual_prompt": {
+                "type": "string"
+              },
+              "narration": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "character_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reference_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "transition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "duration_seconds",
+              "beat",
+              "visual_prompt"
+            ]
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "narration_voice": {
+              "type": "string"
+            },
+            "bgm_prompt": {
+              "type": "string"
+            },
+            "subtitles": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "narration_voice",
+            "bgm_prompt",
+            "subtitles"
+          ]
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "video": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "music": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "video",
+            "image",
+            "music"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic"
+              ]
+            },
+            "max_artifact_retries": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "max_artifact_retries"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "language",
+        "language_contract",
+        "target_duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "workflow_id",
+        "style_id",
+        "characters",
+        "shots",
+        "audio",
+        "providers",
+        "automation"
+      ]
+    }
+  },
+  "required": [
+    "project_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_rebuild_apply`
+
+针对确定的基础项目版本执行已批准的重建计划。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "base_project_version_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "plan_id",
+    "base_project_version_id",
+    "idempotency_key"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_skill_load`
+
+Skill 被选中、被其他 Skill 点名或被用户明确请求后，加载其完整 Markdown 指令。返回 resourceOwnerSkillId 和资源路径；读取每个路径时，必须向 video_skill_read_resource 传入该确切所有者 ID。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "skill_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "skill_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_skill_read_resource`
+
+当 Skill 指令要求时，读取其一个内置文本文件。传入随路径返回的 resourceOwnerSkillId，不能用依赖 Skill 或最近加载的 Skill ID 替代。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "skill_id": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "skill_id",
+    "path"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_workflow_list`
+
+规划前列出 Video Runtime Workflow。自动模式只选择可用、用户可选且描述匹配请求的 Workflow。不要使用隐藏兼容 Workflow 或编造编译器。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+### `video_workflow_load`
+
+加载所选可用视频 Workflow 的权威指令和执行约定，在构造 VideoSpec 前调用。然后为返回的每个 skillDependencies 及指令额外要求的 Skill 调用 video_skill_load。资源路径属于 resourceOwnerSkillId（通常是 Workflow ID），不属于最近加载的依赖。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workflow_id"
+  ]
+}
+```
+
+来源： [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/src/index.ts)
+
+视频工具提供持久项目、版本化计划、产物编辑、检查点和构建。Provider 执行保留在 Runtime HTTP API 后端。
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -503,7 +2079,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 来源：[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)
 
-不在任何随产品发布的树中，需要显式选择启用；动态 Package 代码可以访问真实运行时，见 .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md。该工具集注入 `@deepseek-ai/dsh-cordis-host-runner` 提供的 `ctx.dynamicCordisRunner`，后者拥有定义注册表和 vm 沙箱；组合缺少它时这些工具不会激活。运行中的 Package 在停止、undefine 或 DSH 重启前可以注册**额外的**模型可见工具；发生这类工具集变化时，系统会记录完整且有变动的请求头。
+不在任何随产品发布的树中，需要显式选择启用；动态 Package 代码可以访问真实运行时，见 <https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md>。该工具集注入 `@deepseek-ai/dsh-cordis-host-runner` 提供的 `ctx.dynamicCordisRunner`，后者拥有定义注册表和 vm 沙箱；组合缺少它时这些工具不会激活。运行中的 Package 在停止、undefine 或 DSH 重启前可以注册**额外的**模型可见工具；发生这类工具集变化时，系统会记录完整且有变动的请求头。
 
 <a id="deepseek-aidsh-tool-bash-persistent"></a>
 

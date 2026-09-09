@@ -176,7 +176,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/video${path}`, {
     credentials: 'include',
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init.headers },
+    headers: requestHeaders({ 'Content-Type': 'application/json' }, init.headers),
   })
   const payload = await response.json().catch(() => null) as { data?: T; detail?: string } | null
   if (!response.ok || payload?.data === undefined) {
@@ -292,3 +292,4 @@ export const videoRuntimeClient = {
     }),
   }),
 }
+import { requestHeaders } from '../../utils/requestHeaders'

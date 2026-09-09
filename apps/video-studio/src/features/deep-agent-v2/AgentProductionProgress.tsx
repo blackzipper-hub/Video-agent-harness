@@ -1,3 +1,4 @@
+import { displayValue } from '@/utils/displayValue'
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, Wrench } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
@@ -26,7 +27,7 @@ function nestedCallId(payload: Record<string, unknown>): string {
   if (!message || typeof message !== 'object') return ''
   const source = (message as Record<string, unknown>).source
   return source && typeof source === 'object'
-    ? String((source as Record<string, unknown>).callId || '')
+    ? displayValue((source as Record<string, unknown>).callId || '')
     : ''
 }
 
@@ -84,8 +85,8 @@ export function AgentProductionProgress({
   )
   const tools = events.filter(event => event.type === 'agent.tool.started')
     .map(event => ({
-      id: String(event.payload.callId || event.id),
-      name: String(event.payload.tool || event.payload.name || 'tool'),
+      id: displayValue(event.payload.callId || event.id),
+      name: displayValue(event.payload.tool || event.payload.name || 'tool'),
     }))
     .slice(-6)
   const hasBuildTool = tools.some(tool => tool.name === 'video_project_build')
@@ -142,7 +143,7 @@ export function AgentProductionProgress({
                 aria-expanded={expanded}
                 aria-label={expanded ? t('da.progress.collapse') : t('da.progress.expand')}
                 title={expanded ? t('da.progress.collapse') : t('da.progress.expand')}
-                onClick={() => setExpanded(value => !value)}
+                onClick={() =>{  setExpanded(value => !value) }}
               >
                 {expanded ? (
                   <ChevronUp className="h-4 w-4" />

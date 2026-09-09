@@ -4,7 +4,7 @@
 
 超时的**时序与分类**部分：一个零依赖纯函数库（无运行时 harness 依赖），由每个需要限制调用方超时提示、启动 deadline，并在之后区分「已超时」与「已取消」的能力共享。
 
-它**不负责终止**。它发出的信号只会*通知*；真正停止工作仍由各能力负责，因为机制各不相同：bash 对操作系统进程组发送 SIGKILL，web 关闭 `fetch` 套接字，没有任何共享层能够承担全部终止机制。[Agent Note](../../../.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.zh.md) 将边界划定为：共享时序/分类，将强制终止保留在本地。
+它**不负责终止**。它发出的信号只会*通知*；真正停止工作仍由各能力负责，因为机制各不相同：bash 对操作系统进程组发送 SIGKILL，web 关闭 `fetch` 套接字，没有任何共享层能够承担全部终止机制。[Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.md) 将边界划定为：共享时序/分类，将强制终止保留在本地。
 
 它是**库，而非服务或插件**：没有 `ctx`，不注册任何内容，不持有状态，也不发出事件。「超时服务」必须了解如何停止每项能力的工作，这正是微内核要排除在共享层之外的知识。
 

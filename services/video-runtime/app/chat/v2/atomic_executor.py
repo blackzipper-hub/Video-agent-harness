@@ -377,7 +377,10 @@ async def execute_atomic(
         return str(result.task_id or operation_id), {"title": title, "summary": result.message or title, "uri": clip.audio_url, "metadata": metadata}
 
     if task.capability_id == "atomic.video.generate":
-        from app.integrations.providers.provider_bridge import generate_video
+        from app.integrations.providers.provider_bridge import (
+            generate_video,
+            normalize_video_frame_inputs,
+        )
 
         profile = dict(params)
         profile.pop("workflow_parameters", None)
@@ -440,6 +443,7 @@ async def execute_atomic(
             ),
             _selected_urls(selected, _AUDIO_ARTIFACT_TYPES),
         )
+        profile = normalize_video_frame_inputs(profile)
         result = await generate_video(profile, on_remote_submitted=on_remote_submitted)
         uri = result.get("video_url") or result.get("uri")
         if not uri:

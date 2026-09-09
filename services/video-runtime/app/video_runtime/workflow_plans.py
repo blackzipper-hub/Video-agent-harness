@@ -131,6 +131,12 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
 def validate_original_cuti_workflow_contract(workflow: WorkflowSpec) -> None:
     """Reject migrated Workflow metadata that no longer matches Cuti's source."""
     expected = ORIGINAL_CUTI_WORKFLOW_CONTRACTS.get(workflow.skill_name)
+    if workflow.skill_name == "cinematic":
+        # A new derivative, not a claimed original Cuti workflow.
+        expected = {
+            **ORIGINAL_CUTI_WORKFLOW_CONTRACTS["seedance2"],
+            "parameters": {"shot_workflow_mode": "seedance2_script", "reference_mode": "multi_reference"},
+        }
     if expected is None:
         raise BuildPlanValidationError(
             f"workflow {workflow.skill_name} has no locked original Cuti contract"
@@ -571,6 +577,7 @@ def _validate_external_short_drama_plan(plan: RebuildPlan) -> None:
 
 
 def compile_seedance2(workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> RebuildPlan:
+    multi_reference = workflow.parameters.get("reference_mode") == "multi_reference"
     b = WorkflowPlanBuilder(workflow, context, spec)
     b.add_sources()
     spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
@@ -640,7 +647,7 @@ def compile_seedance2(workflow: WorkflowSpec, context: PluginContext, spec: Vide
         if previous_clip and transition in {
             "continuous", "continuous_shot", "continuation", "seamless",
         }:
-            if video_refs or audio_refs:
+            if not multi_reference and (video_refs or audio_refs):
                 raise BuildPlanValidationError(
                     "seedance2 WaveSpeed continuation cannot combine a strict decoded "
                     "start frame with video/audio references; assign those references to "
@@ -653,7 +660,13 @@ def compile_seedance2(workflow: WorkflowSpec, context: PluginContext, spec: Vide
                 depends_on=[previous_clip],
             )
             dependencies.append(previous_tail)
-            parameters.update({"generation_mode": "i2v", "start_image_from_step": previous_tail})
+            if multi_reference:
+                parameters["reference_from_steps"] = [*image_refs, previous_tail]
+                parameters["generation_mode"] = "reference_to_video"
+            else:
+                parameters.update({"generation_mode": "i2v", "start_image_from_step": previous_tail})
+        if multi_reference:
+            parameters["reference_mode"] = "multi_reference"
         clip = b.add(
             f"shot-{shot.id}-video", "video_clip", "atomic.video.generate",
             parameters=parameters, depends_on=dependencies, cost=0.65, skills=[],
@@ -1934,6 +1947,7 @@ def compile_skill_workflow(
 # This prevents a misspelled/copied frontmatter mode from becoming an implicit
 # default compiler.
 WORKFLOW_ID_COMPILERS = {
+    "cinematic": ("seedance2", compile_seedance2),
     "seedance2": ("seedance2", compile_seedance2),
     "mv": ("mv", compile_mv_compat),
     "short-drama-workflow": ("short_drama_workflow", compile_short_drama_workflow),

@@ -341,6 +341,9 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
         payload = _artifact_payload(project_id, artifact, selected_ids)
         grouped.setdefault(payload["logicalId"], []).append(payload)
     current_spec_revision = spec_revisions[-1] if spec_revisions else None
+    committed_spec_revision = next((item for item in spec_revisions if item.id == current_version.video_spec_revision_id), None)
+    if committed_spec_revision is not None:
+        spec = committed_spec_revision.content
     return {
         "project": project.model_dump(mode="json"),
         "currentProjectVersion": current_version.model_dump(mode="json"),

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-09-studio-type-aware-checks.md
+2026-09-09-studio-type-aware-checks.md: 7530c5c66e8f2fcabe3d591d2ae257b6d8cb05cd
+2026-09-09-studio-type-aware-checks.zh.md: 9346e5056c2d9a2573896ec9cda9659e35639013

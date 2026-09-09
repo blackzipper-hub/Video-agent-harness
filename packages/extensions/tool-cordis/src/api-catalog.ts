@@ -2220,6 +2220,145 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'videoRuntime',
+    summary: 'Stable interface implemented by local or remote video project runtimes.',
+    description: 'Stable interface implemented by local or remote video project runtimes.',
+    methods: [
+      {
+        signature: 'abstract openProject(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>',
+        description: 'Open an existing project and bind it to the supplied session.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract createProject(request: CreateProjectRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>',
+        description: 'Create a persistent project with an idempotent request.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract inspectProject(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<ProjectSnapshot>',
+        description: 'Read the current project version and active build summary.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract listWorkflows(identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowSummary[]>',
+        description: 'List installed workflows, including unavailability reasons.',
+        parameters: [{ name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract loadWorkflow(workflowId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<WorkflowDetail>',
+        description: 'Read a workflow\'s instructions, resources, and execution requirements.',
+        parameters: [{ name: 'workflowId', description: 'Installed Workflow identifier.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract loadSkill(skillId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillDetail>',
+        description: 'Read an installed Skill and its resource inventory.',
+        parameters: [{ name: 'skillId', description: 'Installed Skill identifier.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract loadSkillResource(skillId: string, path: string, identity: RequestIdentity, signal?: AbortSignal): Promise<SkillResourceDetail>',
+        description: 'Read one resource owned by the requested Skill.',
+        parameters: [{ name: 'skillId', description: 'Installed Skill identifier.' }, { name: 'path', description: 'Skill-relative resource path.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract previewChange(request: ChangePreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ChangePreview>',
+        description: 'Persist an impact preview without submitting media generation.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract previewEdits(request: EditPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>',
+        description: 'Persist a structured edit plan against its base project version.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract listArtifacts(projectId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<MediaArtifactSummary[]>',
+        description: 'List project artifacts available as planning inputs.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract listPlanPatchCapabilities(identity: RequestIdentity, signal?: AbortSignal): Promise<CapabilityPromptView[]>',
+        description: 'Read executable capabilities and their parameter schemas.',
+        parameters: [{ name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract previewPlanPatch(request: PlanPatchPreviewRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>',
+        description: 'Validate and persist artifact-based operations without executing them.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract planProject(request: BuildPlanRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildPlanSnapshot>',
+        description: 'Persist an initial plan from a project intent or complete video specification.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract startBuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>',
+        description: 'Start a persisted plan using an idempotent, version-checked request.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract applyRebuild(request: RebuildRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>',
+        description: 'Execute a rebuild plan against its recorded base project version.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract getBuild(projectId: string, buildId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>',
+        description: 'Read durable build progress, costs, and failure details.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'buildId', description: 'Build identifier belonging to the project.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract cancelBuild(projectId: string, buildId: string, identity: RequestIdentity, signal?: AbortSignal): Promise<BuildSnapshot>',
+        description: 'Request build cancellation; already-submitted provider work may continue.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'buildId', description: 'Build identifier belonging to the project.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract inspectCheckpoint( projectId: string, buildId: string, checkpointId: string, identity: RequestIdentity, signal?: AbortSignal, ): Promise<PlanCheckpoint>',
+        description: 'Read a checkpoint or open the live planning snapshot when its id is live.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'buildId', description: 'Build identifier belonging to the project.' }, { name: 'checkpointId', description: 'Checkpoint identifier, or live for an editable planning snapshot.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract resolveCheckpoint( request: CheckpointResolutionRequest, identity: RequestIdentity, signal?: AbortSignal, ): Promise<BuildPlanSnapshot>',
+        description: 'Atomically append a revision-checked planning resolution.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract retryCheckpoint( projectId: string, buildId: string, checkpointId: string, identity: RequestIdentity, signal?: AbortSignal, ): Promise<PlanCheckpoint>',
+        description: 'Request redelivery of a failed planning checkpoint.',
+        parameters: [{ name: 'projectId', description: 'Persistent project identifier.' }, { name: 'buildId', description: 'Build identifier belonging to the project.' }, { name: 'checkpointId', description: 'Checkpoint identifier, or live for an editable planning snapshot.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract selectArtifact( request: ArtifactSelectionRequest, identity: RequestIdentity, signal?: AbortSignal, ): Promise<ArtifactSelectionResult>',
+        description: 'Select an existing artifact version without generating new media.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+      {
+        signature: 'abstract exportProject(request: ExportRequest, identity: RequestIdentity, signal?: AbortSignal): Promise<ExportResult>',
+        description: 'Create an idempotent export request for the selected project version.',
+        parameters: [{ name: 'request', description: 'Structured request including idempotency and revision fields where required.' }, { name: 'identity', description: 'Session and user attribution for Runtime authorization.' }, { name: 'signal', description: 'Optional cancellation signal for this request; abort does not undo remote work.' }],
+        returns: 'Runtime response after validation; rejects on transport, authorization, or state errors.',
+      },
+    ],
+  },
+  {
     key: 'web',
     summary: 'The web access service.',
     description: 'The web access service. Registered as `ctx.web` (one instance per context).\n\nSelection semantics (resolved at execution time, never order-dependent):\n\n- A configured id that is registered and `available()` → that provider.\n- A configured id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.\n- A configured id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`.\n- No id configured, exactly one registered usable provider → that provider.\n- No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.\n- No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.',
@@ -2902,6 +3041,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export class ApprovalService extends Service {\n    static Config: z<Config>;\n    constructor(ctx: Context, public config: Config);\n    setPolicy(agent: Agent, policy: ApprovalPolicy): void;\n    async request(req: ApprovalRequest): Promise<ApprovalOutcome>;\n    overrideOf(session: Session): ApprovalPolicy | undefined;\n}',
   },
   {
+    name: 'ArtifactSelectionRequest',
+    declaration: 'export interface ArtifactSelectionRequest {\n    projectId: string;\n    versionId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n}',
+  },
+  {
+    name: 'ArtifactSelectionResult',
+    declaration: 'export interface ArtifactSelectionResult {\n    projectId: string;\n    artifactId: string;\n    versionId: string;\n    projectVersionId: string;\n}',
+  },
+  {
     name: 'AskUserQuestionAnswer',
     declaration: 'export interface AskUserQuestionAnswer {\n    answers: AskUserQuestionAnswerItem[];\n}',
   },
@@ -3018,8 +3165,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
   },
   {
+    name: 'BuildPlanRequest',
+    declaration: 'export interface BuildPlanRequest {\n    projectId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n    videoSpec?: VideoSpec;\n    projectIntent?: ProjectIntent;\n}',
+  },
+  {
+    name: 'BuildPlanSnapshot',
+    declaration: 'export interface BuildPlanSnapshot {\n    planId: string;\n    projectId: string;\n    kind: \'initial\' | \'incremental\' | \'export\';\n    status: string;\n    baseProjectVersionId: string;\n    workflowId: string;\n    videoSpec?: VideoSpec;\n    projectIntent?: ProjectIntent;\n    shotCount: number;\n    schemaVersion: 1 | 2;\n    planRevision: number;\n    specRevisionId?: string;\n    currentPhase: string;\n    nextCheckpoint?: Record<string, JsonValue>;\n    estimatedCost: number;\n    steps: Array<Record<string, JsonValue>>;\n}',
+  },
+  {
+    name: 'BuildSnapshot',
+    declaration: 'export interface BuildSnapshot {\n    buildId: string;\n    projectId: string;\n    status: \'queued\' | \'running\' | \'waiting_external\' | \'waiting_agent\' | \'completed\' | \'failed\' | \'cancelled\';\n    progress: number;\n    message: string;\n    projectVersionId?: string;\n    kind: \'initial\' | \'incremental\' | \'export\';\n    estimatedCost: number;\n    actualCost: number;\n    error?: string;\n}',
+  },
+  {
     name: 'CancelOptions',
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
+  },
+  {
+    name: 'CapabilityPromptView',
+    declaration: 'export interface CapabilityPromptView {\n    id: string;\n    accepted_aliases: string[];\n    description: string;\n    required_inputs: string[];\n    optional_references: string[];\n    output: string;\n    executor: string;\n    parameters_schema: Record<string, JsonValue>;\n    trust_level: string;\n    enabled: boolean;\n}',
+  },
+  {
+    name: 'ChangePreview',
+    declaration: 'export interface ChangePreview {\n    planId: string;\n    projectId: string;\n    baseProjectVersionId: string;\n    staleArtifactIds: string[];\n    validationArtifactIds: string[];\n    reusedArtifactIds: string[];\n    rebuildOrder: string[];\n    estimatedCost: number;\n}',
+  },
+  {
+    name: 'ChangePreviewRequest',
+    declaration: 'export interface ChangePreviewRequest {\n    projectId: string;\n    change: string;\n    targetArtifactVersionIds: string[];\n    idempotencyKey: string;\n}',
+  },
+  {
+    name: 'CheckpointResolutionRequest',
+    declaration: 'export interface CheckpointResolutionRequest {\n    projectId: string;\n    buildId: string;\n    checkpointId: string;\n    basePlanRevision: number;\n    baseSpecRevision: number;\n    idempotencyKey: string;\n    videoSpec?: VideoSpec;\n    videoSpecPatch?: Record<string, JsonValue>;\n    phaseInputs?: Record<string, JsonValue>;\n    proposedSteps?: Array<Record<string, JsonValue>>;\n    cancelStepIds?: string[];\n    replaceFailedStepIds?: Record<string, string>;\n    goalSatisfied?: boolean;\n    waitingForInput?: boolean;\n    response?: string;\n    reason?: string;\n}',
   },
   {
     name: 'ClientResponse',
@@ -3194,6 +3369,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CreateGoalResult {\n    readonly ref: GoalRef;\n}',
   },
   {
+    name: 'CreateProjectRequest',
+    declaration: 'export interface CreateProjectRequest {\n    title: string;\n    idempotencyKey: string;\n}',
+  },
+  {
     name: 'CreateSessionOptions',
     declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
   },
@@ -3330,12 +3509,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
   },
   {
+    name: 'EditPreviewRequest',
+    declaration: 'export interface EditPreviewRequest {\n    projectId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n    description: string;\n    edits: VideoEdit[];\n}',
+  },
+  {
     name: 'EncodedImageAttachment',
     declaration: 'export interface EncodedImageAttachment {\n    mediaType: ImageMediaType;\n    data: string;\n    name?: string;\n}',
   },
   {
     name: 'EpochHeader',
     declaration: 'export interface EpochHeader {\n    config: LlmCallConfig;\n    adapterDefaults?: LlmCallConfigAdapterDefaults;\n    system?: string;\n    tools?: ToolSchema[];\n}',
+  },
+  {
+    name: 'ExportRequest',
+    declaration: 'export interface ExportRequest {\n    projectId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n    format: string;\n}',
+  },
+  {
+    name: 'ExportResult',
+    declaration: 'export interface ExportResult {\n    exportId: string;\n    projectId: string;\n    status: \'queued\' | \'running\' | \'completed\' | \'failed\' | \'cancelled\';\n    uri?: string;\n}',
   },
   {
     name: 'FileDiff',
@@ -3570,10 +3761,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type JsonSchemaType = \'object\' | \'array\' | \'string\' | \'number\' | \'integer\' | \'boolean\' | \'null\';',
   },
   {
-    name: 'JsonValue',
-    declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
-  },
-  {
     name: 'KnobState',
     declaration: 'export interface KnobState {\n    preset: string | null;\n    sandbox: SandboxMode | null;\n    approval: ApprovalPolicy | null;\n}',
   },
@@ -3694,6 +3881,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
   },
   {
+    name: 'MediaArtifactSummary',
+    declaration: 'export interface MediaArtifactSummary {\n    artifactVersionId: string;\n    artifactId: string;\n    logicalId: string;\n    type: string;\n    title: string;\n    summary: string;\n}',
+  },
+  {
     name: 'Message',
     declaration: 'export interface Message {\n    readonly id: MessageId;\n    readonly role: \'system\' | \'user\' | \'assistant\';\n    readonly content: ContentBlock[];\n    readonly source: MessageSource;\n}',
   },
@@ -3810,6 +4001,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
   },
   {
+    name: 'PlanCheckpoint',
+    declaration: 'export interface PlanCheckpoint {\n    id: string;\n    project_id: string;\n    build_id: string;\n    plan_id: string;\n    workflow_id: string;\n    session_id: string;\n    phase: string;\n    next_phase: string;\n    status: \'pending\' | \'planning\' | \'resolved\' | \'failed\';\n    artifact_summaries: Array<Record<string, JsonValue>>;\n    resolved_sections: string[];\n    unresolved_sections: string[];\n    planner_instruction: string;\n    planning_mode: \'staged\' | \'agentic\';\n    base_plan_revision: number;\n    base_spec_revision: number;\n    delivery_attempts: number;\n    error?: string;\n}',
+  },
+  {
+    name: 'PlanPatchInput',
+    declaration: 'export interface PlanPatchInput {\n    role: string;\n    artifact_version_id?: string;\n    operation_step_id?: string;\n}',
+  },
+  {
+    name: 'PlanPatchOperation',
+    declaration: 'export interface PlanPatchOperation {\n    step_id: string;\n    capability: string;\n    inputs: PlanPatchInput[];\n    parameters?: Record<string, JsonValue>;\n    title?: string;\n}',
+  },
+  {
+    name: 'PlanPatchPreviewRequest',
+    declaration: 'export interface PlanPatchPreviewRequest {\n    projectId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n    description: string;\n    operations: PlanPatchOperation[];\n}',
+  },
+  {
     name: 'PostToolDecision',
     declaration: 'export type PostToolDecision = {\n    kind: \'accept\';\n    content?: ContentBlock[];\n    value?: never;\n    additionalContexts?: UserMessage[];\n} | {\n    kind: \'accept\';\n    value: JsonValue;\n    content?: never;\n    additionalContexts?: UserMessage[];\n} | {\n    kind: \'block\';\n    feedback: ContentBlock[];\n    additionalContexts?: UserMessage[];\n};',
   },
@@ -3850,6 +4057,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PreToolDecision = {\n    kind: \'allow\';\n} | {\n    kind: \'deny\';\n    reason: string;\n} | {\n    kind: \'ask\';\n    reason?: string;\n};',
   },
   {
+    name: 'ProjectIntent',
+    declaration: 'export interface ProjectIntent {\n    title: string;\n    brief: string;\n    language: string;\n    language_contract: VideoLanguageContract;\n    target_duration_seconds: number;\n    aspect_ratio: \'16:9\' | \'9:16\' | \'1:1\';\n    resolution: string;\n    workflow_id: string;\n    style_id: string;\n    activated_skill_ids?: string[];\n    source_asset_ids?: string[];\n    workflow_parameters?: Record<string, JsonValue>;\n    providers: {\n        video: string;\n        image: string;\n        music: string;\n    };\n    automation: {\n        mode: \'automatic\';\n        max_artifact_retries: number;\n    };\n    constraints?: Record<string, JsonValue>;\n}',
+  },
+  {
     name: 'ProjectionChangeListener',
     declaration: 'export type ProjectionChangeListener = (session: Session, key: Extract<keyof SessionProjectionMap, string>, value: unknown, seq: number) => void;',
   },
@@ -3868,6 +4079,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectionSnapshot',
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
+  },
+  {
+    name: 'ProjectSnapshot',
+    declaration: 'export interface ProjectSnapshot {\n    projectId: string;\n    title: string;\n    status: string;\n    currentVersionId: string;\n    artifactCount: number;\n    activeBuildIds: string[];\n    summary: string;\n}',
   },
   {
     name: 'PromptAssembly',
@@ -3910,6 +4125,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
   },
   {
+    name: 'RebuildRequest',
+    declaration: 'export interface RebuildRequest {\n    projectId: string;\n    planId: string;\n    baseProjectVersionId: string;\n    idempotencyKey: string;\n}',
+  },
+  {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
   },
@@ -3928,6 +4147,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequestHeaderReason',
     declaration: 'export type RequestHeaderReason = \'initial\' | \'resume\' | \'change\';',
+  },
+  {
+    name: 'RequestIdentity',
+    declaration: 'export interface RequestIdentity {\n    sessionId?: string;\n    userId?: string;\n}',
   },
   {
     name: 'RequestImageAttachment',
@@ -4382,6 +4605,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SkillDefinition extends SkillSummary {\n    readonly content: string;\n    readonly path?: string;\n    readonly metadata?: Readonly<Record<string, unknown>>;\n}',
   },
   {
+    name: 'SkillDetail',
+    declaration: 'export interface SkillDetail {\n    id: string;\n    description: string;\n    kind: string;\n    instructions: string;\n    resourceOwnerSkillId: string;\n    resources: string[];\n    resourceContents: Array<{\n        path: string;\n        content: string;\n    }>;\n}',
+  },
+  {
     name: 'SkillInvocationPolicy',
     declaration: 'export interface SkillInvocationPolicy {\n    readonly modelInvocable: boolean;\n    readonly userInvocable: boolean;\n}',
   },
@@ -4408,6 +4635,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SkillResourceBase',
     declaration: 'export type SkillResourceBase = {\n    readonly kind: \'directory\';\n    readonly path: string;\n} | {\n    readonly kind: \'url\';\n    readonly url: string;\n} | {\n    readonly kind: \'opaque\';\n    readonly description: string;\n};',
+  },
+  {
+    name: 'SkillResourceDetail',
+    declaration: 'export interface SkillResourceDetail {\n    id: string;\n    path: string;\n    content: string;\n}',
   },
   {
     name: 'SkillSource',
@@ -4938,6 +5169,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface UserQuestionProvider {\n    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;\n}',
   },
   {
+    name: 'VideoCharacterSpec',
+    declaration: 'export interface VideoCharacterSpec {\n    id: string;\n    name: string;\n    appearance: string;\n    clothing?: string;\n    personality?: string;\n    voice?: string;\n}',
+  },
+  {
+    name: 'VideoEdit',
+    declaration: 'export interface VideoEdit {\n    type: VideoEditType;\n    id?: string;\n    artifactVersionId?: string;\n    prompt?: string;\n    patch?: Record<string, JsonValue>;\n}',
+  },
+  {
+    name: 'VideoEditType',
+    declaration: 'export type VideoEditType = \'patch_character\' | \'patch_scene\' | \'patch_shot\' | \'regenerate_artifact\' | \'replace_music\' | \'generate_lipsync\' | \'patch_timeline\';',
+  },
+  {
+    name: 'VideoLanguageContract',
+    declaration: 'export interface VideoLanguageContract {\n    ui_locale: \'zh-CN\' | \'en-US\';\n    content_language: \'zh-CN\' | \'en-US\';\n    spoken_language: \'zh-CN\' | \'en-US\';\n    subtitle_language: \'zh-CN\' | \'en-US\';\n    provider_prompt_language: \'auto\' | \'zh-CN\' | \'en-US\';\n}',
+  },
+  {
+    name: 'VideoShotSpec',
+    declaration: 'export interface VideoShotSpec {\n    id: string;\n    order: number;\n    duration_seconds: number;\n    beat: string;\n    visual_prompt: string;\n    narration?: string;\n    character_ids?: string[];\n    reference_asset_ids?: string[];\n    transition?: string;\n}',
+  },
+  {
+    name: 'VideoSpec',
+    declaration: 'export interface VideoSpec {\n    title: string;\n    language: string;\n    language_contract: VideoLanguageContract;\n    target_duration_seconds: number;\n    aspect_ratio: \'16:9\' | \'9:16\' | \'1:1\';\n    resolution: string;\n    workflow_id: string;\n    style_id: string;\n    activated_skill_ids?: string[];\n    source_asset_ids?: string[];\n    workflow_parameters?: Record<string, JsonValue>;\n    characters: VideoCharacterSpec[];\n    shots: VideoShotSpec[];\n    audio: {\n        narration_voice: string;\n        bgm_prompt: string;\n        subtitles: boolean;\n    };\n    providers: {\n        video: string;\n        image: string;\n        music: string;\n    };\n    automation: {\n        mode: \'automatic\';\n        max_artifact_retries: number;\n    };\n}',
+  },
+  {
     name: 'WebBootEntry',
     declaration: 'export interface WebBootEntry {\n    id: string;\n    url: string;\n    rev: string;\n    inject?: string[];\n    immediately?: boolean;\n    external?: string[];\n}',
   },
@@ -5018,6 +5273,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type WorkflowAgentOutcome = \'completed\' | \'failed\' | \'cancelled\';',
   },
   {
+    name: 'WorkflowDetail',
+    declaration: 'export interface WorkflowDetail extends WorkflowSummary {\n    parameters: Record<string, JsonValue>;\n    pipeline: string[];\n    skillDependencies: string[];\n    instructions: string;\n    instructionSkillId?: string;\n    instructionAppendix?: string;\n    resourceOwnerSkillId: string;\n    resources: string[];\n    resourceContents: Array<{\n        path: string;\n        content: string;\n    }>;\n    videoModelCapabilities?: Array<Record<string, JsonValue>>;\n}',
+  },
+  {
     name: 'WorkflowMeta',
     declaration: 'export interface WorkflowMeta {\n    name: string;\n    description: string;\n    whenToUse?: string;\n    phases?: WorkflowPhase[];\n}',
   },
@@ -5052,6 +5311,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkflowSummary',
+    declaration: 'export interface WorkflowSummary {\n    id: string;\n    title: string;\n    description: string;\n    mode: string;\n    available: boolean;\n    unavailableReason?: string;\n    requiredCapabilities: string[];\n    missingCapabilities: string[];\n    userSelectable: boolean;\n    executionKind: string;\n    compiler?: string | null;\n    entrypoints: string[];\n}',
   },
 ]
 

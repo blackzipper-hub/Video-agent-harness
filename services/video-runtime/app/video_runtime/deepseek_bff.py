@@ -660,7 +660,14 @@ def _selection_context(workflow_id: str | None, activated_skill_ids: list[str]) 
             "VideoSpec. Post-production on existing Artifacts is workflow-independent: call "
             "video_artifact_list and video_plan_patch_capability_list, load the recommended Skill, "
             "then use video_plan_patch_preview without switching or recompiling the generation "
-            "Workflow. If workflow_id is null, inspect the existing project instead of changing it."
+            "Workflow. If workflow_id is null, inspect the existing project instead of changing it. "
+            "A missing or partial VideoSpec never makes existing artifacts uneditable. "
+            "For parameter corrections, submit regenerate_artifact edits with the selected version "
+            "IDs and parameter patches; saved recipes preserve the other parameters. "
+            "For an active continuous build, inspect its live checkpoint to append tasks or cancel "
+            "pending tasks. For a completed build requiring new creative work, plan a new "
+            "ProjectIntent in the SAME project at its current version; selected artifacts are "
+            "retained as reusable inputs. Keep completed tasks immutable."
         ),
     }, ensure_ascii=False, sort_keys=True)
 

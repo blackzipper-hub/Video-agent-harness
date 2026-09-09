@@ -1,3 +1,4 @@
+import { displayValue } from '@/utils/displayValue'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   AlertTriangle,
@@ -44,13 +45,13 @@ const eventTone = (type: string): TraceTone => {
 }
 
 const eventCallId = (event: DeepAgentEvent): string => {
-  const direct = event.payload?.call_id || event.payload?.callId
-  if (direct) return String(direct)
-  const message = event.payload?.message
+  const direct = event.payload.call_id || event.payload.callId
+  if (direct) return displayValue(direct)
+  const message = event.payload.message
   if (!message || typeof message !== 'object') return ''
   const source = (message as Record<string, unknown>).source
   return source && typeof source === 'object'
-    ? String((source as Record<string, unknown>).callId || '')
+    ? displayValue((source as Record<string, unknown>).callId || '')
     : ''
 }
 
@@ -59,12 +60,12 @@ const eventTitle = (
   t: Translate,
   toolNames: Map<string, string>,
 ): string => {
-  const payload = event.payload || {}
+  const payload = event.payload
   const unknown = t('da.trace.unknown')
   if (event.type === 'agent.started')
     return t('da.trace.coordinationStarted')
   if (event.type === 'llm.request.started')
-    return interpolate(t('da.trace.llmCall'), { model: String(payload.model || unknown) })
+    return interpolate(t('da.trace.llmCall'), { model: displayValue(payload.model || unknown) })
   if (event.type === 'llm.context.ready')
     return t('da.trace.contextReady')
   if (event.type === 'llm.usage')
@@ -72,16 +73,16 @@ const eventTitle = (
   if (event.type === 'llm.attempt')
     return t('da.trace.llmRetry')
   if (event.type === 'agent.tool.started') {
-    return interpolate(t('da.trace.toolCall'), { tool: String(payload.tool || payload.name || unknown) })
+    return interpolate(t('da.trace.toolCall'), { tool: displayValue(payload.tool || payload.name || unknown) })
   }
   if (event.type === 'agent.tool.completed') {
-    const tool = String(payload.tool || toolNames.get(eventCallId(event)) || unknown)
+    const tool = displayValue(payload.tool || toolNames.get(eventCallId(event)) || unknown)
     return interpolate(t(payload.is_error ? 'da.trace.toolFailed' : 'da.trace.toolCompleted'), { tool })
   }
   if (event.type === 'agent.step.started')
-    return interpolate(t('da.trace.stepStarted'), { step: String(payload.step || '') })
+    return interpolate(t('da.trace.stepStarted'), { step: displayValue(payload.step || '') })
   if (event.type === 'agent.step.completed')
-    return interpolate(t('da.trace.stepCompleted'), { step: String(payload.step || '') })
+    return interpolate(t('da.trace.stepCompleted'), { step: displayValue(payload.step || '') })
   if (event.type === 'agent.context.updated')
     return t('da.trace.contextUpdated')
   if (event.type === 'deepseek.permission/preset')
@@ -93,7 +94,7 @@ const eventTitle = (
   if (event.type === 'deepseek.session/title')
     return t('da.trace.sessionTitle')
   if (event.type === 'plan.revised') {
-    return interpolate(t('da.trace.planRevised'), { revision: String(payload.revision || '') })
+    return interpolate(t('da.trace.planRevised'), { revision: displayValue(payload.revision || '') })
   }
   if (event.type === 'task.started') return t('da.trace.taskStarted')
   if (event.type === 'task.succeeded')
@@ -137,17 +138,17 @@ const toneClass = (tone: TraceTone) => {
 }
 
 const eventSummary = (event: DeepAgentEvent, zh: boolean): string => {
-  const payload = event.payload || {}
+  const payload = event.payload
   if (event.type === 'run.waiting_input' || event.type === 'run.interruption') {
     return [
-      payload.what_happened && `Now: ${String(payload.what_happened)}`,
-      payload.why_interrupted && `Why: ${String(payload.why_interrupted)}`,
-      payload.why_confirm && `Next: ${String(payload.why_confirm)}`,
-      payload.skill_name && `Skill: ${String(payload.skill_name)}`,
-      payload.skill_resource && `Resource: ${String(payload.skill_resource)}`,
-      payload.skill_policy && `Policy: ${String(payload.skill_policy)}`,
-      payload.capability_id && `Capability: ${String(payload.capability_id)}`,
-      payload.task_id && `Task: ${String(payload.task_id)}`,
+      payload.what_happened && `Now: ${displayValue(payload.what_happened)}`,
+      payload.why_interrupted && `Why: ${displayValue(payload.why_interrupted)}`,
+      payload.why_confirm && `Next: ${displayValue(payload.why_confirm)}`,
+      payload.skill_name && `Skill: ${displayValue(payload.skill_name)}`,
+      payload.skill_resource && `Resource: ${displayValue(payload.skill_resource)}`,
+      payload.skill_policy && `Policy: ${displayValue(payload.skill_policy)}`,
+      payload.capability_id && `Capability: ${displayValue(payload.capability_id)}`,
+      payload.task_id && `Task: ${displayValue(payload.task_id)}`,
     ]
       .filter(Boolean)
       .join('\n')
@@ -155,12 +156,12 @@ const eventSummary = (event: DeepAgentEvent, zh: boolean): string => {
   if (event.type === 'plan.revised') {
     const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
     return [
-      payload.reason ? String(payload.reason) : '',
+      payload.reason ? displayValue(payload.reason) : '',
       ...tasks.map((task) => {
         const value = task as Record<string, unknown>
-        return `${String(value.capability_id || 'task')}: ${String(value.objective || '')}`
+        return `${displayValue(value.capability_id || 'task')}: ${displayValue(value.objective || '')}`
       }),
-      payload.response ? String(payload.response) : '',
+      payload.response ? displayValue(payload.response) : '',
     ]
       .filter(Boolean)
       .join('\n')
@@ -169,38 +170,38 @@ const eventSummary = (event: DeepAgentEvent, zh: boolean): string => {
     return JSON.stringify(payload.input || payload.arguments || {}, null, 2)
   }
   if (event.type === 'agent.tool.completed') {
-    if (payload.output) return String(payload.output)
+    if (payload.output) return displayValue(payload.output)
     if (payload.error) return typeof payload.error === 'string'
       ? payload.error
       : JSON.stringify(payload.error, null, 2)
     return zh ? '工具已返回结果。' : 'The tool returned a result.'
   }
-  if (event.type === 'agent.started') return String(payload.observation || '')
+  if (event.type === 'agent.started') return displayValue(payload.observation || '')
   if (event.type === 'llm.request.started') {
     return [
-      `${'Provider'}: ${String(payload.provider || 'unknown')}`,
-      `${zh ? '模型' : 'Model'}: ${String(payload.model || 'unknown')}`,
-      `${zh ? '推理强度' : 'Reasoning effort'}: ${String(payload.reasoning_effort || 'default')}`,
-      `${zh ? '可用工具' : 'Available tools'}: ${String(payload.tool_count || 0)}`,
+      `Provider: ${displayValue(payload.provider || 'unknown')}`,
+      `${zh ? '模型' : 'Model'}: ${displayValue(payload.model || 'unknown')}`,
+      `${zh ? '推理强度' : 'Reasoning effort'}: ${displayValue(payload.reasoning_effort || 'default')}`,
+      `${zh ? '可用工具' : 'Available tools'}: ${displayValue(payload.tool_count || 0)}`,
     ].join('\n')
   }
   if (event.type === 'llm.context.ready') {
     return [
-      `${zh ? '模型' : 'Model'}: ${String(payload.model || 'unknown')}`,
+      `${zh ? '模型' : 'Model'}: ${displayValue(payload.model || 'unknown')}`,
       `${zh ? '上下文窗口' : 'Context window'}: ${Number(payload.context_window || 0).toLocaleString()} tokens`,
     ].join('\n')
   }
   if (event.type === 'llm.usage') {
     return [
-      `scope: ${String(payload.scope || 'unknown')}`,
-      payload.capability_id && `stage: ${String(payload.capability_id)}`,
+      `scope: ${displayValue(payload.scope || 'unknown')}`,
+      payload.capability_id && `stage: ${displayValue(payload.capability_id)}`,
       `input: ${Number(payload.input_tokens || 0).toLocaleString()}`,
       `output: ${Number(payload.output_tokens || 0).toLocaleString()}`,
       `cached: ${Number(payload.cached_tokens || 0).toLocaleString()}`,
       `reasoning: ${Number(payload.reasoning_tokens || 0).toLocaleString()}`,
       `total: ${Number(payload.total_tokens || 0).toLocaleString()}`,
       payload.requested_tokens && `requested (failed call): ${Number(payload.requested_tokens).toLocaleString()}`,
-      `status: ${String(payload.status || 'unknown')}`,
+      `status: ${displayValue(payload.status || 'unknown')}`,
     ].filter(Boolean).join('\n')
   }
   if (event.type === 'llm.attempt') return JSON.stringify(payload, null, 2)
@@ -210,22 +211,22 @@ const eventSummary = (event: DeepAgentEvent, zh: boolean): string => {
       : 'The model is selecting the next action from current context; the following tool input, result, or public answer is the auditable record.'
   }
   if (event.type === 'agent.step.completed') {
-    return `${zh ? '回合' : 'Turn'} ${String(payload.turn || '-')} · ${zh ? '步骤' : 'Step'} ${String(payload.step || '-')}`
+    return `${zh ? '回合' : 'Turn'} ${displayValue(payload.turn || '-')} · ${zh ? '步骤' : 'Step'} ${displayValue(payload.step || '-')}`
   }
   if (event.type === 'agent.context.updated') {
-    return `${zh ? '新增' : 'Inserted'}: ${String(payload.inserted_count || 0)} · ${zh ? '移除' : 'Removed'}: ${String(payload.removed_count || 0)}`
+    return `${zh ? '新增' : 'Inserted'}: ${displayValue(payload.inserted_count || 0)} · ${zh ? '移除' : 'Removed'}: ${displayValue(payload.removed_count || 0)}`
   }
-  if (event.type === 'deepseek.permission/preset') return String(payload.preset || '')
-  if (event.type === 'deepseek.sandbox/mode') return String(payload.mode || '')
-  if (event.type === 'deepseek.approval/policy') return String(payload.policy || '')
-  if (event.type === 'deepseek.session/title') return String(payload.title || '')
+  if (event.type === 'deepseek.permission/preset') return displayValue(payload.preset || '')
+  if (event.type === 'deepseek.sandbox/mode') return displayValue(payload.mode || '')
+  if (event.type === 'deepseek.approval/policy') return displayValue(payload.policy || '')
+  if (event.type === 'deepseek.session/title') return displayValue(payload.title || '')
   if (event.type === 'chat.message.created') {
     const message = payload.message as Record<string, unknown> | undefined
-    return message?.role === 'assistant' ? String(message.content || '') : ''
+    return message?.role === 'assistant' ? displayValue(message.content || '') : ''
   }
-  if (payload.error) return String(payload.error)
-  if (payload.response) return String(payload.response)
-  if (payload.task_id) return `task_id: ${String(payload.task_id)}`
+  if (payload.error) return displayValue(payload.error)
+  if (payload.response) return displayValue(payload.response)
+  if (payload.task_id) return `task_id: ${displayValue(payload.task_id)}`
   return ''
 }
 
@@ -244,7 +245,7 @@ export function DeepAgentTracePanel({
     events.forEach((event) => {
       if (event.type !== 'agent.tool.started') return
       const callId = eventCallId(event)
-      if (callId) names.set(callId, String(event.payload.tool || event.payload.name || 'unknown'))
+      if (callId) names.set(callId, displayValue(event.payload.tool || event.payload.name || 'unknown'))
     })
     return {
       toolNames: names,
@@ -255,7 +256,7 @@ export function DeepAgentTracePanel({
       ).length,
       visibleEvents: events.filter((event) => {
         if (event.type === 'chat.message.created') {
-          const message = event.payload?.message as
+          const message = event.payload.message as
             Record<string, unknown> | undefined
           return message?.role === 'assistant'
         }

@@ -1,4 +1,5 @@
-import { parseActionSuggestions } from '@/utils/actionSuggestions'
+import { displayValue } from '../../utils/displayValue'
+import { parseActionSuggestions } from '../../utils/actionSuggestions'
 import type {
   DeepAgentEvent,
   DeepAgentMessage,
@@ -123,8 +124,8 @@ const suggestionsFromSnapshot = (snapshot: DeepAgentSnapshot): DeepAgentSuggesti
   const artifact = [...snapshot.artifacts].reverse().find(
     item => item.type === 'action_suggestions',
   )
-  const raw = artifact?.metadata?.suggestions
-  return parseActionSuggestions(raw) as DeepAgentSuggestion[]
+  const raw = artifact?.metadata.suggestions
+  return parseActionSuggestions(raw)
 }
 
 const mergeSelections = (
@@ -165,7 +166,7 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
   let messages = state.messages
   let suggestions = state.suggestions
   let notice = state.notice
-  const payload = event.payload || {}
+  const payload = event.payload
 
   if (event.type === 'chat.message.created') {
     const message = payload.message as DeepAgentMessage | undefined
@@ -178,8 +179,8 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
       if (message.role === 'user') suggestions = []
     }
   } else if (event.type === 'agent.message.delta') {
-    const delta = String(payload.delta ?? payload.content ?? '')
-    const messageId = String(payload.message_id ?? `stream-${event.run_id}`)
+    const delta = displayValue(payload.delta ?? payload.content ?? '')
+    const messageId = displayValue(payload.message_id ?? `stream-${event.run_id}`)
     const alreadyFinalized = messages.some(message =>
       message.role === 'assistant' &&
       !message.id.startsWith('stream-') &&
@@ -223,17 +224,19 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
       cancelledTaskIds.has(task.id) ? { ...task, status: 'cancelled' } : task,
     )
   } else if (event.type.startsWith('task.')) {
-    const taskId = String(payload.task_id ?? '')
+    const taskId = displayValue(payload.task_id ?? '')
     const index = snapshot.tasks.findIndex(task => task.id === taskId)
     if (index >= 0) {
-      const task = { ...snapshot.tasks[index] }
+      const existingTask = snapshot.tasks[index]
+      if (!existingTask) return state
+      const task = { ...existingTask }
       if (event.type === 'task.started') task.status = 'running'
       if (event.type === 'task.waiting_external') task.status = 'waiting_external'
       if (event.type === 'task.succeeded') task.status = 'succeeded'
       if (event.type === 'task.cancelled') task.status = 'cancelled'
       if (event.type === 'task.failed') {
         task.status = 'failed'
-        task.error = String(payload.error ?? '')
+        task.error = displayValue(payload.error ?? '')
         const runStillActive = !['failed', 'cancelled', 'completed'].includes(snapshot.run.status)
         if (runStillActive) {
           notice = {
@@ -248,7 +251,7 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
         const rawProgress = payload.progress ?? payload.progress_percent ?? payload.percent
         const progress = Number(rawProgress)
         if (Number.isFinite(progress)) task.progress = progress > 1 ? progress : progress * 100
-        task.progress_message = String(payload.message ?? payload.status ?? '')
+        task.progress_message = displayValue(payload.message ?? payload.status ?? '')
       }
       if (typeof payload.remote_operation_id === 'string') {
         task.remote_operation_id = payload.remote_operation_id
@@ -280,7 +283,7 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
   if (event.type === 'run.failed' || event.type === 'agent.failed') {
     notice = {
       severity: 'error',
-      message: String(payload.error || payload.message || 'Run failed'),
+      message: displayValue(payload.error || payload.message || 'Run failed'),
     }
   } else if (event.type === 'run.waiting_input' || event.type === 'run.interruption') {
     notice = buildWaitingInputNotice({

@@ -162,10 +162,7 @@ describe('video tool composition', () => {
       arguments: {}, signal: new AbortController().signal,
     })
     expect(workflows.isError).toBe(false)
-    expect(workflows.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('selectable=true; mode=test; execution=dedicated_compiler; compiler=compile_demo_workflow'),
-    })]))
+    expect(workflows.content.some(item => item.type === 'text' && item.text.includes('selectable=true; mode=test; execution=dedicated_compiler; compiler=compile_demo_workflow'))).toBe(true)
     const result = await ctx.tools.execute({
       callId: CallId('video-call-1'), name: 'video_project_open',
       arguments: { project_id: 'project-1' }, signal: new AbortController().signal,
@@ -241,18 +238,9 @@ describe('video tool composition', () => {
       skillDependencies: ['helper-skill'],
     })
     expect(loadedWorkflow.value).not.toHaveProperty('resourceContents')
-    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('Required Skill dependencies (load each with video_skill_load): helper-skill'),
-    })]))
-    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('Compiler: compile_demo_workflow'),
-    })]))
-    expect(loadedWorkflow.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('using skill_id=demo-workflow'),
-    })]))
+    expect(loadedWorkflow.content.some(item => item.type === 'text' && item.text.includes('Required Skill dependencies (load each with video_skill_load): helper-skill'))).toBe(true)
+    expect(loadedWorkflow.content.some(item => item.type === 'text' && item.text.includes('Compiler: compile_demo_workflow'))).toBe(true)
+    expect(loadedWorkflow.content.some(item => item.type === 'text' && item.text.includes('using skill_id=demo-workflow'))).toBe(true)
     const workflowText = loadedWorkflow.content.find(item => item.type === 'text')?.text ?? ''
     expect(workflowText).toContain('RESOURCE OWNER (mandatory): demo-workflow')
     expect(workflowText).toContain('- reference.md')
@@ -264,13 +252,7 @@ describe('video tool composition', () => {
       arguments: {}, signal: new AbortController().signal,
     })
     expect(capabilities.isError).toBe(false)
-    expect(capabilities.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('media.audio_cut'),
-    })]))
-    expect(capabilities.content).toEqual(expect.arrayContaining([expect.objectContaining({
-      type: 'text',
-      text: expect.stringContaining('parameters_schema'),
-    })]))
+    expect(capabilities.content.some(item => item.type === 'text' && item.text.includes('media.audio_cut'))).toBe(true)
+    expect(capabilities.content.some(item => item.type === 'text' && item.text.includes('parameters_schema'))).toBe(true)
   })
 })

@@ -3,7 +3,7 @@
  * compact and replace a history range with one summary node by subclassing
  * {@link CompactionEngine}. This interface necessarily depends on session and LLM
  * vocabulary; the rationale is in the
- * [compaction Agent Note](../../../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
+ * [compaction Agent Note](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
  * @module @deepseek-ai/dsh-compaction
  */
 

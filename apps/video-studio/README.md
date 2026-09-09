@@ -14,6 +14,8 @@ Markdown documents support GFM tables with keyboard-accessible horizontal scroll
 
 Create renders generated text and scripts as readable Markdown, and complete JSON documents as labeled fields and numbered content cards. Long lists expand on demand; raw JSON remains available in collapsed details. Model-provided HTML is not executed. The shared `ArtifactDocument` renderer preserves unknown fields and supports nested structures without requiring Workflow-specific views.
 
+Frontend type checking includes nullable values and unchecked array indices. Stored pinned-conversation records are validated before display; malformed entries are ignored. Asynchronous UI actions report uncaught failures, and unavailable Canvas contexts or PNG encoding failures reject image export. Request headers accept objects, tuple arrays, and `Headers` instances with per-request overrides.
+
 ```sh
 pnpm --filter @cuti-ai/video-studio run dev
 ```

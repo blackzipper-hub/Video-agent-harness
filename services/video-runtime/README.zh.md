@@ -1,10 +1,14 @@
 # Video Runtime
 
+`cinematic` Workflow 复用 Seedance2 的自主规划，使用 `reference_mode: multi_reference`：续拍保留原始身份／场景图，并把上一段真实尾帧追加为普通参考图，不锁定首帧。选择 Cinematic 或输入 `$cinematic` 使用；已有 Seedance2 项目不会自动切换。
+
+Seedance 续拍规划将上一段尾帧保存在 `start_image_from_step`，将最初的身份／场景参考图保存在 `reference_from_steps`。WaveSpeed 已公布的 I2V 请求没有普通参考图字段，因此同时要求严格首帧和参考图的新请求会在提交前被拒绝，不再静默丢弃身份约束。已提交的远程任务仍可继续查询。实际执行需要支持组合输入的接口，或用户明确同意不保证严格首帧的多参考模式；Runtime 不会私自更换 Provider 或模式。
+
 字幕转写支持通过 `prompt` 提供已知歌词或名称作为识别上下文。转写含至少八个词且超过一半词的起止时间重合时，会在字幕渲染前被拒绝；Agent 可补充音频上下文后通过 PlanPatch 替换任务。该时间戳检查用于识别一种异常模式，不代表字幕内容已通过准确性验收。
 
 独立启动入口默认开启分阶段规划和持续 PlanPatch，可通过环境变量显式覆盖。Windows 可使用 `scripts/start-video-runtime.ps1`，通过 `-Python`、`-CredentialEnvFiles`、`-Port` 和 `-MediaServiceUrl` 指定运行环境；媒体服务地址默认为 `http://127.0.0.1:18080`。脚本在导入凭据后应用本地服务配置，并在启动前检查媒体服务就绪状态，防止旧环境文件把本地构建转向旧服务地址。
 
-Provider 分发将任务输入 ArtifactVersion 转换为有序的图片、视频和音频 URI 列表，直调与 Atomic 路径共用。显式媒体参数顺序优先，其余任务输入按声明顺序去重合并。引用素材缺失、提示词索引越界时在提交前失败。输出产物记录解析后的输入版本与具体参数。旧调用把 Seedance 模型名放在 `provider` 字段时，分发会拆分为 WaveSpeed 通道和精确的模型版本；相互冲突的版本参数在提交前失败。分发保留远程任务 ID 和幂等键，参考图不会自动变成首帧。
+Provider 分发将任务输入 ArtifactVersion 转换为有序的图片、视频和音频 URI 列表，直调与 Atomic 路径共用。显式媒体参数顺序优先，其余任务输入按声明顺序去重合并。引用素材缺失、提示词索引越界时在提交前失败。输出产物记录解析后的输入版本与具体参数。旧调用把 Seedance 模型名放在 `provider` 字段时，分发会拆分为 WaveSpeed 通道和精确的模型版本；相互冲突的版本参数在提交前失败。分发保留远程任务 ID 和幂等键。即使调用方遗留了 `i2v` 模式，普通参考图仍只作为参考；只有显式 `start_image_url`、首帧别名，或提示词中明确标为首帧的图片槽位才会启用严格图生视频。
 
 失败任务可通过 PlanPatch 替换映射提交新参数。待执行的下游任务会复制并改接依赖，旧下游步骤在同一版本事务中取消。失败步骤保留原参数和 `superseded_by` 指针；整单重试跳过已替代及已取消步骤。已开始执行的下游不能自动改接。失败的持续 Build 在查看修复检查点时仍保持失败，只有替换补丁通过计划、规格与项目版本校验并提交后才恢复。
 
@@ -58,6 +62,8 @@ Studio 对接 `app.video_runtime.standalone:app`。`/chat-v1/service` 挂载的�
 如果粘贴的 Create Space URL 指向一个仍存在于 DeepSeek、但在恢复后的 Runtime 中已没有 Project 绑定的 Session，BFF 会创建全新 Session 并返回新的 `thread_id`，不会把新 Project 接到未绑定的历史 Session 上。
 
 ## 测试
+
+产物重新生成从当前选中版本及其生成计划恢复 Capability 和参数，合并用户补丁并重建硬依赖下游，无需完整 VideoSpec。工作区规格按已提交 ProjectVersion 的 Revision 读取。持续 PlanPatch 将执行配方存入规格修订；后续创作保留已选生成素材供 Agent 复用。运行中支持 live 补丁和取消待执行任务，已完成产物通过新 Build 修改，失败时保留原作品版本。
 
 检查点投递根据已消费的 Session 消息和已结束的回合进行对账。回合结束却未处理检查点时，在原有投递次数限制内重试；重试和检查点查询均包含当前任务结果。排队中的消息、活跃回合、已处理检查点和已取消 Build 不会被判定为缺少确认。投递中断仍通过租约恢复。
 

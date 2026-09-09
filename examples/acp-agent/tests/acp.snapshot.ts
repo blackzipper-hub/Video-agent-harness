@@ -26,7 +26,7 @@ import { OFFLOADED_IMAGE_TEXT } from '@deepseek-ai/dsh-llm'
  * `pnpm run test:snapshot:record` re-records model transcripts against the real
  * API; `pnpm run test:snapshot:refresh` rewrites current replay expected outputs keyless.
  * See the package README (packages/test-support/acp-snapshot) and the snapshot Agent Note,
- * .agents/notes/implemented/testing/2026-06-19-acp-snapshot-tests.md.
+ * https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/testing/2026-06-19-acp-snapshot-tests.md.
  */
 
 // The dsh-acp-demo bin (the demo:acp entry), this example's cordis.yml, and

@@ -834,7 +834,7 @@ export function render(entries: CatalogEntry[]): string {
     '',
     '## Seam packages (not directly loadable)',
     '',
-    'Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).',
+    'Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).',
     '',
     ...entries.filter(e => e.kind === 'seam').map(e => renderTerse(e, ` — abstract \`${e.className ?? ''}\``)),
     '',

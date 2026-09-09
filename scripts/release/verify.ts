@@ -4,7 +4,7 @@
  *
  * Publication happens only from GitHub Actions, so the tag and publishability
  * checks are gates on the workflow, not advisory local warnings
- * ([rationale](../../.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
+ * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  */
 
 import { parseArgs } from 'node:util'

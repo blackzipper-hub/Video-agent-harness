@@ -24,11 +24,7 @@ Provider / Workflow / Validator / Media plugins
 
 The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Video Agent Harness reference](docs/video-agent-harness.md) for the architecture in detail.
 
-Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the
-allowed capabilities and creative rules, but it does not precompile the complete
-production DAG. After each executable task frontier finishes, Video Runtime persists
-the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the
-next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
+Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
 
 ## Run
 
@@ -120,9 +116,10 @@ pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no
 
 On Windows PowerShell:
 
+Fill in `OPENAI_API_KEY` and the required media provider keys in `.env` before starting.
+
 ```powershell
 Copy-Item .env.example .env
-# Fill in OPENAI_API_KEY and the required media provider keys in .env
 .\scripts\start-video-harness.ps1
 ```
 

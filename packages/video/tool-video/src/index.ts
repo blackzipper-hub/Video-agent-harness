@@ -7,6 +7,12 @@ import type { RequestIdentity, VideoSpec } from '@cuti-ai/video-runtime'
 export const name = 'cuti-tool-video'
 export const inject = ['tools', 'videoRuntime']
 
+/** Preserve scalar display and serialize structured Runtime values without losing their fields. */
+function displayValue(value: unknown): string {
+  if (value !== null && typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
 const projectOutput = {
   type: 'object' as const,
   additionalProperties: false,
@@ -183,8 +189,8 @@ const videoSpecParameters = {
 } as const
 
 function normalizeVideoSpec(value: unknown): VideoSpec {
-  const spec = value as VideoSpec & {
-    shots: Array<VideoSpec['shots'][number] & { narration?: string | null }>
+  const spec = value as Omit<VideoSpec, 'shots'> & {
+    shots: Array<Omit<VideoSpec['shots'][number], 'narration'> & { narration?: string | null }>
   }
   return {
     ...spec,
@@ -197,7 +203,7 @@ function normalizeVideoSpec(value: unknown): VideoSpec {
 }
 
 function identityOf(agent: { session: { header: { id: unknown } } } | undefined): RequestIdentity {
-  return agent === undefined ? {} : { sessionId: String(agent.session.header.id) }
+  return agent === undefined ? {} : { sessionId: displayValue(agent.session.header.id) }
 }
 
 function withoutInjectedResources(
@@ -208,25 +214,25 @@ function withoutInjectedResources(
 }
 
 function bundledResourceHeader(value: Record<string, import('@cuti-ai/video-runtime').JsonValue>): string {
-  const resources = Array.isArray(value.resources) ? value.resources.map(item => String(item)) : []
+  const resources = Array.isArray(value.resources) ? value.resources.map(item => displayValue(item)) : []
   if (resources.length === 0) return ''
-  const owner = String(value.resourceOwnerSkillId ?? value.id ?? '')
+  const owner = displayValue(value.resourceOwnerSkillId ?? value.id ?? '')
   return [
-    `RESOURCE OWNER (mandatory): ${owner}`,
-    `Every resource path listed below belongs to ${owner}.`,
-    `Read it only with video_skill_read_resource using skill_id=${owner}; never use a dependency Skill id.`,
+    `RESOURCE OWNER (mandatory): ${displayValue(owner)}`,
+    `Every resource path listed below belongs to ${displayValue(owner)}.`,
+    `Read it only with video_skill_read_resource using skill_id=${displayValue(owner)}; never use a dependency Skill id.`,
     'Resources:',
-    ...resources.map(path => `- ${path}`),
+    ...resources.map(path => `- ${displayValue(path)}`),
     '',
   ].join('\n')
 }
 
 function projectText(value: { projectId: string; currentVersionId: string; artifactCount: number; summary: string }): string {
-  return `Video project ${value.projectId} at ${value.currentVersionId}: ${value.artifactCount} artifacts. ${value.summary}`
+  return `Video project ${displayValue(value.projectId)} at ${displayValue(value.currentVersionId)}: ${displayValue(value.artifactCount)} artifacts. ${displayValue(value.summary)}`
 }
 
 function buildText(value: { buildId: string; status: string; progress: number; message: string }): string {
-  return `Video build ${value.buildId}: ${value.status} (${Math.round(value.progress * 100)}%). ${value.message}`
+  return `Video build ${displayValue(value.buildId)}: ${displayValue(value.status)} (${Math.round(value.progress * 100)}%). ${displayValue(value.message)}`
 }
 
 /** Register the stable high-level tool surface; provider-specific operations stay behind the runtime. */
@@ -240,9 +246,9 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{
         type: 'text',
         text: value.map((item) => {
-          const availability = item.available ? 'available' : `unavailable (${item.unavailableReason})`
-          const compiler = item.compiler == null ? 'none' : String(item.compiler)
-          return `${item.id}: ${availability}; selectable=${String(item.userSelectable)}; mode=${String(item.mode)}; execution=${String(item.executionKind)}; compiler=${compiler} — ${item.description}`
+          const availability = item.available ? 'available' : `unavailable (${displayValue(item.unavailableReason)})`
+          const compiler = item.compiler == null ? 'none' : displayValue(item.compiler)
+          return `${displayValue(item.id)}: ${displayValue(availability)}; selectable=${displayValue(item.userSelectable)}; mode=${displayValue(item.mode)}; execution=${displayValue(item.executionKind)}; compiler=${displayValue(compiler)} — ${displayValue(item.description)}`
         }).join('\n'),
       }],
     },
@@ -258,7 +264,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.title)}\nMode: ${String(value.mode)}\nExecution: ${String(value.executionKind)}\nCompiler: ${value.compiler == null ? 'none' : String(value.compiler)}\nPipeline: ${Array.isArray(value.pipeline) ? value.pipeline.join(' -> ') : ''}\n${bundledResourceHeader(value)}Required Skill dependencies (load each with video_skill_load): ${Array.isArray(value.skillDependencies) && value.skillDependencies.length > 0 ? value.skillDependencies.join(', ') : 'none'}\n\nRUNTIME VIDEO MODEL CAPABILITIES (authoritative execution facts; narrative shots are not provider calls):\n${JSON.stringify(value.videoModelCapabilities ?? [], null, 2)}\n\nAUTHORITATIVE WORKFLOW INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
+        text: `${displayValue(value.title)}\nMode: ${displayValue(value.mode)}\nExecution: ${displayValue(value.executionKind)}\nCompiler: ${displayValue(value.compiler == null ? 'none' : displayValue(value.compiler))}\nPipeline: ${displayValue(Array.isArray(value.pipeline) ? value.pipeline.map(displayValue).join(' -> ') : '')}\n${bundledResourceHeader(value)}Required Skill dependencies (load each with video_skill_load): ${displayValue(Array.isArray(value.skillDependencies) && value.skillDependencies.length > 0 ? value.skillDependencies.map(displayValue).join(', ') : 'none')}\n\nRUNTIME VIDEO MODEL CAPABILITIES (authoritative execution facts; narrative shots are not provider calls):\n${JSON.stringify(value.videoModelCapabilities ?? [], null, 2)}\n\nAUTHORITATIVE WORKFLOW INSTRUCTIONS:\n${displayValue(value.instructions ?? '')}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadWorkflow(args.workflow_id, identityOf(exec.agent), exec.signal)
@@ -273,7 +279,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `${String(value.id)}\n${bundledResourceHeader(value)}AUTHORITATIVE SKILL INSTRUCTIONS:\n${String(value.instructions ?? '')}`,
+        text: `${displayValue(value.id)}\n${bundledResourceHeader(value)}AUTHORITATIVE SKILL INSTRUCTIONS:\n${displayValue(value.instructions ?? '')}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadSkill(args.skill_id, identityOf(exec.agent), exec.signal)
@@ -289,7 +295,7 @@ export function apply(ctx: Context): void {
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
-      render: (_args, value) => [{ type: 'text', text: `${value.path}\n\n${value.content}` }],
+      render: (_args, value) => [{ type: 'text', text: `${displayValue(value.path)}\n\n${displayValue(value.content)}` }],
     },
     execute: (args, exec) => ctx.videoRuntime.loadSkillResource(
       args.skill_id, args.path, identityOf(exec.agent), exec.signal,
@@ -323,7 +329,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Initial video plan ${value.planId}: ${value.shotCount} shots, estimated cost $${value.estimatedCost}.`,
+        text: `Initial video plan ${displayValue(value.planId)}: ${displayValue(value.shotCount)} shots, estimated cost $${displayValue(value.estimatedCost)}.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.planProject({
@@ -381,7 +387,7 @@ export function apply(ctx: Context): void {
         type: 'text',
         text: value.length === 0
           ? 'This video project has no selected Artifacts.'
-          : value.map(item => `${String(item.artifactVersionId)}: ${String(item.logicalId)} (${String(item.type)}) — ${String(item.title || item.summary || '')}`).join('\n'),
+          : value.map(item => `${displayValue(item.artifactVersionId)}: ${displayValue(item.logicalId)} (${displayValue(item.type)}) — ${displayValue(item.title || item.summary || '')}`).join('\n'),
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.listArtifacts(
@@ -429,7 +435,7 @@ export function apply(ctx: Context): void {
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Rebuild plan ${value.planId}: ${value.staleArtifactIds.length} stale, ${value.validationArtifactIds.length} validate, ${value.reusedArtifactIds.length} reusable; estimated cost ${value.estimatedCost}.`,
+        text: `Rebuild plan ${displayValue(value.planId)}: ${displayValue(value.staleArtifactIds.length)} stale, ${displayValue(value.validationArtifactIds.length)} validate, ${displayValue(value.reusedArtifactIds.length)} reusable; estimated cost ${displayValue(value.estimatedCost)}.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewChange({
@@ -467,7 +473,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Edit plan ${String(value.planId)}: ${Array.isArray(value.steps) ? value.steps.filter(step => typeof step === 'object' && step !== null && !Array.isArray(step) && step.action === 'rebuild').length : 0} rebuild steps, estimated cost $${String(value.estimatedCost)}. Await user confirmation before applying.`,
+        text: `Edit plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.filter(step => typeof step === 'object' && step !== null && !Array.isArray(step) && step.action === 'rebuild').length : 0)} rebuild steps, estimated cost $${displayValue(value.estimatedCost)}. Await user confirmation before applying.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewEdits({
@@ -513,7 +519,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Dynamic media plan ${String(value.planId)}: ${Array.isArray(value.steps) ? value.steps.length : 0} steps, estimated cost $${String(value.estimatedCost)}. Await user confirmation before applying.`,
+        text: `Dynamic media plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.length : 0)} steps, estimated cost $${displayValue(value.estimatedCost)}. Await user confirmation before applying.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewPlanPatch({
@@ -568,7 +574,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Checkpoint ${String(value.id)} after ${String(value.phase)}; plan ${String(value.next_phase)} from ${Array.isArray(value.artifact_summaries) ? value.artifact_summaries.length : 0} real artifacts.`,
+        text: `Checkpoint ${displayValue(value.id)} after ${displayValue(value.phase)}; plan ${displayValue(value.next_phase)} from ${displayValue(Array.isArray(value.artifact_summaries) ? value.artifact_summaries.length : 0)} real artifacts.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.inspectCheckpoint(
@@ -622,7 +628,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Resolved checkpoint; plan ${String(value.planId)} revision ${String(value.planRevision)} now runs phase ${String(value.currentPhase)}.`,
+        text: `Resolved checkpoint; plan ${displayValue(value.planId)} revision ${displayValue(value.planRevision)} now runs phase ${displayValue(value.currentPhase)}.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.resolveCheckpoint({
@@ -685,7 +691,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Accepted PlanPatch; plan ${String(value.planId)} is now revision ${String(value.planRevision)}.`,
+        text: `Accepted PlanPatch; plan ${displayValue(value.planId)} is now revision ${displayValue(value.planRevision)}.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.resolveCheckpoint({
@@ -736,7 +742,7 @@ export function apply(ctx: Context): void {
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
-      render: (_args, value) => [{ type: 'text', text: `Checkpoint ${String(value.id)} is ${String(value.status)}.` }],
+      render: (_args, value) => [{ type: 'text', text: `Checkpoint ${displayValue(value.id)} is ${displayValue(value.status)}.` }],
     },
     execute: (args, exec) => ctx.videoRuntime.retryCheckpoint(
       args.project_id, args.build_id, args.checkpoint_id, identityOf(exec.agent), exec.signal,
@@ -772,7 +778,7 @@ export function apply(ctx: Context): void {
           projectVersionId: { type: 'string', required: true },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: `Selected artifact ${value.artifactId} version ${value.versionId}; project is now ${value.projectVersionId}.` }],
+      render: (_args, value) => [{ type: 'text', text: `Selected artifact ${displayValue(value.artifactId)} version ${displayValue(value.versionId)}; project is now ${displayValue(value.projectVersionId)}.` }],
     },
     execute: (args, exec) => ctx.videoRuntime.selectArtifact({
       projectId: args.project_id,
@@ -800,7 +806,7 @@ export function apply(ctx: Context): void {
           uri: { type: 'string' },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: `Export ${value.exportId}: ${value.status}${value.uri === undefined ? '' : ` at ${value.uri}`}.` }],
+      render: (_args, value) => [{ type: 'text', text: `Export ${displayValue(value.exportId)}: ${displayValue(value.status)}${displayValue(value.uri === undefined ? '' : ` at ${displayValue(value.uri)}`)}.` }],
     },
     execute: (args, exec) => ctx.videoRuntime.exportProject({
       projectId: args.project_id,

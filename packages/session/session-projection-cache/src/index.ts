@@ -8,7 +8,7 @@
  * write costs a longer tail replay on the next cold read) and a
  * `ver` mismatch discards the row instead of migrating it. Design
  * authority: the session-projection RFC
- * (.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
+ * (https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
  * @module @deepseek-ai/dsh-session-projection-cache
  */
 
