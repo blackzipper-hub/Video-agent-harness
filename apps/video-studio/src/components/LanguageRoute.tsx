@@ -20,7 +20,7 @@ export const LanguageRoute = ({ children }: LanguageRouteProps) => {
     const defaultLang = localStorage.getItem('language') || 'en'
     // 获取当前路径，移除可能存在的语言前缀（包括重复的）
     const pathWithoutLang = location.pathname.replace(/^\/(en|zh)\/(en|zh)\//, '/').replace(/^\/(en|zh)\//, '/').replace(/^\/(en|zh)$/, '/') || '/'
-    const newPath = `/${defaultLang}${pathWithoutLang}${location.search}${location.hash}`
+    const newPath = `/${defaultLang}${pathWithoutLang}${location.search}`
     return <Navigate to={newPath} replace />
   }
 
@@ -29,7 +29,7 @@ export const LanguageRoute = ({ children }: LanguageRouteProps) => {
   if (pathParts.length >= 2 && pathParts[0] === lang && pathParts[1] === lang) {
     // 如果检测到重复的语言前缀，重定向到正确的路径
     const restPath = pathParts.slice(2).join('/')
-    const newPath = `/${lang}${restPath ? '/' + restPath : ''}${location.search}${location.hash}`
+    const newPath = `/${lang}${restPath ? '/' + restPath : ''}${location.search}`
     return <Navigate to={newPath} replace />
   }
 

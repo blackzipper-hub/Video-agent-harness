@@ -1572,7 +1572,7 @@ export const MessageArea = ({
     if (!chatImageDetail) return
     try {
       const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
-      const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=normal&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(chatImageDetail.title)}`
+      const shareUrl = `${window.location.origin}${basePath}/${language}/share/image?mode=normal&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(chatImageDetail.title)}`
       await navigator.clipboard.writeText(shareUrl)
       toast.success(t('copyLinkSuccess'))
     } catch (e) {
@@ -1585,7 +1585,7 @@ export const MessageArea = ({
     const shareTitle = chatImageDetail.title
     const shareText = t('shareImageDescription') || 'Check out this image'
     const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
-    const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=normal&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
+    const shareUrl = `${window.location.origin}${basePath}/${language}/share/image?mode=normal&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
     if (typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })
@@ -4233,7 +4233,7 @@ export const MessageArea = ({
                 <Button size="sm" variant="outline" onClick={asyncEvent(async () => {
                   try {
                     const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
-                    const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(chatImageDetail.title)}`
+                    const shareUrl = `${window.location.origin}${basePath}/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(chatImageDetail.title)}`
                     await navigator.clipboard.writeText(shareUrl)
                     toast.success(t('copyLinkSuccess'))
                   } catch (e) {
@@ -4263,7 +4263,7 @@ export const MessageArea = ({
 
                   // 降级：URL 分享
                   const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
-                  const shareUrl = `${window.location.origin}${basePath}/#/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
+                  const shareUrl = `${window.location.origin}${basePath}/${language}/share/image?mode=${chatShareMode}&image=${encodeURIComponent(chatImageDetail.url)}&title=${encodeURIComponent(shareTitle)}`
                   if (typeof navigator.share === 'function') {
                     try {
                       await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })

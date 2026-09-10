@@ -47,7 +47,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // 如果当前路径有语言前缀，替换它
       // 移除第一个元素（语言前缀），保留剩余路径
       const restPath = pathParts.slice(1).join('/')
-      const newPath = `/${lang}${restPath ? '/' + restPath : ''}${location.search}${location.hash}`
+      const newPath = `/${lang}${restPath ? '/' + restPath : ''}${location.search}`
       navigate(newPath, { replace: true })
     } else {
       // 如果当前路径没有语言前缀，添加它
@@ -56,10 +56,10 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!currentPath.startsWith('/')) {
         currentPath = `/${currentPath}`
       }
-      const newPath = `/${lang}${currentPath === '/' ? '' : currentPath}${location.search}${location.hash}`
+      const newPath = `/${lang}${currentPath === '/' ? '' : currentPath}${location.search}`
       navigate(newPath, { replace: true })
     }
-  }, [location.hash, location.pathname, location.search, navigate])
+  }, [location.pathname, location.search, navigate])
 
   const t = useCallback((key: TranslationKey): string => {
     return translations[language][key] || translations.en[key] || key

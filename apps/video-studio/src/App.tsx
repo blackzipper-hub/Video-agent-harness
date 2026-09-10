@@ -2,7 +2,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider } from 'next-themes'
-import { HashRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { LanguageProvider } from './i18n/LanguageContext'
 import { LanguageRoute } from './components/LanguageRoute'
 import SelectionHub from './components/SelectionHub'
@@ -10,15 +10,14 @@ import NotFound from './pages/NotFound'
 import DeepAgentWorkspacePage from './pages/DeepAgentWorkspacePage'
 import IncrementalVideoWorkspacePage from './pages/IncrementalVideoWorkspacePage'
 const App = () => {
-  // HashRouter: /#/en/create or /#/zh/create
-  // 优点：刷新任何页面都不会 404，无需后端 SPA fallback 支持
-  // 语言通过URL路径设置：/en/... 或 /zh/...
+  // BrowserRouter: /en/create, /zh/create. Studio nginx already falls back to index.html.
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" forcedTheme="dark" enableSystem={false}>
       <TooltipProvider delayDuration={150}>
         <Toaster />
         <Sonner />
-        <HashRouter
+        <BrowserRouter
+          basename={import.meta.env.BASE_URL.replace(/\/$/, '') || '/'}
           future={{
             v7_startTransition: true,
             v7_relativeSplatPath: true,
@@ -47,7 +46,7 @@ const App = () => {
               } />
             </Routes>
           </LanguageProvider>
-        </HashRouter>
+        </BrowserRouter>
       </TooltipProvider>
     </ThemeProvider>
   )
