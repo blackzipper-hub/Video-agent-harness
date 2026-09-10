@@ -346,6 +346,29 @@ class ContinuousSchedulerTest(unittest.IsolatedAsyncioTestCase):
         self.executor.release.set()
         await asyncio.wait_for(self.worker, 3)
 
+    async def test_empty_live_ack_does_not_self_deliver_or_advance_revisions(self):
+        plan = await self.resolve(await self.checkpoint(), proposed_steps=[self.task("slow")])
+        self.worker = asyncio.create_task(self.run_build())
+        await asyncio.wait_for(self.executor.started["slow"].wait(), 3)
+        for _ in range(3):
+            checkpoint = await self.runtime.inspect_checkpoint(
+                project_id=self.project.id, build_id=self.build.id, checkpoint_id="live",
+                session_id="s", user_id="u",
+            )
+            self.assertTrue(checkpoint.phase.startswith("live:"))
+            self.assertIsNone(await self.runtime.repo.claim_pending_checkpoint())
+            acknowledged = await self.resolve(checkpoint)
+            self.assertEqual(acknowledged.current_revision, plan.current_revision)
+            self.assertEqual(acknowledged.video_spec_revision_id, plan.video_spec_revision_id)
+            self.assertEqual((await self.resolve(checkpoint)).current_revision, plan.current_revision)
+            await asyncio.sleep(0.01)
+            self.assertIsNone(await self.runtime.repo.claim_pending_checkpoint())
+        self.executor.release.set()
+        await asyncio.wait_for(self.worker, 3)
+        notification = await self.runtime.repo.claim_pending_checkpoint()
+        self.assertIsNotNone(notification)
+        self.assertTrue(notification.phase.startswith("task-update:"))
+
     async def test_unknown_and_cyclic_dependencies_are_rejected(self):
         checkpoint = await self.checkpoint()
         for tasks in ([self.task("fast", ["absent"])], [self.task("fast", ["slow"]), self.task("slow", ["fast"])]):

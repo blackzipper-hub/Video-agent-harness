@@ -4,6 +4,9 @@ api_version: v1
 runtime_entrypoint: app.video_runtime.builtin_plugins.cuti_provider:CutiAtomicProviderPlugin
 trusted: true
 contributions:
+  plan_patch_capabilities:
+    - atomic.video.generate
+    - api.provider.generate
   capabilities:
     - atomic.text.generate
     - atomic.image.generate

@@ -47,6 +47,12 @@ def _clip(step_id: str, uri: str) -> dict:
 
 
 class MediaCoreDualInputTest(unittest.IsolatedAsyncioTestCase):
+    async def test_transcription_does_not_prime_audio_with_script(self):
+        transcribe = AsyncMock(return_value={"text": "Actual speech", "segments": [{"start": 1, "end": 2, "text": "Actual speech"}]})
+        with patch("app.services.subtitle_transcription_service.transcribe_video", transcribe):
+            await self._run("media.transcribe", {"video_url": "https://cdn.example/v.mp4", "prompt": "Invented screenplay"})
+        self.assertIsNone(transcribe.await_args.kwargs["prompt"])
+
     async def _run(self, capability: str, parameters: dict, completed: dict | None = None):
         plugin = MediaCorePlugin()
         return await plugin.capability_handlers()[capability](
@@ -235,25 +241,33 @@ class DestAndStepSchemaTest(unittest.TestCase):
             "mode": "replace",
         })
 
-    def test_hyperframes_captions_skill_teaches_caption_html(self):
+    def test_hyperframes_captions_skill_teaches_cuti_template_flow(self):
         root = Path(__file__).resolve().parents[2] / "skills" / "builtin"
         catalog = SkillCatalog([root])
         catalog.discover()
         skill = catalog.load("hyperframes-captions")
         self.assertIsNone(skill.contract)
-        self.assertIn("caption_html", skill.instructions)
+        self.assertIn("timestamps", skill.instructions)
         self.assertIn("media.hyperframes_caption", skill.instructions)
-        self.assertIn("video_skill_load", skill.instructions)
-        self.assertIn("media.transcribe", skill.instructions)
         self.assertNotIn("不要只报一个 registry 组件名", skill.instructions)
-        self.assertNotIn("style 名字", skill.instructions)
-        self.assertNotIn("灌词", skill.instructions)
-        self.assertNotIn("subtitle-authoring", skill.instructions)
-        self.assertNotIn("静态硬烧", skill.instructions)
-        self.assertNotIn("静态字幕", skill.instructions)
 
 
 class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
+    async def test_translations_keep_transcript_timing_and_template_placement(self):
+        transcript = MediaArtifactVersion(project_id="project-1", artifact_id="transcription", type="transcript", metadata={
+            "segments": [{"start": 3.2, "end": 4.8, "text": "Hello"}],
+            "words": [{"start": 3.2, "end": 4.8, "word": "Hello"}],
+        }).model_dump(mode="json")
+        caption = AsyncMock(return_value={"result_url": "https://cdn.example/out.mp4"})
+        with patch("app.utils.media_service_client.hyperframes_caption", caption):
+            await self._run({"video_url": "https://cdn.example/v.mp4", "translated_texts": ["你好"],
+                             "caption_html": "<div>invented</div>", "position": "bottom-safe"},
+                            {"transcription": transcript})
+        self.assertEqual(caption.await_args.kwargs["cues"], [{"start": 3.2, "end": 4.8, "text": "你好"}])
+        self.assertEqual(caption.await_args.kwargs["words"], [])
+        self.assertIsNone(caption.await_args.kwargs["caption_html"])
+        self.assertEqual(caption.await_args.kwargs["position"], "bottom-safe")
+
     async def _run(self, parameters: dict, completed: dict | None = None):
         plugin = MediaCorePlugin()
         return await plugin.capability_handlers()["media.hyperframes_caption"](
@@ -284,9 +298,53 @@ class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["caption_html"], "<!doctype html><html></html>")
         self.assertEqual(payload["words"], [])
         self.assertEqual(payload["cues"], [])
-        self.assertNotIn("style", caption.await_args.kwargs)
+        self.assertEqual(caption.await_args.kwargs["style"], "caption-highlight")
         self.assertEqual(result.uri, "https://cdn.example/captioned.mp4")
 
-    async def test_missing_html_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "caption_html or composition_html"):
+    async def test_transcript_cues_render_without_authored_html(self):
+        caption = AsyncMock(return_value={"result_url": "https://cdn.example/captioned.mp4"})
+        transcript = MediaArtifactVersion(
+            project_id="project-1",
+            artifact_id="transcription",
+            type="transcript",
+            uri=None,
+            metadata={"plan_step_id": "transcription"},
+        ).model_dump(mode="json")
+        transcript["metadata"].update({
+            "segments": [{"start": 1, "end": 2, "text": "字幕"}],
+        })
+        with patch("app.utils.media_service_client.hyperframes_caption", caption):
+            result = await self._run(
+                {
+                    "video_url": "https://cdn.example/v.mp4",
+                    "transcription_step": "transcription",
+                    "style": "caption-editorial-emphasis",
+                },
+                {"transcription": transcript},
+            )
+        self.assertEqual(result.uri, "https://cdn.example/captioned.mp4")
+        self.assertEqual(caption.await_args.kwargs["style"], "caption-editorial-emphasis")
+        self.assertEqual(caption.await_args.kwargs["cues"][0]["text"], "字幕")
+        self.assertIsNone(caption.await_args.kwargs["caption_html"])
+
+    async def test_missing_transcript_and_html_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "timestamped transcript"):
             await self._run({"video_url": "https://cdn.example/v.mp4"})
+
+    async def test_replacing_static_captions_uses_original_video(self):
+        caption = AsyncMock(return_value={"result_url": "https://cdn.example/dynamic.mp4"})
+        source = _clip("captioned-video", "https://cdn.example/static-captioned.mp4")
+        source["metadata"].update({
+            "capability": "media.subtitle_burn",
+            "source_video_url": "https://cdn.example/original.mp4",
+        })
+        with patch("app.utils.media_service_client.hyperframes_caption", caption):
+            await self._run(
+                {
+                    "video_step": "captioned-video",
+                    "caption_html": "<body><div data-composition-id=\"captions\"></div></body>",
+                },
+                {"captioned-video": source},
+            )
+
+        self.assertEqual(caption.await_args.args[0], "https://cdn.example/original.mp4")

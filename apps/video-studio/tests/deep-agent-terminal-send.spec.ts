@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { deepAgentReducer, initialDeepAgentState } from '../src/features/deep-agent-v2/reducer'
+import { DeepAgentApiError, isStoppedResumeRequired } from '../src/features/deep-agent-v2/client'
 
 const terminalSnapshot = (status: 'completed' | 'failed' | 'cancelled') => ({
   run: {
@@ -39,4 +40,17 @@ describe('Deep Agent terminal send state', () => {
       expect(next.isSending).toBe(false)
     },
   )
+
+  it('recognizes the authoritative stopped-build conflict for resume fallback', () => {
+    expect(isStoppedResumeRequired(new DeepAgentApiError(
+      409,
+      'Task stopped. Confirm resume before sending a continuation.',
+      'task_stopped_resume_required',
+    ))).toBe(true)
+  })
+
+  it('does not treat unrelated conflicts as a stopped-build resume request', () => {
+    expect(isStoppedResumeRequired(new DeepAgentApiError(409, 'Project version conflict'))).toBe(false)
+    expect(isStoppedResumeRequired(new DeepAgentApiError(422, 'Task stopped. Confirm resume before sending a continuation.'))).toBe(false)
+  })
 })

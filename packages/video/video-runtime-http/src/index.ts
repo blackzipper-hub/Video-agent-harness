@@ -247,9 +247,9 @@ export class HttpVideoRuntime extends VideoRuntime {
     const payload: unknown = await response.json().catch(() => undefined)
     if (!response.ok) {
       const detail = typeof payload === 'object' && payload !== null && 'detail' in payload
-        ? String(payload.detail)
+        ? (typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail))
         : `HTTP ${response.status}`
-      throw new Error(`video runtime request failed: ${detail}`)
+      throw new Error(`video runtime request failed (HTTP ${response.status}): ${detail}`)
     }
     if (typeof payload !== 'object' || payload === null || !('data' in payload)) {
       throw new Error('video runtime returned an invalid response envelope')

@@ -232,7 +232,12 @@ function projectText(value: { projectId: string; currentVersionId: string; artif
 }
 
 function buildText(value: { buildId: string; status: string; progress: number; message: string }): string {
-  return `Video build ${displayValue(value.buildId)}: ${displayValue(value.status)} (${Math.round(value.progress * 100)}%). ${displayValue(value.message)}`
+  const next = ['queued', 'running', 'waiting_external'].includes(value.status)
+    ? ' Work remains active. Continue with video_build_status; do not end the request with a promise to finish later.'
+    : value.status === 'completed'
+      ? ' Inspect the resulting artifacts. If this was an intermediate step (such as transcription), plan and apply the next step until the requested deliverable exists.'
+      : ''
+  return `Video build ${displayValue(value.buildId)}: ${displayValue(value.status)} (${Math.round(value.progress * 100)}%). ${displayValue(value.message)}${next}`
 }
 
 /** Register the stable high-level tool surface; provider-specific operations stay behind the runtime. */
@@ -448,7 +453,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_edit_preview',
-    description: 'Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.',
+    description: 'Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. After preview, execute the requested edit without a second confirmation.',
     parameters: {
       project_id: { type: 'string', required: true },
       base_project_version_id: { type: 'string', required: true },
@@ -473,7 +478,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Edit plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.filter(step => typeof step === 'object' && step !== null && !Array.isArray(step) && step.action === 'rebuild').length : 0)} rebuild steps, estimated cost $${displayValue(value.estimatedCost)}. Await user confirmation before applying.`,
+        text: `Edit plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.filter(step => typeof step === 'object' && step !== null && !Array.isArray(step) && step.action === 'rebuild').length : 0)} rebuild steps, estimated cost $${displayValue(value.estimatedCost)}. Apply this requested plan immediately with video_rebuild_apply; no second confirmation is needed.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewEdits({
@@ -489,7 +494,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_plan_patch_preview',
-    description: 'Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. This only previews impact and cost; wait for user confirmation before video_rebuild_apply. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.',
+    description: 'Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. After preview, call video_rebuild_apply immediately for the requested operation. No second confirmation is needed. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.',
     parameters: {
       project_id: { type: 'string', required: true },
       base_project_version_id: { type: 'string', required: true },
@@ -519,7 +524,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Dynamic media plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.length : 0)} steps, estimated cost $${displayValue(value.estimatedCost)}. Await user confirmation before applying.`,
+        text: `Dynamic media plan ${displayValue(value.planId)}: ${displayValue(Array.isArray(value.steps) ? value.steps.length : 0)} steps, estimated cost $${displayValue(value.estimatedCost)}. Apply this requested plan immediately with video_rebuild_apply; no second confirmation is needed.`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.previewPlanPatch({
@@ -535,7 +540,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'video_rebuild_apply',
-    description: 'Apply an approved rebuild plan against its exact base project version.',
+    description: 'Apply the user-requested rebuild plan against its exact base project version without a second confirmation. Continue tracking the build and completing dependent steps.',
     parameters: {
       project_id: { type: 'string', required: true },
       plan_id: { type: 'string', required: true },
@@ -574,7 +579,7 @@ export function apply(ctx: Context): void {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{
         type: 'text',
-        text: `Checkpoint ${displayValue(value.id)} after ${displayValue(value.phase)}; plan ${displayValue(value.next_phase)} from ${displayValue(Array.isArray(value.artifact_summaries) ? value.artifact_summaries.length : 0)} real artifacts.`,
+        text: `Use base_plan_revision as base_revision and base_spec_revision unchanged in video_plan_patch_submit.\n${JSON.stringify(value)}`,
       }],
     },
     execute: (args, exec) => ctx.videoRuntime.inspectCheckpoint(

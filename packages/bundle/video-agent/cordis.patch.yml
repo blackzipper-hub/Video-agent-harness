@@ -1,4 +1,13 @@
 # Cuti Video Agent bundle. Apply over a normal DeepSeek Harness profile.
+- id: compaction-basic
+  disabled: false
+
+- id: command-compact
+  disabled: false
+
+- id: tool-result-pruner
+  disabled: false
+
 - id: llm-pi-ai
   config:
     providers:

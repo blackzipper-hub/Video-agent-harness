@@ -421,7 +421,7 @@ def platform_capabilities() -> list[CapabilityManifest]:
         ),
         _manifest(
             "media.hyperframes_caption",
-            "Render HyperFrames captions over a selected video. Write caption_html with transcript timing in the HTML.",
+            "Render sentence-synchronized HyperFrames captions over a selected video from timestamped transcript cues.",
             "local.service",
             "video",
             alias="media-hyperframes-caption",
@@ -430,19 +430,29 @@ def platform_capabilities() -> list[CapabilityManifest]:
             optional=["transcript"],
             parameters_schema={
                 "type": "object",
-                "anyOf": [
-                    {"required": ["caption_html"]},
-                    {"required": ["composition_html"]},
-                ],
                 "properties": {
                     "video_url": {"type": "string"},
                     "video_step": {"type": "string"},
                     "transcription_step": {"type": "string"},
+                    "style": {
+                        "type": "string",
+                        "enum": [
+                            "caption-highlight", "caption-pill-karaoke",
+                            "caption-editorial-emphasis", "caption-glitch-rgb",
+                            "caption-kinetic-slam", "caption-neon-glow",
+                            "caption-neon-accent", "caption-clip-wipe",
+                            "caption-gradient-fill", "caption-matrix-decode",
+                            "caption-emoji-pop", "caption-parallax-layers",
+                            "caption-particle-burst", "caption-texture",
+                            "caption-weight-shift",
+                        ],
+                        "default": "caption-highlight",
+                    },
                     "caption_html": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 500000,
-                        "description": "Authored caption composition HTML. Put transcript timing in the HTML.",
+                        "description": "Advanced non-dialogue overlays only. Dialogue uses transcript segments and the Cuti template, not authored HTML.",
                     },
                     "composition_html": {
                         "type": "string",

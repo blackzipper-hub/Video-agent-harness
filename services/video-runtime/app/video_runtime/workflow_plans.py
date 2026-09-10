@@ -144,6 +144,36 @@ def validate_original_cuti_workflow_contract(workflow: WorkflowSpec) -> None:
         )
 
 
+def workflow_execution_kind(workflow: WorkflowSpec) -> str:
+    """Admit named Cuti compilers or explicitly agent-planned installed Skills.
+
+    A Skill's allowlist restricts execution; it never grants provider, network,
+    or sandbox permissions. New Skills cannot inherit a named production DAG.
+    """
+    if workflow.mode in UNAVAILABLE_WORKFLOW_MODES:
+        raise BuildPlanValidationError(UNAVAILABLE_WORKFLOW_MODES[workflow.mode])
+    if workflow.skill_name in WORKFLOW_ID_COMPILERS:
+        validate_original_cuti_workflow_contract(workflow)
+        return "dedicated_compiler"
+    if workflow.planning.mode != "agentic":
+        raise BuildPlanValidationError(
+            f"workflow {workflow.skill_name} requires planning.mode=agentic "
+            "or an explicitly installed dedicated compiler"
+        )
+    if not workflow.allowed_capabilities:
+        raise BuildPlanValidationError(
+            f"workflow {workflow.skill_name} requires non-empty allowed_capabilities"
+        )
+    outputs = workflow.parameters.get("completion_artifact_types", ["video"])
+    if not isinstance(outputs, list) or not outputs or any(
+        not isinstance(item, str) or not item.strip()
+        or item in {"project_intent", "validation", "validation_result"}
+        or item.startswith("source_") for item in outputs
+    ):
+        raise BuildPlanValidationError("completion_artifact_types must list generated deliverable types")
+    return "agent_plan_patch"
+
+
 class WorkflowPlanBuilder:
     def __init__(self, workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec) -> None:
         if not context.project_id:

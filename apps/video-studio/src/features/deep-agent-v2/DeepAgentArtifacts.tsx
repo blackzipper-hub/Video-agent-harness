@@ -771,7 +771,7 @@ export function DeepAgentArtifacts({
         }
       } catch {
         if (isActive()) {
-          setWorkspaceError(tRef.current('da.runtime.requestFailed'))
+          setWorkspaceError(tRef.current('da.runtime.requestFailedGeneric'))
         }
       } finally {
         inFlight = false
@@ -978,8 +978,8 @@ export function DeepAgentArtifacts({
       )
       setRuntimeWorkspace(await videoRuntimeClient.workspace(projectId))
       toast.success(t('da.workspace.artifactSwitched'))
-    } catch {
-      toast.error(t('da.runtime.requestFailed'))
+    } catch (error) {
+      toast.error(error instanceof Error ? runtimeMessage(error.message, t) : t('da.runtime.requestFailedGeneric'))
     } finally {
       setSelectingArtifactId(null)
     }
@@ -993,8 +993,8 @@ export function DeepAgentArtifacts({
         setRuntimeWorkspace(await videoRuntimeClient.workspace(projectId))
         setWorkspaceError(null)
       }
-    } catch {
-      setWorkspaceError(t('da.runtime.requestFailed'))
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? runtimeMessage(error.message, t) : t('da.runtime.requestFailedGeneric'))
     } finally {
       setWorkspaceLoading(false)
     }

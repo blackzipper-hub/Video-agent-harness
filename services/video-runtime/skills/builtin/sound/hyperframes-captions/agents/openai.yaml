@@ -1,4 +1,4 @@
 interface:
   display_name: "HyperFrames Captions"
   short_description: "Overlay HyperFrames captions and optional titles on an existing video."
-  default_prompt: "Use $hyperframes-captions to transcribe the selected video, author HyperFrames caption HTML, and render it."
+  default_prompt: "Use $hyperframes-captions to transcribe the selected video, choose a suitable style, and render sentence-synchronized HyperFrames captions."

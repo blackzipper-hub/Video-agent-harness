@@ -24,6 +24,7 @@ from .workflow_plans import (
     compile_skill_workflow,
     validate_agentic_workflow_plan,
     validate_original_cuti_workflow_contract,
+    workflow_execution_kind,
 )
 from .staged_planning import (
     append_phase,
@@ -47,16 +48,17 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
         workflow = self._workflows.get(workflow_id)
         if workflow is None:
             raise LookupError(f"workflow Skill is not installed: {workflow_id}")
-        validate_original_cuti_workflow_contract(workflow)
+        workflow_execution_kind(workflow)
         return effective_planning_mode(workflow, workflow_id)
 
     def describe_workflows(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for spec in self._workflows.values():
             contract = WORKFLOW_ID_COMPILERS.get(spec.skill_name)
+            execution_kind = "unavailable"
             contract_error: str | None = None
             try:
-                validate_original_cuti_workflow_contract(spec)
+                execution_kind = workflow_execution_kind(spec)
             except BuildPlanValidationError as exc:
                 contract_error = str(exc)
             compiler = (
@@ -68,7 +70,7 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
                 )
                 else None
             )
-            available = compiler is not None
+            available = execution_kind != "unavailable"
             result.append({
                 "id": spec.skill_name,
                 "title": spec.title,
@@ -93,9 +95,7 @@ class SkillWorkflowPlugin(BaseVideoPlugin):
                     UNAVAILABLE_WORKFLOW_CAPABILITIES.get(spec.mode, [])
                 ),
                 "userSelectable": available,
-                "executionKind": (
-                    "dedicated_compiler" if available else "unavailable"
-                ),
+                "executionKind": execution_kind,
                 "compiler": compiler.__name__ if compiler is not None else None,
                 "planning": {
                     "mode": spec.planning.mode,

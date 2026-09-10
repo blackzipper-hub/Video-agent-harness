@@ -559,6 +559,12 @@ def _workflow_views(build_runtime: VideoBuildRuntime) -> list[dict]:
             "compiler": None,
         } for workflow_id in loaded.manifest.contributions.workflows)
     for item in workflows:
+        if item.get("executionKind") == "agent_plan_patch" and not (
+            build_runtime.staged_planning_enabled and build_runtime.continuous_plan_patch_enabled
+        ):
+            item["available"] = False
+            item["userSelectable"] = False
+            item["unavailableReason"] = "Workflow requires continuous PlanPatch planning to be enabled"
         if build_runtime.skills.catalog.has(item["id"]):
             try:
                 metadata = build_runtime.skills.catalog.load(item["id"]).metadata
@@ -654,7 +660,14 @@ async def list_plan_patch_capabilities(
     build_runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict:
     """List enabled capabilities with parameters_schema for PlanPatch."""
-    return {"data": build_runtime.skills.capabilities.prompt_view()}
+    operations = {item.capability: item for item in build_runtime.plan_patch_capability_catalog()}
+    entries = build_runtime.skills.capabilities.prompt_view()
+    for entry in entries:
+        operation = operations.get(entry["id"])
+        entry["workflow_free_available"] = operation is not None
+        if operation is not None:
+            entry["workflow_free_inputs"] = [item.model_dump(mode="json") for item in operation.inputs]
+    return {"data": entries}
 
 
 @router.get("/workflows/{workflow_id}")

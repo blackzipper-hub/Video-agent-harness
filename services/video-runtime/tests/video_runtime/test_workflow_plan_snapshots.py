@@ -187,8 +187,8 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             {
                 "compile_seedance2", "compile_mv_compat",
                 "compile_short_drama_workflow",
-                "compile_product_ad", "compile_cuti_product",
-                "compile_scenario_product", "compile_libtv_product",
+                "compile_cuti_product",
+                "compile_scenario_product",
             },
         )
 
@@ -228,8 +228,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
         expected_hashes = {
             "cuti-product-workflow": "141aa613a932a7552e6c6ea62fd88ad7ceec35c61ab7dff407eb138db7b68fb7",
             "cuti-scenario-product-workflow": "46f179443bbf2377dfe238a519b15cfff54adfee239a6b0bce61a5a1bc9a3996",
-            "libtv-product-workflow": "8a41ee03d48eda29d1b574c9b512f9b259f216f8cce9be69ffd8455c2736ee64",
-            "product-ad-video": "250e1b246c6f3fc4560c97598f92d10209d4105e313598928fd8c31a43de2657",
             "seedance2": "a496b7e4b2ed260753355de549b0606e38236692461cff601be05021fe4db7d7",
             "short-drama-workflow": "d81a99f35a4fddf2772e1aa5c861ec7f53ec88690e136f3048523c68c8143c4c",
         }
@@ -395,24 +393,6 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
             for item in clips
         ))
 
-    async def test_product_ad_rejects_non_image_source(self) -> None:
-        if "product-ad-video" not in self.plugin._workflows:
-            self.skipTest("product ad workflow is not installed")
-        audio = MediaArtifactVersion(
-            id="source-audio-version", artifact_id="source:audio",
-            project_id="project-1", type="source_audio",
-            uri="https://example.test/music.mp3",
-        )
-        spec = _spec("product-ad-video", source_asset_ids=[audio.artifact_id])
-        with self.assertRaisesRegex(BuildPlanValidationError, "uploaded product image"):
-            await self.plugin.compile_build_plan(
-                PluginContext(project_id="project-1", values={
-                    "base_project_version_id": "version-1",
-                    "source_artifacts": {audio.artifact_id: audio},
-                }),
-                spec,
-            )
-
     async def test_unavailable_and_unknown_workflows_fail_closed(self) -> None:
         views = {item["id"]: item for item in self.plugin.describe_workflows()}
         for workflow_id in ("open-montage", "ink-press-product-workflow"):
@@ -456,8 +436,8 @@ class WorkflowPlanSnapshotTest(unittest.IsolatedAsyncioTestCase):
         if "seedance2" in installed:
             workflow_specs["seedance2"] = _spec("seedance2")
         for workflow_id in (
-            "product-ad-video", "cuti-product-workflow",
-            "cuti-scenario-product-workflow", "libtv-product-workflow",
+            "cuti-product-workflow",
+            "cuti-scenario-product-workflow",
         ):
             if workflow_id not in installed:
                 continue

@@ -172,17 +172,14 @@ class TestSkillProgressiveLoad(unittest.TestCase):
 
         for helper in (
             "video-research", "suno-song", "h3",
-            "hyperframes-captions",
+            "hyperframes-captions", "subtitle-authoring",
         ):
             self.assertIn(f'video_skill_load("{helper}")', instructions)
             self._get_skill(helper)
-        self.assertNotIn('video_skill_load("subtitle-authoring")', instructions)
 
         captions = self._get_skill("hyperframes-captions")["instructions"]
-        self.assertIn("caption_html", captions)
-        self.assertIn("video_skill_load", captions)
-        self.assertIn("media.transcribe", captions)
-        self.assertNotIn("media.audio_analyze", captions)
+        self.assertIn("timestamps", captions)
+        self.assertIn("selected `style` explicitly", captions)
 
         suno = self._get_skill("suno-song")
         for path in (

@@ -1,5 +1,7 @@
 # @cuti-ai/tool-video
 
+Checkpoint inspection renders the checkpoint JSON, including both revision counters, artifact summaries and planning instructions. Submit `base_plan_revision` as `base_revision` and retain `base_spec_revision`; these values must not be guessed from a phase label.
+
 English | [中文](README.zh.md)
 
 Stable, high-level tools that let a DeepSeek agent operate a versioned video project without exposing provider-specific calls.
@@ -11,6 +13,8 @@ Project creation and planning require a five-field video language contract. The 
 For corrected-parameter retries, submit `replace_failed_task_ids` mapping failed IDs to new `add_tasks` client keys. The Runtime replaces pending descendants atomically; completed outputs remain reusable. A failed continuous Build can be inspected with `checkpoint_id="live"` and stays stopped until the repair patch commits.
 
 ## Model Experience
+
+An explicit edit request authorizes preview and apply without another confirmation. Build results distinguish queued work from completion and direct the Agent to finish dependent steps. Workflow-free PlanPatch capabilities include installed video generation and media operations; a generated clip can feed concatenation in the same plan.
 
 ### Project video tools
 

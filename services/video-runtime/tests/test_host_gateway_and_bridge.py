@@ -234,6 +234,22 @@ def test_explicit_prompt_first_frame_slot_becomes_start_image(prompt, slot):
     assert profile["start_image_url"] == slot
 
 
+@pytest.mark.parametrize("prompt", [
+    "参考图锁定身份服装车辆道具空间而非首帧：@图片1部长保镖，@图片2控制室。",
+    "不要将@图片1作为首帧，只作人物参考。",
+    "Do not use @image1 as the first frame; use identity references only.",
+    "Not the first frame: @image1 is an identity reference.",
+])
+def test_negated_frame_assignment_keeps_all_identity_references(prompt):
+    profile = normalize_video_profile({
+        "model": "seedance-2.5", "generation_mode": "t2v", "prompt": prompt,
+        "images": ["https://cdn/character.png", "https://cdn/scene.png"],
+    })
+    assert "start_image_url" not in profile
+    assert profile["generation_mode"] == "t2v"
+    assert len(profile["images"]) == 2
+
+
 def test_conflicting_duration_selectors_are_rejected():
     with pytest.raises(ValueError, match="conflicting video duration selectors"):
         normalize_video_profile({"duration": 5, "duration_seconds": 15})

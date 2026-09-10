@@ -179,7 +179,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.transcribe",
-                description="Transcribe the selected video into timestamped speech. For songs, pass known lyrics in parameters.prompt to guide recognition; unreliable word timing is rejected before subtitle rendering.",
+                description="Transcribe actual audio from the selected video into timestamped speech, without screenplay or lyrics prompting. Inspect the resulting segments before rendering captions.",
                 inputs=[source("video", ["video"], "video_step")],
                 output_artifact_type="transcript",
                 estimated_cost=0.01,
@@ -206,7 +206,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.hyperframes_caption",
-                description="Render authored HyperFrames caption HTML over a selected video.",
+                description="Render sentence-synchronized HyperFrames captions from a timestamped transcript.",
                 inputs=[
                     source("video", ["video"], "video_step"),
                     source("transcript", ["transcript"], "transcription_step", required=False),
@@ -408,7 +408,7 @@ class MediaCorePlugin(BaseVideoPlugin):
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 language=parameters.get("language"),
                 model=parameters.get("model"),
-                prompt=parameters.get("prompt"),
+                prompt=None,
             )
         elif capability == "media.timeline.compose":
             items, cursor = [], 0.0
@@ -500,20 +500,37 @@ class MediaCorePlugin(BaseVideoPlugin):
             result = {**result, "uri": result.get("result_url")}
         elif capability == "media.hyperframes_caption":
             from app.utils import media_service_client as msc
+            video_step = parameters.get("video_step")
             video_url = self._url_from_step_or_direct(
                 completed,
-                step_id=parameters.get("video_step"),
+                step_id=video_step,
                 url=parameters.get("video_url") or parameters.get("uri"),
                 label="video_step or video_url",
             )
+            # Replacing one caption treatment with another must start from the
+            # pre-caption source. Otherwise every edit permanently burns another
+            # subtitle layer into the selected logical video artifact.
+            if parameters.get("replace_existing_captions", True) and video_step:
+                selected_video = completed.get(str(video_step))
+                selected_metadata = (
+                    selected_video.metadata or {} if selected_video is not None else {}
+                )
+                selected_capability = str(
+                    selected_metadata.get("capability")
+                    or selected_metadata.get("rebuild_capability")
+                    or ""
+                )
+                original_video_url = selected_metadata.get("source_video_url")
+                if (
+                    selected_capability in {"media.subtitle_burn", "media.subtitle.burn", "media.hyperframes_caption"}
+                    and isinstance(original_video_url, str)
+                    and original_video_url.strip()
+                ):
+                    video_url = original_video_url.strip()
             caption_html = parameters.get("caption_html")
             composition_html = parameters.get("composition_html")
             authored_caption = caption_html.strip() if isinstance(caption_html, str) else ""
             authored_host = composition_html.strip() if isinstance(composition_html, str) else ""
-            if not authored_caption and not authored_host:
-                raise ValueError(
-                    "media.hyperframes_caption requires caption_html or composition_html"
-                )
             transcription_step = parameters.get("transcription_step")
             if not transcription_step:
                 for dep in step.get("depends_on") or []:
@@ -533,11 +550,31 @@ class MediaCorePlugin(BaseVideoPlugin):
                 raise ValueError(
                     f"required media output is unavailable: {transcription_step}"
                 )
+            if transcription is not None:
+                # Dialogue captions use the proven Cuti template, not arbitrary
+                # model HTML that can override timing and safe-area placement.
+                cues = list(transcription.metadata.get("segments") or [])
+                words = list(transcription.metadata.get("words") or [])
+                translations = parameters.get("translated_texts")
+                if translations is not None:
+                    if not isinstance(translations, list) or len(translations) != len(cues) or any(
+                        not isinstance(text, str) or not text.strip() for text in translations
+                    ):
+                        raise ValueError("translated_texts must contain one nonempty translation per transcript segment; preserve transcript order")
+                    cues = [{**cue, "text": text.strip()} for cue, text in zip(cues, translations, strict=True)]
+                    words = []
+                authored_caption = ""
+                authored_host = ""
+            if not authored_caption and not authored_host and not words and not cues:
+                raise ValueError(
+                    "media.hyperframes_caption requires a timestamped transcript, words, or cues"
+                )
             result = await msc.hyperframes_caption(
                 video_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 words=words,
                 cues=cues,
+                style=str(parameters.get("style") or "caption-highlight"),
                 accent_color=str(parameters.get("accent_color") or "#ff1745"),
                 position=str(parameters.get("position") or "bottom-safe"),
                 playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,

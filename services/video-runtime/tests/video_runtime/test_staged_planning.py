@@ -479,15 +479,13 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "mv": ["intent", "music", "music-analysis", "music-cut"],
             "short-drama-workflow": ["intent", "story-draft"],
             "seedance2": ["intent"],
-            "product-ad-video": ["intent", "source-1", "product-analysis"],
             "cuti-product-workflow": ["intent", "source-1", "product-analysis"],
             "cuti-scenario-product-workflow": ["intent", "source-1", "product-analysis"],
-            "libtv-product-workflow": ["intent", "source-1", "product-analysis"],
         }
         music = {"mv"}
         products = {
-            "product-ad-video", "cuti-product-workflow",
-            "cuti-scenario-product-workflow", "libtv-product-workflow",
+            "cuti-product-workflow",
+            "cuti-scenario-product-workflow",
         }
         for index, (workflow_id, expected_steps) in enumerate(expected.items(), start=1):
             project, version = await self.runtime.create_project(
@@ -637,12 +635,12 @@ class StagedPlanningRuntimeTest(unittest.IsolatedAsyncioTestCase):
         """Schema-v2 continuation may stage a compiler, but may never replace it."""
         workflows = (
             "mv", "seedance2",
-            "short-drama-workflow", "product-ad-video", "cuti-product-workflow",
-            "cuti-scenario-product-workflow", "libtv-product-workflow",
+            "short-drama-workflow", "cuti-product-workflow",
+            "cuti-scenario-product-workflow",
         )
         product_workflows = {
-            "product-ad-video", "cuti-product-workflow",
-            "cuti-scenario-product-workflow", "libtv-product-workflow",
+            "cuti-product-workflow",
+            "cuti-scenario-product-workflow",
         }
         music_workflows = {
             "mv",
@@ -980,7 +978,7 @@ class ContinuousPlanInitializationTest(unittest.TestCase):
         # Availability is checked by Runtime before reaching this function.
         for workflow_id in (
             "seedance2", "cuti.music-video",
-            "cuti.lipsync-music-video", "product-ad-video",
+            "cuti.lipsync-music-video",
             "cuti-scenario-product-workflow", "workflow-keyframe-pipeline",
             "third-party-agentic-workflow",
         ):
@@ -1007,7 +1005,7 @@ class ContinuousPlanInitializationTest(unittest.TestCase):
             project_id="project-1", artifact_id="source:product", type="source_image",
         )
         intent = ProjectIntent(
-            title="Product", brief="Use my product image", workflow_id="product-ad-video",
+            title="Product", brief="Use my product image", workflow_id="cuti-product-workflow",
             source_asset_ids=[source.artifact_id],
         )
         context = PluginContext(project_id="project-1", values={

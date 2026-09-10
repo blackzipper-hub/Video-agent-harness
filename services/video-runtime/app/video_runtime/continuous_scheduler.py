@@ -8,7 +8,7 @@ import json
 from typing import TYPE_CHECKING
 
 from .plan_utils import topological_steps
-from .models import Build, BuildStep, MediaArtifactVersion, PlanCheckpoint, ProjectVersion, RebuildPlan, RebuildPlanItem, now
+from .models import Build, BuildStep, MediaArtifactVersion, PlanCheckpoint, ProjectVersion, RebuildPlan, RebuildPlanItem, now, uid
 from .repository import PlanRevisionConflict
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ async def _notify_agent(
         return
     phase = "task-update:" + hashlib.sha256(json.dumps(terminal).encode()).hexdigest()[:24]
     if force:
-        phase = f"{'repair' if repairing else 'live'}:{plan.current_revision}"
+        phase = f"repair:{plan.current_revision}" if repairing else f"live:{plan.current_revision}:{uid()}"
     if any(item.phase == phase for item in checkpoints):
         return next(item for item in checkpoints if item.phase == phase) if repairing else None
     from .runtime import _checkpoint_artifact_summary, _checkpoint_task_parameters
@@ -77,6 +77,16 @@ async def _notify_agent(
             "replace_failed_task_ids mapping old task IDs to new client_keys; Runtime clones "
             "and rewires pending descendants. Do not use unchanged build retry for invalid parameters. Failed tasks "
             "are not automatically resubmitted. Completion requires no active tasks.\n"
+            "When editing, the previous selected video is not proof that the NEW request is "
+            "complete. Produce the requested edited/new artifact before goal_satisfied. "
+            "Preserve unchanged selections; use the target artifact's logical output ID when "
+            "replacing it. Existing media are available context, not automatic video references. "
+            "Choose reference inputs explicitly from the user's intent and capability schema.\n"
+            "Current user goal: " + (plan.project_intent.brief if plan.project_intent else "") + "\n"
+            "Requested edits: " + json.dumps(
+                plan.project_intent.constraints.get("edits", []) if plan.project_intent else [],
+                ensure_ascii=False,
+            ) + "\n"
             "Task snapshot at notification time:\n" + json.dumps(snapshot, ensure_ascii=False)
         ),
     ))
@@ -120,7 +130,9 @@ async def execute_continuous_build(
                 await runtime._execute_initial_create_step(
                     build=build, planned=planned, state=state, completed=completed,
                     executor=executor,
-                    retry_limit=plan.video_spec.automation.max_artifact_retries if plan.video_spec else 1,
+                    # Retry transport inside the provider adapter; task failure
+                    # must reach the Agent before another generation submission.
+                    retry_limit=0,
                 )
                 return
             state.status = "completed"

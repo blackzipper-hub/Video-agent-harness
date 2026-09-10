@@ -678,6 +678,53 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
             for item in dependencies
         ))
 
+    async def test_workflow_free_concat_ignores_stale_generation_workflow_lock(self):
+        runtime = await video_runtime()
+        project, _version = await runtime.create_project(
+            user_id="user", title="Finish an existing build",
+        )
+        workflow_id = "cuti-scenario-product-workflow"
+        if not runtime.skills.catalog.has(workflow_id):
+            self.skipTest(f"{workflow_id} Skill is not installed")
+        lock = await runtime.set_project_skill_enabled(
+            project_id=project.id,
+            skill_id=workflow_id,
+            enabled=True,
+        )
+        await runtime.repo.upsert_project_skill_lock(
+            lock.model_copy(update={"digest": "stale-project-lock"}),
+        )
+        clips = []
+        for number in (1, 2):
+            clips.append(await runtime.repo.add_artifact(MediaArtifactVersion(
+                artifact_id=f"{project.id}:segment-{number}",
+                project_id=project.id,
+                type="video_clip",
+                uri=f"https://media.test/segment-{number}.mp4",
+            )))
+        project = await runtime.repo.get_project(project.id)
+
+        plan = await runtime.preview_plan_patch(
+            project_id=project.id,
+            base_project_version_id=project.current_version_id,
+            description="Join the completed clips",
+            idempotency_key="concat-stale-workflow-lock",
+            operations=[MediaEditOperation.model_validate({
+                "step_id": "concat-segments",
+                "capability": "media.concat",
+                "inputs": [
+                    {"role": "videos", "artifact_version_id": item.id}
+                    for item in clips
+                ],
+                "parameters": {"normalize": True, "transition_duration": 0},
+            })],
+        )
+
+        concat = next(item for item in plan.items if item.step_id == "concat-segments")
+        self.assertEqual(plan.workflow_id, "")
+        self.assertEqual(concat.depends_on, ["source-1", "source-2"])
+        self.assertEqual(concat.resolved_skills, [])
+
     async def test_timeline_edit_can_author_new_shots_for_duration_extension(self):
         runtime = await video_runtime()
         project, _version = await runtime.create_project(user_id="user", title="Extend duration")
@@ -686,7 +733,7 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
             artifact_id=f"{project.id}:spec",
             project_id=project.id,
             type="video_spec",
-            metadata={"content": spec.model_dump(mode="json"), "plan_step_id": "spec"},
+            metadata={"content": spec.model_dump(mode="json") | {"execution_tasks": [{"step_id": "done", "status": "succeeded"}]}, "plan_step_id": "spec"},
         ))
         await runtime.repo.add_artifact(MediaArtifactVersion(
             artifact_id=f"{project.id}:seedance-prompts",
@@ -734,6 +781,70 @@ class InitialBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(plan.video_spec.shots), 4)
         new_shot = next(item for item in plan.items if item.step_id == "shot-four-video")
         self.assertEqual(new_shot.action, "create")
+        topological_steps(plan.items)
+
+    async def test_dynamic_edits_allow_matching_url_and_chained_transforms(self):
+        runtime = await video_runtime()
+        project, version = await runtime.create_project(user_id="user", title="Repeated edits")
+        source = await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id="source", project_id=project.id, type="video",
+            uri="https://media.test/source.mp4",
+        ))
+        project = await runtime.repo.get_project(project.id)
+        plan = await runtime.preview_plan_patch(
+            project_id=project.id, base_project_version_id=project.current_version_id,
+            operations=[MediaEditOperation.model_validate(item) for item in [
+                {"step_id": "first", "capability": "media.hyperframes_caption",
+                 "inputs": [{"role": "video", "artifact_version_id": source.id}],
+                 "parameters": {"video_url": source.uri, "caption_html": "<body>First</body>"}},
+                {"step_id": "second", "capability": "media.hyperframes_caption",
+                 "inputs": [{"role": "video", "operation_step_id": "first"}],
+                 "parameters": {"caption_html": "<body>Second</body>"}},
+            ]],
+        )
+        first = next(item for item in plan.items if item.step_id == "first")
+        second = next(item for item in plan.items if item.step_id == "second")
+        self.assertNotIn("video_url", first.parameters)
+        self.assertIn("first", second.depends_on)
+        self.assertNotEqual(first.output_artifact_id, second.output_artifact_id)
+        topological_steps(plan.items)
+
+    async def test_dynamic_patch_can_generate_video_then_concat(self):
+        runtime = await video_runtime()
+        project, _ = await runtime.create_project(user_id="user", title="Append clip")
+        source = await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id="source", project_id=project.id, type="video", uri="https://media.test/source.mp4",
+        ))
+        reference = await runtime.repo.add_artifact(MediaArtifactVersion(
+            artifact_id="reference", project_id=project.id, type="image", uri="https://media.test/reference.png",
+        ))
+        project = await runtime.repo.get_project(project.id)
+        with self.assertRaisesRegex(ValueError, "Accepted input roles: images"):
+            await runtime.preview_plan_patch(
+                project_id=project.id, base_project_version_id=project.current_version_id,
+                operations=[MediaEditOperation.model_validate({
+                    "step_id": "invalid-reference", "capability": "api.provider.generate",
+                    "inputs": [{"role": "reference", "artifact_version_id": reference.id}],
+                    "parameters": {"prompt": "A bottle on a table"},
+                })],
+            )
+        plan = await runtime.preview_plan_patch(
+            project_id=project.id, base_project_version_id=project.current_version_id,
+            operations=[MediaEditOperation.model_validate(item) for item in [
+                {"step_id": "new-video", "capability": "api.provider.generate", "inputs": [
+                    {"role": "image", "artifact_version_id": reference.id}],
+                 "parameters": {"provider": "ark", "model": "seedance-2.5", "duration": 5,
+                                "prompt": "0-5 seconds: a slow cinematic camera push toward a bottle on a wooden table, warm lighting, no dialogue or text."}},
+                {"step_id": "append", "capability": "media.concat", "inputs": [
+                    {"role": "videos", "artifact_version_id": source.id},
+                    {"role": "videos", "operation_step_id": "new-video"}],
+                 "parameters": {"video_steps": ["redundant-source", "new-video"], "transition_duration": 0}},
+            ]],
+        )
+        appended = next(item for item in plan.items if item.step_id == "append")
+        self.assertIn("new-video", appended.depends_on)
+        self.assertNotIn("redundant-source", appended.parameters["video_steps"])
+        self.assertEqual(plan.workflow_id, "")
         topological_steps(plan.items)
 
     async def test_dynamic_media_patch_rejects_direct_urls_and_unselected_artifacts(self):

@@ -524,8 +524,9 @@ def append_continuous_plan_patch(
         resolves=["next_plan_patch"],
         planner_instruction=(
             "Inspect newly completed Artifacts and failed tasks, then append tasks or "
-            "cancel pending work. Set goal_satisfied only after the final playable "
-            "result exists and no active work remains."
+            "cancel pending work. Set goal_satisfied only after the Workflow's declared "
+            "deliverable exists (a playable video by default, or completion_artifact_types "
+            "from its parameters) and no active work remains."
         ),
         planning_mode="agentic",
     )

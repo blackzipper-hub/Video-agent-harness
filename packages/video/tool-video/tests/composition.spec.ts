@@ -254,5 +254,19 @@ describe('video tool composition', () => {
     expect(capabilities.isError).toBe(false)
     expect(capabilities.content.some(item => item.type === 'text' && item.text.includes('media.audio_cut'))).toBe(true)
     expect(capabilities.content.some(item => item.type === 'text' && item.text.includes('parameters_schema'))).toBe(true)
+    const edit = await ctx.tools.execute({
+      callId: CallId('video-call-auto-edit'), name: 'video_plan_patch_preview',
+      arguments: {
+        project_id: 'project-1', base_project_version_id: 'version-1',
+        idempotency_key: 'auto-edit', description: 'Add captions', operations: [{
+          step_id: 'captions', capability: 'media.hyperframes_caption',
+          inputs: [{ role: 'video', artifact_version_id: 'video-version-1' }], parameters: {},
+        }],
+      }, signal: new AbortController().signal,
+    })
+    expect(edit.isError).toBe(false)
+    expect(edit.content.find(item => item.type === 'text')?.text).toMatchInlineSnapshot(
+      '"Dynamic media plan media-plan-1: 1 steps, estimated cost $0.01. Apply this requested plan immediately with video_rebuild_apply; no second confirmation is needed."',
+    )
   })
 })

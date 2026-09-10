@@ -27,9 +27,10 @@ from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
 from .repository import ProjectVersionConflict, SidebarRun
 from .upload_security import sign_uploaded_file as _sign_uploaded_file
-from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
+from .workflow_plans import workflow_execution_kind
 from app.chat.utils.file_utils import process_uploaded_files
 from app.chat.v2.language import (
+    LanguageSkillConflictError,
     active_language_skill,
     explicit_language_skill,
     normalize_output_language,
@@ -125,15 +126,18 @@ def _request_language_contract(
     activated_skill_ids: list[str] | None = None,
     current: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    explicit_skill = explicit_language_skill(text)
-    selected_skill = explicit_skill or active_language_skill(activated_skill_ids)
-    return resolve_video_language_contract(
-        text,
-        ui_locale=app_language,
-        current=current,
-        overrides=_language_overrides(user_option),
-        language_skill=selected_skill,
-    )
+    try:
+        explicit_skill = explicit_language_skill(text)
+        selected_skill = explicit_skill or active_language_skill(activated_skill_ids)
+        return resolve_video_language_contract(
+            text,
+            ui_locale=app_language,
+            current=current,
+            overrides=_language_overrides(user_option),
+            language_skill=selected_skill,
+        )
+    except LanguageSkillConflictError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _prompt_input_files(input_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -448,13 +452,16 @@ def _validate_workflow_selection(
     if (metadata.metadata or {}).get("kind") != "workflow":
         raise HTTPException(status_code=422, detail=f"Skill is not a workflow: {workflow}")
     spec = runtime.skills.workflows.get(workflow)
-    mode = spec.mode if spec is not None else ""
-    contract = WORKFLOW_ID_COMPILERS.get(workflow)
-    if contract is None or contract[0] != mode:
-        reason = UNAVAILABLE_WORKFLOW_MODES.get(mode) or (
-            f"No dedicated compiler for workflow {workflow} with mode {mode}"
-        )
-        raise HTTPException(status_code=409, detail=f"Workflow is unavailable: {workflow}: {reason}")
+    try:
+        if spec is None:
+            raise ValueError("Workflow is not registered")
+        kind = workflow_execution_kind(spec)
+        if kind == "agent_plan_patch" and not (
+            runtime.staged_planning_enabled and runtime.continuous_plan_patch_enabled
+        ):
+            raise ValueError("Workflow requires continuous PlanPatch planning to be enabled")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=f"Workflow is unavailable: {workflow}: {exc}") from exc
 
 
 def _visible_user_text(value: str) -> str:
@@ -1235,13 +1242,28 @@ async def add_message(
                 )
             )
         if not is_empty_creation:
+            prompt += (
+                "\nExecution policy: the user's edit request authorizes preview and apply; "
+                "do not ask for another confirmation. For an additional clip, use "
+                "video_plan_patch_preview with api.provider.generate and chain media.concat. "
+                "Do not stop after transcription: inspect its real segments, translate each "
+                "segment with translated_texts ONLY if this request explicitly asks for translation. "
+                "Otherwise use the original transcript language, not the UI language or a prior translation. Render using "
+                "media.hyperframes_caption with the video and transcript artifact inputs. "
+                "Never invent dialogue from the screenplay or supply caption_html for dialogue. "
+                "Poll video_build_status until the requested output is complete; a queued "
+                "build or a transcript alone does not satisfy a captioned-video request."
+            )
             prompt += _selection_context(workflow_id, activated_skill_ids)
             prompt += "\n\n" + video_language_instruction(language_values)
         builds = await runtime.repo.list_builds(project_id)
         latest = max(builds, key=lambda item: item.created_at) if builds else None
         stopped = latest is not None and latest.status == "cancelled"
         if stopped and not body.resume_builds:
-            raise HTTPException(status_code=409, detail="Task stopped. Confirm resume before sending a continuation.")
+            raise HTTPException(status_code=409, detail={
+                "code": "task_stopped_resume_required",
+                "message": "Task stopped. Confirm resume before sending a continuation.",
+            })
         if stopped:
             # Only the latest stopped build is eligible, never historical cancelled plans.
             if latest is not None:
@@ -1590,7 +1612,14 @@ async def token_usage(
 async def list_skills(
     runtime: Annotated[VideoBuildRuntime, Depends(get_runtime)],
 ) -> dict[str, Any]:
-    return success(runtime.skills.prompt_view())
+    views = runtime.skills.prompt_view()
+    for view in views:
+        if view.get("execution_kind") == "agent_plan_patch" and not (
+            runtime.staged_planning_enabled and runtime.continuous_plan_patch_enabled
+        ):
+            view["available"] = False
+            view["unavailable_reason"] = "Workflow requires continuous PlanPatch planning to be enabled"
+    return success(views)
 
 
 @router.post("/uploads")

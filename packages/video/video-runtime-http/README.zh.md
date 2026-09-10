@@ -4,6 +4,8 @@
 
 Video Runtime 能力 seam 的 HTTP Provider。它传输首次构建与结构化编辑计划，并把取消信号、有界超时、服务认证以及 Session／用户身份转发到 Python 运行时。
 
+失败响应保留 HTTP 状态码，并将结构化校验详情按 JSON 返回，使 Agent 能定位被拒绝的字段并修正下一次工具调用。
+
 请配置 `baseUrl`，认证部署还需配置 `serviceToken`。调用工具只提供 DeepSeek Session id 时，`userId` 提供部署身份；多用户部署必须由认证 BFF 设置该值，不能共享本地默认值。
 
 检查点 ID 为 `live` 时使用 POST，因为打开规划快照会修改状态；具体检查点 ID 使用 GET。两类请求均保留相同的 Session 和用户身份请求头。

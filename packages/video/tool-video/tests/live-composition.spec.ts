@@ -52,6 +52,15 @@ it('loads video tools through YAML and transports a live edit with pending cance
     signal: new AbortController().signal,
   })
   expect(inspect.isError).toBe(false)
+  expect(inspect.content).toMatchInlineSnapshot(`
+    [
+      {
+        "text": "Use base_plan_revision as base_revision and base_spec_revision unchanged in video_plan_patch_submit.
+    {\"id\":\"checkpoint-2\",\"phase\":\"live:2\",\"next_phase\":\"agent_execution\",\"artifact_summaries\":[],\"base_plan_revision\":2,\"base_spec_revision\":2}",
+        "type": "text",
+      },
+    ]
+  `)
   const patch = await ctx.tools.execute({
     callId: CallId('live-patch'), name: 'video_plan_patch_submit',
     arguments: {
@@ -81,4 +90,17 @@ it('loads video tools through YAML and transports a live edit with pending cance
     replaceFailedStepIds: { 'failed-shot': 'replacement' },
     proposedSteps: [{ step_id: 'replacement', depends_on: ['running-reference'] }],
   })
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ detail: [
+    { loc: ['body', 'basePlanRevision'], msg: 'Input should be greater than or equal to 1', input: 0 },
+  ] }, { status: 422 })))
+  const invalid = await ctx.tools.execute({
+    callId: CallId('invalid-patch'), name: 'video_plan_patch_submit',
+    arguments: { project_id: 'project-1', build_id: 'build-1', checkpoint_id: 'checkpoint-2',
+      base_revision: 0, base_spec_revision: 0, idempotency_key: 'invalid', add_tasks: [] },
+    signal: new AbortController().signal,
+  })
+  expect(invalid.isError).toBe(true)
+  expect(JSON.stringify(invalid.content)).toContain('basePlanRevision')
+  expect(JSON.stringify(invalid.content)).toContain('HTTP 422')
+  expect(JSON.stringify(invalid.content)).not.toContain('[object Object]')
 })

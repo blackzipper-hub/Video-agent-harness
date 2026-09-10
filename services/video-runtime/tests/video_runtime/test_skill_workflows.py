@@ -81,11 +81,10 @@ class SkillWorkflowPluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             set(workflows),
             {
+                "cinematic",
                 "cuti-product-workflow",
                 "cuti-scenario-product-workflow",
-                "libtv-product-workflow",
                 "mv",
-                "product-ad-video",
                 "seedance2",
                 "short-drama-workflow",
             },
@@ -167,42 +166,10 @@ instructions
             with self.assertRaisesRegex(ValueError, "unknown capability"):
                 VideoSkillRuntime([root])
 
-    async def test_runtime_freezes_product_workflow_without_unrelated_director(self):
-        skills = VideoSkillRuntime()
-        if not skills.catalog.has("product-ad-video"):
-            self.skipTest("product-ad-video Skill is not installed in this checkout")
-        runtime = VideoBuildRuntime(skill_runtime=skills)
-        await runtime.plugins.load_directories([
-            Path(__file__).resolve().parents[2] / "plugins",
-        ])
-        await load_workflow_skills(runtime.plugins, skills)
-        project, version = await runtime.create_project(
-            user_id="user-1",
-            title="Product film",
-        )
-        source = await _add_product_source(runtime, project.id)
-        project = await runtime.repo.get_project(project.id)
-        plan = await runtime.plan_project(
-            project_id=project.id,
-            base_project_version_id=project.current_version_id,
-            video_spec=_video_spec("product-ad-video").model_copy(
-                update={"source_asset_ids": [source.artifact_id]},
-            ),
-            idempotency_key="product-plan",
-        )
-        video = next(
-            item for item in plan.items
-            if item.capability == "atomic.video.generate"
-        )
-        skill_ids = [item.skill_id for item in video.resolved_skills]
-        self.assertIn("product-ad-video", skill_ids)
-        self.assertNotIn("video-director", skill_ids)
-        self.assertIn("product identity", video.skill_context.instructions)
-
     async def test_project_skill_lock_is_runtime_owned_and_frozen_into_steps(self):
         skills = VideoSkillRuntime()
-        if not skills.catalog.has("product-ad-video"):
-            self.skipTest("product-ad-video Skill is not installed in this checkout")
+        if not skills.catalog.has("cuti-product-workflow"):
+            self.skipTest("cuti-product-workflow Skill is not installed in this checkout")
         runtime = VideoBuildRuntime(skill_runtime=skills)
         await runtime.plugins.load_directories([
             Path(__file__).resolve().parents[2] / "plugins",
@@ -224,20 +191,25 @@ instructions
         plan = await runtime.plan_project(
             project_id=project.id,
             base_project_version_id=(await runtime.repo.get_project(project.id)).current_version_id,
-            video_spec=_video_spec("product-ad-video").model_copy(
-                update={"source_asset_ids": [source.artifact_id]},
+            video_spec=_video_spec("cuti-product-workflow").model_copy(
+                update={
+                    "source_asset_ids": [source.artifact_id],
+                    "target_duration_seconds": 30,
+                    "shots": [shot.model_copy(update={
+                        "duration_seconds": 15,
+                        "visual_prompt": "0-15秒，产品保持外观一致，镜头完整展示产品。",
+                    }) for shot in _video_spec("cuti-product-workflow").shots],
+                    "workflow_parameters": {"narration_mode": "music_only"},
+                },
             ),
             idempotency_key="locked-skill-plan",
         )
         persisted = await runtime.list_project_skill_locks(project.id)
         self.assertEqual(
             {item.skill_id for item in persisted},
-            {"product-voiceover-narration", "product-ad-video"},
+            {"product-voiceover-narration", "cuti-product-workflow"},
         )
-        # product-ad-video is intentionally a direct I2V workflow and no longer
-        # creates the generic `characters` stage.  A project lock is still
-        # frozen into its own workflow-specific planning artifact.
-        brief_step = next(item for item in plan.items if item.step_id == "commercial-brief")
+        brief_step = next(item for item in plan.items if item.step_id == "commercial-strategy")
         resolved = {item.skill_id: item for item in brief_step.resolved_skills}
         self.assertEqual(resolved["product-voiceover-narration"].source, "project_lock")
 
@@ -249,7 +221,7 @@ instructions
         )
         self.assertEqual(switched.workflow_id, "seedance2")
         locks = {item.skill_id: item.enabled for item in await runtime.list_project_skill_locks(project.id)}
-        self.assertFalse(locks["product-ad-video"])
+        self.assertFalse(locks["cuti-product-workflow"])
         self.assertTrue(locks["seedance2"])
 
 
@@ -286,21 +258,8 @@ class SkillWorkflowApiTest(unittest.TestCase):
         resources = {item["path"]: item["content"] for item in detail["resourceContents"]}
         self.assertIn("reference.md", resources)
 
-        with TestClient(app) as client:
-            helper_response = client.get(
-                "/api/video/skills/seedance-20",
-                headers={"X-Video-User-Id": "user-1"},
-            )
-        self.assertEqual(helper_response.status_code, 200, helper_response.text)
-        helper = helper_response.json()["data"]
-        self.assertEqual(helper["kind"], "helper")
-        self.assertEqual(helper["resourceOwnerSkillId"], "seedance-20")
-        self.assertGreater(len(helper["resources"]), len(helper["resourceContents"]))
-        self.assertTrue(all(isinstance(item["content"], str) for item in helper["resourceContents"]))
-
         catalog = {item["name"]: item for item in skills.prompt_view()}
         self.assertEqual(catalog["seedance2"]["kind"], "workflow")
-        self.assertEqual(catalog["seedance-20"]["kind"], "helper")
         with TestClient(app) as client:
             shotcraft = client.get(
                 "/api/video/skills/video-shotcraft",
