@@ -862,8 +862,8 @@
       rgba(255, 253, 250, 0.5) 50%,
       transparent 74%
     ) 0 calc(100% - 1px) / 100% 1px no-repeat,
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.05) 14%, transparent 34%),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 12%, transparent 28%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.05) 12px, transparent 28px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 10px, transparent 22px);
 }
 
 /* the constant part of the rim: a 1px ring at the level the reference keeps all
@@ -887,14 +887,24 @@
   mask-composite: exclude;
 }
 
+.home-composer-expanded {
+  border-radius: 28px;
+}
+
 .home-composer-row {
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
-  height: calc(67 * var(--u));
+  min-height: calc(67 * var(--u));
+  height: auto;
   padding-inline: calc(15 * var(--u));
   gap: calc(13 * var(--u));
+}
+
+.home-composer-expanded .home-composer-row {
+  align-items: flex-start;
+  padding-block: calc(11 * var(--u));
 }
 
 /* soft lit disc rather than a hard outlined circle */
@@ -933,24 +943,65 @@
   background: rgba(255, 255, 255, 0.34);
 }
 
+.home-composer-skill {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  max-width: calc(140 * var(--u));
+  margin-right: calc(6 * var(--u));
+  gap: 0.28em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: calc(13.7 * var(--u));
+  font-weight: 500;
+  line-height: calc(26 * var(--u));
+  letter-spacing: 0.006em;
+}
+
+.home-composer-expanded .home-composer-skill {
+  margin-top: 2px;
+}
+
+.home-composer-skill-mark {
+  color: #a98ad4;
+}
+
+.home-composer-skill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a69cb8;
+}
+
 .home-composer-input {
   flex: 1 1 auto;
   min-width: 0;
+  max-height: calc(208 * var(--u));
   margin-left: calc(6 * var(--u));
-  max-height: calc(72 * var(--u));
   resize: none;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 0;
   background: transparent;
+  padding: 0;
   font-size: calc(13.7 * var(--u));
   font-weight: 400;
   line-height: calc(26 * var(--u));
   letter-spacing: 0.006em;
   color: rgba(255, 255, 255, 0.9);
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
 }
 
 .home-composer-input::-webkit-scrollbar {
-  display: none;
+  width: 6px;
+}
+
+.home-composer-input::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
 }
 
 .home-composer-input::placeholder {

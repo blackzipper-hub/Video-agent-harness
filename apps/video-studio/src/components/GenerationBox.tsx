@@ -47,6 +47,8 @@ interface GenerationBoxProps {
   variant?: 'default' | 'landing'
   placeholder?: string
   selectedWorkflowId?: string
+  selectedWorkflowLabel?: string
+  onClearWorkflow?: () => void
   externalPrompt?: string // External prompt to fill into the input
   externalFiles?: File[] // External files to pre-upload
   /** 内容模版：如 "Lip-Sync MV"（点 Lip-sync 卡片时），默认不传为 Default */
@@ -72,6 +74,8 @@ const GenerationBox = ({
   variant = 'default',
   placeholder,
   selectedWorkflowId,
+  selectedWorkflowLabel,
+  onClearWorkflow,
   externalPrompt,
   externalFiles,
   externalContentCategory,
@@ -142,21 +146,29 @@ const GenerationBox = ({
 
   /** 发送按钮动效：idle | 放大 | 点击 */
   const [sendButtonAnim, setSendButtonAnim] = useState<'idle' | 'enlarge' | 'click'>('idle')
+  const [landingExpanded, setLandingExpanded] = useState(false)
+
+  const sizeLandingTextarea = (textarea: HTMLTextAreaElement) => {
+    const line = parseFloat(getComputedStyle(textarea).lineHeight) || 24
+    textarea.style.height = 'auto'
+    const next = Math.max(Math.min(textarea.scrollHeight, line * 8), line)
+    textarea.style.height = `${next}px`
+    return next > line + 1
+  }
 
   // Auto-resize textarea based on content
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
-    textarea.style.height = 'auto'
     if (variant === 'landing') {
-      // one line by default; grow up to three, keeping the design's line height
-      const line = parseFloat(getComputedStyle(textarea).lineHeight) || 24
-      textarea.style.height = `${Math.max(Math.min(textarea.scrollHeight, line * 3), line)}px`
+      const grew = sizeLandingTextarea(textarea)
+      setLandingExpanded(grew && prompt.trim().length > 0)
       return
     }
+    textarea.style.height = 'auto'
     const newHeight = Math.max(Math.min(textarea.scrollHeight, 300), 100)
     textarea.style.height = `${newHeight}px`
-  }, [prompt, variant])
+  }, [prompt, variant, selectedWorkflowLabel])
 
   // 如果配置为不显示 image/music，且当前选中了这些类型，则切换到 video
   useEffect(() => {
@@ -188,12 +200,12 @@ const GenerationBox = ({
       setTimeout(() => {
         const textarea = textareaRef.current
         if (textarea) {
-          textarea.style.height = 'auto'
-          const line = parseFloat(getComputedStyle(textarea).lineHeight) || 24
-          const newHeight = variant === 'landing'
-            ? Math.max(Math.min(textarea.scrollHeight, line * 3), line)
-            : Math.max(Math.min(textarea.scrollHeight, 300), 100)
-          textarea.style.height = `${newHeight}px`
+          if (variant === 'landing') {
+            setLandingExpanded(sizeLandingTextarea(textarea))
+          } else {
+            textarea.style.height = 'auto'
+            textarea.style.height = `${Math.max(Math.min(textarea.scrollHeight, 300), 100)}px`
+          }
           textarea.focus()
         }
       }, 0)
@@ -523,7 +535,7 @@ const GenerationBox = ({
       <div className={`w-full ${className}`}>
         <div
           className={`home-composer relative overflow-hidden ${
-            uploadedFiles.length > 0 ? '!rounded-[2rem]' : ''
+            uploadedFiles.length > 0 || landingExpanded ? 'home-composer-expanded' : ''
           } ${isDragOver ? 'border-white/40' : isFocused ? 'border-white/[0.18]' : ''}`}
           onDragOver={dragDropHandler.handleDragOver}
           onDragLeave={dragDropHandler.handleDragLeave}
@@ -558,6 +570,17 @@ const GenerationBox = ({
               <Plus className="h-[45%] w-[45%]" strokeWidth={1.3} />
             </button>
             <div className="home-composer-divider" />
+            {selectedWorkflowLabel && (
+              <button
+                type="button"
+                className="home-composer-skill"
+                onClick={onClearWorkflow}
+                aria-label={`${t('homeSkillClear')}: ${selectedWorkflowLabel}`}
+              >
+                <span className="home-composer-skill-mark">$</span>
+                <span className="home-composer-skill-name">{selectedWorkflowLabel}</span>
+              </button>
+            )}
             <textarea
               ref={textareaRef}
               value={prompt}

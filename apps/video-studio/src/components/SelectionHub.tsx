@@ -18,6 +18,7 @@ const SelectionHub = () => {
   const lang = routeLang || language || 'en'
   // nothing preselected: with no tag chosen the backend routes the request itself
   const [selectedSkillId, setSelectedSkillId] = useState('')
+  const selectedSkill = HOME_SKILLS.find(skill => skill.id === selectedSkillId)
 
   const go = (path: string) => {
     navigate(`/${lang}${path}`)
@@ -32,7 +33,7 @@ const SelectionHub = () => {
       <div className="pointer-events-none absolute inset-0" aria-hidden>
         <div className="absolute inset-0 bg-black" />
         <img
-          src="/home-hero-v6.jpg"
+          src="/home-hero-v7.jpg"
           alt=""
           className="home-planet-photo"
         />
@@ -91,6 +92,8 @@ const SelectionHub = () => {
               variant="landing"
               placeholder={t('homePromptPlaceholder')}
               selectedWorkflowId={selectedSkillId || undefined}
+              selectedWorkflowLabel={selectedSkill ? t(selectedSkill.labelKey) : undefined}
+              onClearWorkflow={() => setSelectedSkillId('')}
             />
           </div>
 
