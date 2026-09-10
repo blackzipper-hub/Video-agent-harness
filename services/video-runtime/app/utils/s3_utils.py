@@ -19,7 +19,7 @@ def _local_public_base() -> str:
 
 
 def _storage_is_local() -> bool:
-    return (getattr(settings, "STORAGE_BACKEND", "s3") or "s3").lower() == "local"
+    return (getattr(settings, "STORAGE_BACKEND", "local") or "local").lower() == "local"
 
 
 def is_our_cdn_url(url: str) -> bool:
@@ -61,7 +61,7 @@ class S3Utils:
             logger.info(f"🗂️ 存储后端=local，落地目录={self._local_dir}，URL 前缀={self.cdn_domain}")
         else:
             self.s3_client = self._build_s3_client()
-            self.cdn_domain = settings.CDN_DOMAIN  # https://cdn-dev.newai.land
+            self.cdn_domain = settings.CDN_DOMAIN
 
     @staticmethod
     def _build_s3_client():
@@ -319,7 +319,7 @@ class S3Utils:
         将CDN URL转换为S3文件键
         
         Args:
-            cdn_url: CDN URL，如 https://cdn-dev.newai.land/images/uuid.webp
+            cdn_url: CDN URL, for example https://cdn.example.test/images/uuid.webp
             
         Returns:
             Optional[str]: S3文件键，如 images/uuid.webp，失败返回None

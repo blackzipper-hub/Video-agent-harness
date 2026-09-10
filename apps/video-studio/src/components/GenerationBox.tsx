@@ -369,10 +369,6 @@ const GenerationBox = ({
 
         setCharacterName('')
         setCharacterImages([])
-
-        setTimeout(() => {
-          navigate('/vault')
-        }, 1500)
       } else {
         toast.error(`${t('characterUploadError')}: ${response.message}`)
       }

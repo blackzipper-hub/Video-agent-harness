@@ -25,10 +25,10 @@ class Settings(BaseSettings):
     log_level: str = Field(default="info")
     port: int = Field(default=8080)
 
-    # Storage backend: "s3"（默认，云端）| "local"（开源自托管，落地本地磁盘）
+    # Storage backend: "local"（默认，自托管落地本地磁盘）| "s3"（可选对象存储）
     # 与 agent 项目保持一致的开关名（STORAGE_BACKEND / LOCAL_STORAGE_DIR / PUBLIC_BASE_URL），
     # 本地模式下与 agent 共享同一 LOCAL_STORAGE_DIR，由 agent 的 /files 静态挂载对外提供。
-    storage_backend: str = Field(default="s3", description="s3 | local")
+    storage_backend: str = Field(default="local", description="s3 | local")
     local_storage_dir: str = Field(
         default="",
         description="local 后端落地目录；应与 agent 的 LOCAL_STORAGE_DIR 指向同一路径以共享文件",

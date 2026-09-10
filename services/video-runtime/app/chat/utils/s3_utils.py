@@ -29,7 +29,7 @@ class S3Utils:
         # filesystem and needs no S3 client / AWS credentials.
         from app.config import settings as app_settings
 
-        self._is_local = (getattr(app_settings, "STORAGE_BACKEND", "s3") or "s3").lower() == "local"
+        self._is_local = (getattr(app_settings, "STORAGE_BACKEND", "local") or "local").lower() == "local"
         self.bucket_name = settings.S3_BUCKET_NAME
         if self._is_local:
             self.s3_client = None

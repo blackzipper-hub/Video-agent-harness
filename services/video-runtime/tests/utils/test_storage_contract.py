@@ -63,7 +63,7 @@ def _local_store(tmp_path, monkeypatch):
 
 def _s3_store(monkeypatch):
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3", raising=False)
-    monkeypatch.setattr(settings, "CDN_DOMAIN", "https://cdn-dev.newai.land", raising=False)
+    monkeypatch.setattr(settings, "CDN_DOMAIN", "https://cdn.example.test", raising=False)
     monkeypatch.setattr(settings, "S3_BUCKET_NAME", "cuti-test", raising=False)
     from app.utils.s3_utils import S3Utils
 
@@ -117,7 +117,7 @@ async def test_s3_ingest_then_fetch_uses_bucket_not_http(monkeypatch, http_audio
     """dest/prod: ingest to S3, later Gemini reads the bucket for our CDN URL."""
     s3, objects, s3_gets = _s3_store(monkeypatch)
     stored = await s3.download_and_upload_audio_to_s3(http_audio, generation_id="prod_clip")
-    assert stored.startswith("https://cdn-dev.newai.land/audios/")
+    assert stored.startswith("https://cdn.example.test/audios/")
     assert objects, "upload must put_object"
     dst = tmp_path / "from-s3.mp3"
     assert await s3.download_file(stored, str(dst)) is True

@@ -8,7 +8,6 @@
 | **resolution_aspect_ratio_support_and_rules.md** | 分辨率与能力规则 |
 | **media-service-and-cpu.md** | Media Service + CPU |
 | **image-consistency-importance-and-selective-check.md** | 图像一致性检查 |
-| **aws-and-kubernetes.md** | AWS / EKS 部署 |
 | **agent-notes/** | 增量 Runtime / checkpoint 实现笔记 |
 
 测试生成物（非人工维护主文档）：`tests/llm/reports/structured_recovery_matrix_report.md`。

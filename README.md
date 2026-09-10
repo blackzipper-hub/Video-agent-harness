@@ -149,14 +149,13 @@ cp .env.example .env.local
 Set these values in `apps/video-studio/.env.local`:
 
 ```dotenv
-VITE_LOCAL_SINGLE_USER_MODE=true
 VITE_VIDEO_RUNTIME_URL=http://127.0.0.1:8001
 VITE_VIDEOCHAT_URL=http://127.0.0.1:8001
 VITE_CUTI_BACKEND_URL=http://127.0.0.1:8001
 VITE_BACKEND_URL=http://127.0.0.1:8001
 ```
 
-Keep local login off. `VITE_LOCAL_SINGLE_USER_MODE=true` uses a fake `local@cuti.dev` user and does not call Go. Dev / cluster images build this flag as `false`.
+Studio has no login flow. Project identity is `local-user` in Video Runtime.
 
 Return to the repository root and start Vite:
 

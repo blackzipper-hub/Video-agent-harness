@@ -35,7 +35,7 @@ export default defineConfig(({ mode, command }) => {
   ) ?? "http://127.0.0.1:8001";
   const apiTarget = httpTarget(env.VITE_CUTI_BACKEND_URL, env.VITE_BACKEND_URL, runtimeTarget)
     ?? runtimeTarget;
-  // dev.newai.land 上 Nginx 用 /api/cv-v1 进 K8s、/api/cuti 进本机 8002；经该域名时勿改成 /api/cuti
+  // Local Vite proxies /api/cv-v1 onto the Runtime /api/cuti mount.
 
   // 分享链接：标题、简介、缩略图（Open Graph / Twitter Card）
   const siteUrl = env.VITE_SITE_URL || (env.VITE_BACKEND_URL ? new URL(env.VITE_BACKEND_URL).origin : '');
@@ -106,7 +106,7 @@ export default defineConfig(({ mode, command }) => {
             });
           },
         },
-        // 经 newai.land 与线上一致；直连本机/内网 VideoAgent 时其只挂 /api/cuti，需重写
+        // Studio historical prefix /api/cv-v1 → Runtime /api/cuti
         '/api/cv-v1': {
           target: apiTarget,
           changeOrigin: true,

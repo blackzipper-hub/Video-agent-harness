@@ -67,7 +67,7 @@ import {
 } from './SmartClipPanel'
 import { resolveAutoCropTargetDurationSec } from '@/utils/targetVideoDuration'
 import ReactMarkdown from 'react-markdown'
-import { Send, MessageSquare, X, Loader2, Square, Clock, ChevronDown, Upload, CheckCircle2, CheckCircle, Plus, Download, Share2, Scissors, ZoomIn, Minus, Copy, ArrowLeft, ArrowRight, MessageCircle, Sparkles, AlertTriangle, Wallet } from 'lucide-react'
+import { Send, MessageSquare, X, Loader2, Square, Clock, ChevronDown, Upload, CheckCircle2, CheckCircle, Plus, Download, Share2, Scissors, ZoomIn, Minus, Copy, ArrowLeft, ArrowRight, MessageCircle, Sparkles, AlertTriangle } from 'lucide-react'
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useLanguage } from '@/i18n/LanguageContext'
 import { getDisplayPromptForUserMessage, PROMPT_MAPPINGS, PROMPT_MAPPINGS_FOR_CREATE_PAGE } from '@/utils/promptMapping'
@@ -1133,7 +1133,6 @@ export const MessageArea = ({
   }, [messageRenderSignature, lastDisplayMessage?.role])
   const isActionSuggestionsMessage = useCallback((m: Message) => {
     if (m.role !== 'ai' || m.event_type === 'welcome') return false
-    if (m.event_type === 'insufficient_credits_notice') return true
     return showActionSuggestions
   }, [showActionSuggestions])
 
@@ -1192,10 +1191,10 @@ export const MessageArea = ({
     streamedActionSuggestions && streamedActionSuggestions.length > 0
       ? streamedActionSuggestions
       : null
-  const effectiveActionSuggestions = suppressActionSuggestionsUI
+  const effectiveActionSuggestions = (suppressActionSuggestionsUI
     ? []
     : (streamedSuggestions ?? latestActionSuggestions)
-  const hasPaymentActionSuggestions = effectiveActionSuggestions.some(isPaymentTopUpAction)
+  ).filter(item => !isPaymentTopUpAction(item))
   const suggestionsEverReceived =
     agentSuggestionsEverReceived || (streamedSuggestions?.length ?? 0) > 0
 
@@ -1766,7 +1765,6 @@ export const MessageArea = ({
         {displayMessages.length > 0 ? (
           <div className={`mx-auto w-full max-w-[760px] space-y-5 min-w-0 overflow-x-hidden ${todoMessage ? (todoCollapsed ? 'pb-20' : 'pb-44') : ''}`}>
             {displayMessages.map((msg, index) => {
-              const isPaymentNotice = msg.event_type === 'insufficient_credits_notice'
               return (
               // ✅ Typewriter: only animate the latest AI message while generating (prevents re-typing old history)
                 <div
@@ -1792,14 +1790,10 @@ export const MessageArea = ({
                     </button>
                   )}
                   <div
-                    className={`min-w-0 overflow-hidden [overflow-wrap:anywhere] [box-shadow:var(--chat-shadow-bubble)] ${
-                      isPaymentNotice
-                        ? 'max-w-[92%] rounded-2xl border-2 border-amber-400/90 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 px-5 py-4 text-amber-950 shadow-[0_12px_40px_rgba(245,158,11,0.28)] dark:border-amber-500/70 dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-900/30 dark:text-amber-50'
-                        : `max-w-[78%] rounded-3xl px-4 py-3 text-[15px] leading-[1.55] ${
-                          msg.role === 'user' || msg.role === 'human'
-                            ? 'rounded-tr-md bg-[var(--chat-bubble-user)] text-[var(--chat-bubble-user-foreground)]'
-                            : 'rounded-tl-md bg-[var(--chat-bubble-ai)] text-foreground'
-                        }`
+                    className={`min-w-0 overflow-hidden [overflow-wrap:anywhere] [box-shadow:var(--chat-shadow-bubble)] max-w-[78%] rounded-3xl px-4 py-3 text-[15px] leading-[1.55] ${
+                      msg.role === 'user' || msg.role === 'human'
+                        ? 'rounded-tr-md bg-[var(--chat-bubble-user)] text-[var(--chat-bubble-user-foreground)]'
+                        : 'rounded-tl-md bg-[var(--chat-bubble-ai)] text-foreground'
                     }`}
                   >
                     {/* Display video analysis details - 使用后端提供的消息 */}
@@ -2229,29 +2223,6 @@ export const MessageArea = ({
                                 {continued ? (
                                   <div className="flex flex-col items-center gap-2">
                                     <span className="inline-block text-sm text-amber-700 dark:text-amber-300">{t('continued') || '已继续'}</span>
-                                    {(() => {
-                                      const est = interruptData.credit_estimate
-                                      const rem = est?.remaining_credits_estimate
-                                      const kf = est?.keyframe_credits_estimate
-                                      const vid = est?.video_credits_estimate
-                                      if (typeof rem !== 'number' && typeof kf !== 'number' && typeof vid !== 'number') return null
-                                      return (
-                                        <p className="text-xs text-amber-800/90 dark:text-amber-200/90 break-words max-w-full">
-                                          {typeof rem === 'number' && rem > 0
-                                            ? t('interrupt.continueWillConsume').replace('{credits}', displayValue(rem))
-                                            : typeof rem === 'number' && rem === 0
-                                              ? t('interrupt.noExtraCredits')
-                                              : null}
-                                          {(typeof kf === 'number' && kf > 0) || (typeof vid === 'number' && vid > 0) ? (
-                                            <span className="block mt-1 opacity-90">
-                                              {typeof kf === 'number' && kf > 0 ? `${t('storyboardsSection') || 'Storyboards'} ≈${kf}` : ''}
-                                              {typeof kf === 'number' && kf > 0 && typeof vid === 'number' && vid > 0 ? ' · ' : ''}
-                                              {typeof vid === 'number' && vid > 0 ? `${t('shotsSection') || 'Shots'} ≈${vid}` : ''}
-                                            </span>
-                                          ) : null}
-                                        </p>
-                                      )
-                                    })()}
                                   </div>
                                 ) : canContinue ? (
                                   <div className="flex flex-col items-center gap-3 w-full">
@@ -2327,29 +2298,7 @@ export const MessageArea = ({
                                           msg.event_data?.thread_id || threadId || '',
                                         )}
                                       >
-                                        {(() => {
-                                          // 失败暂停同样用「继续」文案：行为是继续往下走，用户可自行重试，标「重试该步骤」会误导。
-                                          const remainingCredits = interruptData.credit_estimate?.remaining_credits_estimate
-                                          if (typeof remainingCredits === 'number' && remainingCredits > 0) {
-                                            return (
-                                              <>
-                                                {t('continue')}
-                                                <span className="mx-2 opacity-70">|</span>
-                                                {t('interrupt.creditsPart').replace('{credits}', displayValue(remainingCredits))}
-                                              </>
-                                            )
-                                          }
-                                          if (typeof remainingCredits === 'number' && remainingCredits === 0) {
-                                            return (
-                                              <>
-                                                {t('continue')}
-                                                <span className="mx-2 opacity-70">|</span>
-                                                {t('interrupt.zeroCredits')}
-                                              </>
-                                            )
-                                          }
-                                          return t('continue')
-                                        })()}
+                                        {t('continue')}
                                       </Button>
                                       {autoContinueOnInterrupt &&
                                 runIdForResume &&
@@ -2808,20 +2757,6 @@ export const MessageArea = ({
                         videosData={videosData}
                         charactersData={charactersData}
                       />
-                    ) : msg.event_type === 'insufficient_credits_notice' ? (
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-500/25 text-amber-700 ring-2 ring-amber-400/50 dark:text-amber-200">
-                          <Wallet className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                            {t('insufficientCreditsGoPricing')}
-                          </p>
-                          <p className="mt-2 text-[15px] font-semibold leading-relaxed whitespace-pre-wrap">
-                            {msg.content}
-                          </p>
-                        </div>
-                      </div>
                     ) : msg.event_type === 'welcome' ? (
                     // 新建任务时的 Cuti 欢迎语，仅展示文案，不显示 loading
                       <p className="text-sm leading-relaxed font-inter whitespace-pre-wrap">
@@ -3564,70 +3499,40 @@ export const MessageArea = ({
                     {t('clickDirectGenerateHint')}
                   </div>
                 )}
-                {hasPaymentActionSuggestions ? (
-                  <div className="mb-3 rounded-xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 text-sm font-semibold text-amber-950 shadow-sm dark:border-amber-600/60 dark:from-amber-950/40 dark:to-orange-950/30 dark:text-amber-100">
-                    {t('insufficientCreditsGoPricing')}
-                  </div>
-                ) : null}
-                <div
-                  className={`px-1 pb-1.5 text-[12px] font-semibold ${
-                    hasPaymentActionSuggestions ? 'text-amber-800 dark:text-amber-200' : 'font-medium text-foreground/50'
-                  }`}
-                >
+                <div className="px-1 pb-1.5 text-[12px] font-semibold font-medium text-foreground/50">
                   {t('actionSuggestionsTitle')}
                 </div>
-                <div
-                  className={`overflow-hidden rounded-xl border ${
-                    hasPaymentActionSuggestions
-                      ? 'border-amber-300/80 bg-amber-50/60 shadow-[0_8px_28px_rgba(245,158,11,0.18)] dark:border-amber-700/60 dark:bg-amber-950/25'
-                      : 'border-[var(--chat-chip-border)] bg-[var(--chat-chip)]/40'
-                  }`}
-                >
+                <div className="overflow-hidden rounded-xl border border-[var(--chat-chip-border)] bg-[var(--chat-chip)]/40">
                   {effectiveActionSuggestions.map((item, i) => {
                     const isGenerate = Boolean(item.is_direct_generate)
-                    const isTopUp = isPaymentTopUpAction(item)
-                    const Icon = isTopUp ? Wallet : isGenerate ? Sparkles : MessageCircle
+                    const Icon = isGenerate ? Sparkles : MessageCircle
                     return (
                       <button
                         key={`${item.label}-${i}`}
                         type="button"
                         onClick={() =>{  handleActionSuggestionButtonClick(item) }}
                         disabled={isInputDisabled}
-                        className={`group flex w-full items-center gap-3 px-4 text-left transition disabled:opacity-50 ${
-                          isTopUp
-                            ? 'bg-gradient-to-r from-[#ff5f8f] to-[#6f35ff] py-4 text-[15px] font-semibold text-white shadow-[0_10px_28px_rgba(124,58,237,0.35)] hover:opacity-95'
-                            : `py-3 text-[13px] hover:bg-white dark:hover:bg-white/10 ${
-                              i > 0 ? 'border-t border-[var(--chat-chip-border)]' : ''
-                            }`
+                        className={`group flex w-full items-center gap-3 px-4 text-left transition disabled:opacity-50 py-3 text-[13px] hover:bg-white dark:hover:bg-white/10 ${
+                          i > 0 ? 'border-t border-[var(--chat-chip-border)]' : ''
                         }`}
                       >
                         <Icon
                           className={`h-4 w-4 shrink-0 ${
-                            isTopUp
-                              ? 'text-white'
-                              : isGenerate
-                                ? 'text-[var(--chat-brand-from)]'
-                                : 'text-foreground/40'
+                            isGenerate
+                              ? 'text-[var(--chat-brand-from)]'
+                              : 'text-foreground/40'
                           }`}
                         />
                         <span
                           className={`flex-1 truncate ${
-                            isTopUp
-                              ? 'font-semibold text-white'
-                              : isGenerate
-                                ? 'font-medium text-foreground'
-                                : 'text-foreground/80'
+                            isGenerate
+                              ? 'font-medium text-foreground'
+                              : 'text-foreground/80'
                           }`}
                         >
                           {isGenerate ? t('directGenerateAction') : item.label}
                         </span>
-                        <ArrowRight
-                          className={`h-4 w-4 shrink-0 transition group-hover:translate-x-0.5 ${
-                            isTopUp
-                              ? 'text-white/90'
-                              : 'text-foreground/30 group-hover:text-foreground/60'
-                          }`}
-                        />
+                        <ArrowRight className="h-4 w-4 shrink-0 transition group-hover:translate-x-0.5 text-foreground/30 group-hover:text-foreground/60" />
                       </button>
                     )
                   })}

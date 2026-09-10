@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { toast } from 'sonner'
 import { useLanguage } from '@/i18n/LanguageContext'
 import GenerationBox from '@/components/GenerationBox'
 
@@ -21,17 +20,12 @@ const SelectionHub = () => {
   const [selectedSkillId, setSelectedSkillId] = useState('')
 
   const go = (path: string) => {
-    if (path === 'explore') {
-      toast.message(t('exploreComingSoon'))
-      return
-    }
     navigate(`/${lang}${path}`)
   }
 
   const isCreate = !location.pathname.includes('/create')
     && !location.pathname.includes('/studio')
     && !location.pathname.includes('/video')
-    && !location.pathname.includes('/explore')
 
   return (
     <div className="home-landing relative min-h-screen overflow-hidden bg-black text-white antialiased">
@@ -57,7 +51,6 @@ const SelectionHub = () => {
           {[
             { id: 'create', label: t('homeNavCreate'), path: '' },
             { id: 'chats', label: t('homeNavChats'), path: '/create' },
-            { id: 'explore', label: t('homeNavExplore'), path: 'explore' },
           ].map((item) => {
             const active = item.id === 'create' ? isCreate : false
             return (

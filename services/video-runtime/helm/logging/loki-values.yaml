@@ -30,7 +30,7 @@ loki:
     enable_api: true
 
 # 集群若无 default StorageClass，须显式指定（EKS 常见为 gp2 / gp3）。
-# 动态 EBS 须先装 EBS CSI：scripts/ensure-ebs-csi-addon.sh；说明见 docs/aws-and-kubernetes.md「第 16 步」。
+# 动态 EBS 须先装 EBS CSI：scripts/ensure-ebs-csi-addon.sh
 minio:
   enabled: true
   persistence:

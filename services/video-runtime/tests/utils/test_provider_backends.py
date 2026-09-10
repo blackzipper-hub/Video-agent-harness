@@ -86,7 +86,7 @@ def test_storage_local_download_fetches_foreign_http_url(tmp_path, monkeypatch):
 def test_storage_s3_download_uses_http_for_foreign_url(tmp_path, monkeypatch):
     """dest/prod keep S3 for CDN; vendor hosts still HTTP-get without changing STORAGE_BACKEND."""
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3", raising=False)
-    monkeypatch.setattr(settings, "CDN_DOMAIN", "https://cdn-dev.newai.land", raising=False)
+    monkeypatch.setattr(settings, "CDN_DOMAIN", "https://cdn.example.test", raising=False)
     from app.utils.s3_utils import S3Utils
 
     payload = b"y" * 200
@@ -124,7 +124,7 @@ def test_storage_s3_download_uses_http_for_foreign_url(tmp_path, monkeypatch):
     assert asyncio.run(s3.download_file("https://files.aimusicapi.ai/stems/clip.mp3", dst)) is True
     assert open(dst, "rb").read() == payload
     # First-party CDN must not take the HTTP fallback (would skip S3).
-    assert asyncio.run(s3.download_file("https://cdn-dev.newai.land/audios/a.mp3", dst)) is False
+    assert asyncio.run(s3.download_file("https://cdn.example.test/audios/a.mp3", dst)) is False
 
 
 def test_storage_defaults_to_s3(monkeypatch):

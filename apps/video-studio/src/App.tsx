@@ -11,7 +11,7 @@ import DeepAgentWorkspacePage from './pages/DeepAgentWorkspacePage'
 import IncrementalVideoWorkspacePage from './pages/IncrementalVideoWorkspacePage'
 import StudioWorkspacePage from './pages/StudioWorkspacePage'
 const App = () => {
-  // ✅ 使用 HashRouter - URL 格式: /cuti/new/#/en/pricing 或 /cuti/new/#/zh/pricing
+  // HashRouter: /#/en/create or /#/zh/create
   // 优点：刷新任何页面都不会 404，无需后端 SPA fallback 支持
   // 语言通过URL路径设置：/en/... 或 /zh/...
   return (

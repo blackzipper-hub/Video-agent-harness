@@ -123,7 +123,7 @@ async def image_resize(
 ) -> dict:
     """
     调用 Media Service 下采样/缩放图片，返回 S3 CDN URL。
-    Returns: {"result_url": "https://cdn-dev.newai.land/...", "width": 1344, "height": 768}
+    Returns: {"result_url": "https://cdn.example.test/...", "width": 1344, "height": 768}
     """
     return await _post("image/resize", {
         "image_url": image_url,

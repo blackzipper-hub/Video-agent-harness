@@ -33,9 +33,6 @@ class Settings(BaseSettings):
         description="数据库连接",
     )
     REDIS_URL: str = Field(default="redis://127.0.0.1:6379/0", description="Redis 连接")
-    JWT_SECRET_KEY: str = Field(default="", description="JWT 密钥")
-    JWT_ALGORITHM: str = Field(default="HS256", description="JWT 算法")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60 * 24 * 7, description="JWT 过期时间（分钟）")
     VIDEOAGENT_BASE_URL: str = Field(
         default="",
         description="Cuti-VideoAgent 服务 API 基础地址，例如 https://videoagent-host/api/cuti",
@@ -56,12 +53,12 @@ class Settings(BaseSettings):
         description="AWS 区域（本机可 ~/.aws/credentials 或环境变量）",
     )
     S3_BUCKET_NAME: str = Field(
-        default="cuti-agent-assets-dev-699475938168-ap-southeast-2",
-        description="用户上传等媒体文件的 S3 bucket",
+        default="",
+        description="Optional object-store bucket when STORAGE_BACKEND=s3",
     )
     CDN_DOMAIN: str = Field(
-        default="https://cdn-dev.newai.land",
-        description="与 bucket 对应的 CDN 根域名（上传后拼接为可访问 URL）",
+        default="",
+        description="Optional public base URL when using object storage",
     )
 
     # Cuti-Media-Service：上传 S3 后对音频做 audio/info 补时长（与 Cuti-VideoAgent 一致）

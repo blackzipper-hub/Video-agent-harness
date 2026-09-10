@@ -130,20 +130,6 @@ class Settings(BaseSettings):
         description="CDN / public base URL for serving stored files (set via env/.env)"
     )
 
-    # JWT settings
-    JWT_SECRET_KEY: str = Field(
-        default="your-super-secret-jwt-key-change-this-in-production-please-make-it-long-and-random",
-        description="JWT secret key"
-    )
-    JWT_ALGORITHM: str = Field(
-        default="HS256",
-        description="JWT algorithm"
-    )
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=60 * 24 * 7,  # 7 days
-        description="JWT access token expiration time in minutes"
-    )
-
     # Service-to-service auth settings
     CUTI_SERVICE_ENABLED: bool = Field(
         default=True,
@@ -154,8 +140,8 @@ class Settings(BaseSettings):
         description="Bearer token for trusted service callers (set via env/.env; empty disables service auth)"
     )
     CUTI_SERVICE_DEFAULT_USER_ID: Optional[str] = Field(
-        default=None,
-        description="Fallback user_id for service callers / local single-user mode (set via env/.env)"
+        default="local-user",
+        description="Fallback user_id for local single-user mode and service callers"
     )
 
     # In-process Chat Agent (merged monorepo). Default False keeps this service byte-identical
@@ -183,12 +169,10 @@ class Settings(BaseSettings):
         description="When True, enqueue with user_option.full_auto so interrupt gates auto-resume after countdown (15s / 60s smart-clip). Default False requires manual Continue."
     )
 
-    # Single-user / local mode (for open-source / self-hosted deployments)
-    # 默认 False = 鉴权行为不变（仍需 cookie 或 service token）；
-    # 置 True 时，无 token 的请求回退为 CUTI_SERVICE_DEFAULT_USER_ID，免登录本地自托管即可用。
+    # Single-user / local mode (self-hosted). Always on for this agent-only track.
     LOCAL_SINGLE_USER_MODE: bool = Field(
-        default=False,
-        description="When True, requests without auth fall back to CUTI_SERVICE_DEFAULT_USER_ID (no login needed). Default False keeps existing auth behavior."
+        default=True,
+        description="When True, requests resolve to CUTI_SERVICE_DEFAULT_USER_ID (local-user). Default True for self-host."
     )
 
     # Base URL for external access
@@ -234,8 +218,8 @@ class Settings(BaseSettings):
     # ==================== Provider 后端开关 ====================
     # 对象存储后端：s3（集群成品）| local（自托管 / compose 本地盘）
     STORAGE_BACKEND: str = Field(
-        default="s3",
-        description="Object storage backend: 's3' (AWS/MinIO) or 'local' (filesystem; no object store needed)."
+        default="local",
+        description="Object storage backend: 'local' (filesystem; default) or 's3' (AWS/MinIO)."
     )
     # 账号/Key 只从环境变量读。保留该字段是为了兼容已有 Helm / compose（值只能是 env）。
     ACCOUNT_BACKEND: str = Field(

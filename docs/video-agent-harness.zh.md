@@ -62,7 +62,7 @@ API 根路径是 `/api/video`。它提供项目创建与查看、已安装插件
 
 ## 当前集成状态
 
-仓库包含 DeepSeek 工具组合、项目运行时、真实 Postgres 迁移、增量执行器、插件生命周期、授权网关、兼容 BFF、Cuti 原子 Provider 适配器、隔离 Sandbox Worker 和 Video Studio 项目界面。Create 工作区用同一套通用 Artifact 渲染逻辑处理 Provider 直调和完整视频流水线。Runtime 的 draft 与已选版本会自动分类为文档、故事、图片、视频、音频或其他产物；最新图片或视频会置顶，视频卡片支持取帧。该工作区不包含专用 `VideoResultsPanel`，也不请求旧的 thread 聚合接口。独立服务支持 Bearer Token 身份适配，组合式 Cuti 应用复用既有 JWT Cookie／服务身份；生产部署只需注入真实 Provider 凭据和部署专用密钥，源码不保存这些秘密。
+仓库包含 DeepSeek 工具组合、项目运行时、真实 Postgres 迁移、增量执行器、插件生命周期、授权网关、兼容 BFF、Cuti 原子 Provider 适配器、隔离 Sandbox Worker 和 Video Studio 项目界面。Create 工作区用同一套通用 Artifact 渲染逻辑处理 Provider 直调和完整视频流水线。Runtime 的 draft 与已选版本会自动分类为文档、故事、图片、视频、音频或其他产物；最新图片或视频会置顶，视频卡片支持取帧。该工作区不包含专用 `VideoResultsPanel`，也不请求旧的 thread 聚合接口。独立服务支持 Bearer Token 身份适配，本地自托管使用 `local-user`；生产部署只需注入真实 Provider 凭据和部署专用密钥，源码不保存这些秘密。
 
 本地自托管使用 `ACCOUNT_BACKEND=env`，直接从 `OPENAI_API_KEY`、`WAVESPEED_API_KEY`、`SUNO_API_KEY` 及其他可选 Provider 环境变量读取账号。`compose.video.yml` 已启用内置插件目录、导入的 Media Service，以及由 Video Runtime 在 `/files` 提供的共享本地媒体卷；本地配置不要求 S3 凭据。Compose 使用的 Capability Grant 密钥仅供本地开发，生产部署必须替换。可以直接向 Compose 提供仓库外的私有环境文件而不复制秘密，例如 `docker compose --env-file ../cuti-video-agent/.env -f compose.video.yml up`。Windows 使用本机 HTTP 代理时，还要给 Node 版 DeepSeek 进程传入 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`；否则可能出现 Python Provider 可用、Harness 模型请求却超时的现象。
 
