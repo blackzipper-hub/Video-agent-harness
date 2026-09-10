@@ -1,6 +1,0 @@
-apiVersion: v2
-name: deepseek-harness
-description: DeepSeek Harness web profile + loopback nginx sidecar
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

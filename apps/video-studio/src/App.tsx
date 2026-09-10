@@ -9,7 +9,6 @@ import SelectionHub from './components/SelectionHub'
 import NotFound from './pages/NotFound'
 import DeepAgentWorkspacePage from './pages/DeepAgentWorkspacePage'
 import IncrementalVideoWorkspacePage from './pages/IncrementalVideoWorkspacePage'
-import StudioWorkspacePage from './pages/StudioWorkspacePage'
 const App = () => {
   // HashRouter: /#/en/create or /#/zh/create
   // 优点：刷新任何页面都不会 404，无需后端 SPA fallback 支持
@@ -39,8 +38,6 @@ const App = () => {
                     <Route path="/create/:threadId" element={<DeepAgentWorkspacePage />} />
                     <Route path="/deep-agent-v2" element={<DeepAgentWorkspacePage />} />
                     <Route path="/deep-agent-v2/:threadId" element={<DeepAgentWorkspacePage />} />
-                    <Route path="/studio" element={<StudioWorkspacePage />} />
-                    <Route path="/studio/:threadId" element={<StudioWorkspacePage />} />
                     <Route path="/video" element={<IncrementalVideoWorkspacePage />} />
                     <Route path="/video/:projectId" element={<IncrementalVideoWorkspacePage />} />
                     {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

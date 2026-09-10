@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cuti-go-dsn
-type: Opaque
-stringData:
-  # In-cluster Postgres only (vda-dev PVC). Do not use the EC2 host.
-  dsn: postgres://cuti:replace-me@postgres:5432/storybook_dev?sslmode=disable

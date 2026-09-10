@@ -17,4 +17,4 @@ Then start DeepSeek Harness as described in the [root README](../README.md). Ide
 | 8001 | Video Runtime |
 | 18080 | Media Service |
 
-Helm charts under `deploy/charts` and `services/*/helm` are optional operator templates. They are not required for local use. Overlay values that still mention S3 are for people who bring their own object store; they are not the default.
+This track is local compose only. Cluster Helm and overlays stay on the private branch.

@@ -1,7 +1,6 @@
 import { arrayItem } from './arrayItem'
 import { DEFAULT_VIDEO_OPTIONS } from '@/constants/defaults'
 import { isAudioFile } from '@/utils/fileUploadUtils'
-import { audioApi } from '@/services/api'
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -167,7 +166,6 @@ export const autoCropAudioFileToDuration = async (
   return { file: croppedFile, cropped: true, sourceDurationSec }
 }
 
-const MIN_SMART_CROP_SECONDS = 1
 const SMART_CROP_RECOMMEND_GAP_SEC = 1
 
 export const smartCropAudioFileToTargetDuration = async (
@@ -190,20 +188,8 @@ export const smartCropAudioFileToTargetDuration = async (
     return { file, cropped: false, sourceDurationSec }
   }
 
-  let startSec = 0
-  let endSec = targetDurationSec
-  try {
-    const res = await audioApi.recommendAudioCrop(file, targetDurationSec)
-    const payload = res.data
-    if (payload.status === 'ready' && payload.recommended) {
-      const rec = payload.recommended
-      const dur = sourceDurationSec
-      startSec = Math.max(0, Math.min(rec.start_sec, dur - MIN_SMART_CROP_SECONDS))
-      endSec = Math.min(dur, Math.max(rec.end_sec, startSec + MIN_SMART_CROP_SECONDS))
-    }
-  } catch (error) {
-    console.warn('Smart clip recommend failed, fallback to head crop:', error)
-  }
+  const startSec = 0
+  const endSec = targetDurationSec
 
   const croppedFile = await cropAudioFile(file, startSec, endSec)
   return { file: croppedFile, cropped: true, sourceDurationSec }

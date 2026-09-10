@@ -8,7 +8,6 @@ import { Pause, Play, Scissors } from 'lucide-react'
 import { toast } from 'sonner'
 import { createWaveformPeaks, cropAudioFile, decodeAudioFile } from '@/utils/audioCrop'
 import { useLanguage } from '@/i18n/LanguageContext'
-import { audioApi } from '@/services/api'
 
 interface AudioCropDialogProps {
   open: boolean
@@ -21,11 +20,6 @@ interface AudioCropDialogProps {
 
 const MIN_CROP_SECONDS = 1
 const RECOMMEND_GAP_SEC = 1
-
-const fileCacheKey = (file: File, suggestedDurationSec?: number | null) =>
-  `${file.name}:${file.size}:${file.lastModified}:${suggestedDurationSec ?? 0}`
-
-const recommendCache = new Map<string, Awaited<ReturnType<typeof audioApi.recommendAudioCrop>>['data']>()
 
 const formatSec = (sec: number) => {
   if (!Number.isFinite(sec)) return '0.00s'
@@ -80,24 +74,7 @@ export const AudioCropDialog = ({
           && dur > suggestedDurationSec + RECOMMEND_GAP_SEC
 
         if (!shouldRecommend) return
-
-        const cacheKey = fileCacheKey(file, suggestedDurationSec)
-        let payload = recommendCache.get(cacheKey)
-        if (!payload) {
-          const res = await audioApi.recommendAudioCrop(file, suggestedDurationSec)
-          payload = res.data
-          if (payload.status === 'ready') {
-            recommendCache.set(cacheKey, payload)
-          }
-        }
         if (isCancelled()) return
-
-        if (payload.status === 'ready' && payload.recommended) {
-          const rec = payload.recommended
-          const start = Math.max(0, Math.min(rec.start_sec, dur - MIN_CROP_SECONDS))
-          const end = Math.min(dur, Math.max(rec.end_sec, start + MIN_CROP_SECONDS))
-          setRange([start, end])
-        }
       } catch (error: unknown) {
         if (!operation.cancelled) {
           toast.error(error instanceof Error && error.message ? error.message : t('failedParseAudio'))

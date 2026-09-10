@@ -1,3 +1,0 @@
-postgres:
-  existingSecret: cuti-postgres
-  database: storybook

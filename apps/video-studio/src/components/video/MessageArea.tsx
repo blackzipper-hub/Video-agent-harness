@@ -76,7 +76,7 @@ import { FilePreview } from '@/components/FilePreview'
 import { AudioCropDialog } from '@/components/AudioCropDialog'
 import { TaskStatus } from '@/types/api'
 import { DEFAULT_IMAGE_GENERATION_TOOL, DEFAULT_VIDEO_OPTIONS } from '@/constants/defaults'
-import { agentApi, videoEditingApi } from '@/services/api'
+import { agentApi } from '@/services/api'
 import aiAvatar from '@/assets/ai-avatar-capybara.png'
 import userPromptAvatar from '@/assets/user-prompt-avatar.png'
 
@@ -754,11 +754,7 @@ function PostRegenerateMessageBlock({
       setConfirmOpen(false)
     }
     try {
-      const res = await videoEditingApi.postRegenerateAction({
-        conversation_id: cid,
-        message_id: Number(mid),
-        action,
-      })
+      const res = { code: 1, message: 'Regenerate is not available in the local agent build.' }
       if (res.code !== 0) {
         if (didPresetKeyframeCompanion) {
           onPostRegenerateKeyframeDiceKeys?.([])

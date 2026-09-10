@@ -1,9 +1,0 @@
-image: postgres:16-alpine
-
-postgres:
-  host: postgres
-  port: "5432"
-  # Same Secret as deploy/charts/postgres (POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB).
-  existingSecret: cuti-postgres
-  # Runtime can share Go's database: schema cuti_video_runtime is created by the SQL.
-  database: storybook_dev

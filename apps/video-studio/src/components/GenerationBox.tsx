@@ -10,7 +10,6 @@ import { resolveAutoCropTargetDurationSec, resolveSendDurationPlan } from '@/uti
 import { FilePreview } from '@/components/FilePreview'
 import { AudioCropDialog } from '@/components/AudioCropDialog'
 import CharacterSelectPopover from '@/components/CharacterSelectDialog'
-import { api } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -117,7 +116,7 @@ const GenerationBox = ({
 
   const [characterName, setCharacterName] = useState('')
   const [characterImages, setCharacterImages] = useState<File[]>([])
-  const [isUploadingCharacter, setIsUploadingCharacter] = useState(false)
+  const [isUploadingCharacter] = useState(false)
 
   // Character selection
   const [selectedCharacters, setSelectedCharacters] = useState<Array<{
@@ -356,28 +355,7 @@ const GenerationBox = ({
       return
     }
 
-    setIsUploadingCharacter(true)
-
-    try {
-      const response = await api.characterUpload.createCharacter({
-        characterName: characterName,
-        images: characterImages,
-      })
-
-      if (response.code === 0) {
-        toast.success(t('characterUploadSuccess'))
-
-        setCharacterName('')
-        setCharacterImages([])
-      } else {
-        toast.error(`${t('characterUploadError')}: ${response.message}`)
-      }
-    } catch (error) {
-      console.error('Character upload error:', error)
-      toast.error(t('characterUploadError'))
-    } finally {
-      setIsUploadingCharacter(false)
-    }
+    toast.error('Character upload is not available in the local agent build.')
   }
 
   const handleSendMessage = async () => {

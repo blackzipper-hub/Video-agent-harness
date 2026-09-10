@@ -1,6 +1,0 @@
-apiVersion: v2
-name: cuti-postgres
-description: Postgres with PVC (in-cluster; alternative to RDS)
-type: application
-version: 0.1.0
-appVersion: "16"

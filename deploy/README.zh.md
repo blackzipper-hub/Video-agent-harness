@@ -17,4 +17,4 @@ docker compose --env-file .env -f compose.video.yml up --build -d
 | 8001 | Video Runtime |
 | 18080 | Media Service |
 
-`deploy/charts` 和 `services/*/helm` 里的 Helm chart 是可选的运维模板，本地不必用。overlay 里若仍写 S3，只给自带对象存储的人用，不是默认。
+这条线只支持本地 compose。集群 Helm 和 overlay 留在私有分支。
