@@ -45,6 +45,16 @@ def test_chinese_message_overrides_english_ui_language():
 
 def test_ui_language_preserves_chinese_for_language_neutral_followup():
     assert resolve_output_language("OK", requested="zh", current="en") == "zh"
+    assert resolve_output_language("15s", requested="zh") == "zh"
+    assert resolve_output_language("", requested="zh") == "zh"
+
+
+def test_english_user_words_beat_chinese_ui():
+    assert resolve_output_language("Magician", requested="zh") == "en"
+    assert resolve_output_language(
+        "A stage magician closes a show; the last spark hides in his palm.",
+        requested="zh",
+    ) == "en"
 
 
 def test_explicit_english_skill_wins_over_chinese_message_and_alias_is_canonical():
@@ -140,3 +150,119 @@ def test_language_skills_are_discoverable_as_run_scoped_skills():
     discovered = {item.name: item for item in catalog.discover()}
     assert discovered["language-zh"].metadata["scope"]["type"] == "run"
     assert discovered["language-en"].metadata["scope"]["type"] == "run"
+
+
+_FIVE_LAYER_CASES = (
+    {
+        "name": "1-explicit-english-plan-chinese-speech",
+        "text": "请用英文展示全部策划，人物说中文，并配英文字幕",
+        "ui_locale": "zh",
+        "expected": {
+            "ui_locale": "zh-CN",
+            "content_language": "en-US",
+            "spoken_language": "zh-CN",
+            "subtitle_language": "en-US",
+            "provider_prompt_language": "auto",
+        },
+    },
+    {
+        "name": "2-english-words-beat-chinese-ui",
+        "text": "Magician. A stage magician closes a show; the last spark hides in his palm.",
+        "ui_locale": "zh",
+        "expected": {
+            "ui_locale": "zh-CN",
+            "content_language": "en-US",
+            "spoken_language": "en-US",
+            "subtitle_language": "en-US",
+            "provider_prompt_language": "auto",
+        },
+    },
+    {
+        "name": "2-chinese-words-beat-english-ui",
+        "text": "做一首中文说唱MV，舞台上的魔术师把最后一点光藏进掌心。",
+        "ui_locale": "en",
+        "expected": {
+            "ui_locale": "en-US",
+            "content_language": "zh-CN",
+            "spoken_language": "zh-CN",
+            "subtitle_language": "zh-CN",
+            "provider_prompt_language": "auto",
+        },
+    },
+    {
+        "name": "4-english-plan-chinese-narration",
+        "text": "Create an English shot plan, but use Chinese narration",
+        "ui_locale": "zh",
+        "expected": {
+            "ui_locale": "zh-CN",
+            "content_language": "en-US",
+            "spoken_language": "zh-CN",
+            "subtitle_language": "en-US",
+            "provider_prompt_language": "auto",
+        },
+    },
+    {
+        "name": "5-ui-fallback-when-language-is-undetectable",
+        "text": "OK",
+        "ui_locale": "zh",
+        "expected": {
+            "ui_locale": "zh-CN",
+            "content_language": "zh-CN",
+            "spoken_language": "zh-CN",
+            "subtitle_language": "zh-CN",
+            "provider_prompt_language": "auto",
+        },
+    },
+)
+
+
+def test_five_layer_language_contracts_resolve_concurrently():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def resolve_case(case: dict) -> tuple[str, dict[str, str], dict[str, str]]:
+        contract = resolve_video_language_contract(case["text"], ui_locale=case["ui_locale"])
+        return case["name"], contract, case["expected"]
+
+    failures: list[str] = []
+    with ThreadPoolExecutor(max_workers=len(_FIVE_LAYER_CASES)) as pool:
+        futures = [pool.submit(resolve_case, case) for case in _FIVE_LAYER_CASES]
+        for future in as_completed(futures):
+            name, contract, expected = future.result()
+            if contract != expected:
+                failures.append(f"{name}: {contract} != {expected}")
+            instruction = video_language_instruction(contract)
+            assert "<video_language_contract>" in instruction
+            assert f"content_language={contract['content_language']}" in instruction
+            assert "ui_locale is chrome only" in instruction
+            if contract["content_language"] != contract["ui_locale"]:
+                visible = (
+                    "Simplified Chinese"
+                    if contract["content_language"] == "zh-CN"
+                    else "English"
+                )
+                assert visible in instruction
+    assert not failures, failures
+
+
+def test_followup_ok_keeps_english_plan_when_studio_is_chinese():
+    current = resolve_video_language_contract(
+        "Magician. A stage magician closes a show.", ui_locale="zh",
+    )
+    updated = resolve_video_language_contract("OK", ui_locale="zh", current=current)
+    assert current["content_language"] == "en-US"
+    assert updated["ui_locale"] == "zh-CN"
+    assert updated["content_language"] == "en-US"
+    assert updated["provider_prompt_language"] == "auto"
+
+
+def test_language_skill_and_provider_override_stay_independent():
+    contract = resolve_video_language_contract(
+        "做一支产品广告",
+        ui_locale="en",
+        language_skill="language-en",
+        overrides={"provider_prompt_language": "zh-CN"},
+    )
+    assert contract["content_language"] == "en-US"
+    assert contract["spoken_language"] == "en-US"
+    assert contract["provider_prompt_language"] == "zh-CN"
+    assert contract["ui_locale"] == "en-US"

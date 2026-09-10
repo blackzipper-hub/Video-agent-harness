@@ -55,7 +55,8 @@ export default {
         },
       },
       fontFamily: {
-        'inter': ['Inter', 'sans-serif'],
+        'inter': ['Inter', 'PingFang SC', 'Noto Sans SC', 'sans-serif'],
+        'inter-tight': ['"Inter Tight"', 'Inter', 'PingFang SC', 'Noto Sans SC', 'sans-serif'],
         'space-grotesk': ['"Space Grotesk"', 'sans-serif'],
         'righteous': ['Righteous', 'sans-serif'],
         'playfair': ['Playfair Display', 'serif'],
