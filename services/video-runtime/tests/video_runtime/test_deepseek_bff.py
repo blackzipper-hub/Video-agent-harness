@@ -134,6 +134,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             "content": "continue", "idempotency_key": "unconfirmed",
         })
         self.assertEqual(denied.status_code, 409)
+        self.assertEqual(denied.json()["detail"]["code"], "task_stopped_resume_required")
         resumed = self.client.post(base + "/resume", json={
             "content": "continue", "idempotency_key": "confirmed",
         })
@@ -366,15 +367,15 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             json={
                 "objective": "Make a Skill-driven trailer",
                 "idempotency_key": "skill-selection-1",
-                "workflow_id": "product-ad-video",
+                "workflow_id": "cuti-product-workflow",
                 "activated_skill_ids": ["product-voiceover-narration"],
             },
         ).json()["data"]
         prompt = self.deepseek.prompts[-1][1]
-        self.assertIn('"product-ad-video"', prompt)
+        self.assertIn('"cuti-product-workflow"', prompt)
         self.assertIn("Call video_workflow_load", prompt)
         self.assertIn('VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]', prompt)
-        self.assertNotIn("$product-ad-video", prompt)
+        self.assertNotIn("$cuti-product-workflow", prompt)
 
         lock_response = self.client.post(
             f"/chat-v1/service/studio/projects/{created['thread_id']}"
@@ -429,11 +430,11 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             json={
                 "objective": "$seedance2 make a product spot",
                 "idempotency_key": "workflow-priority-1",
-                "workflow_id": "product-ad-video",
+                "workflow_id": "cuti-product-workflow",
             },
         )
         self.assertEqual(explicit.status_code, 200, explicit.text)
-        self.assertEqual(explicit.json()["data"]["workflow_id"], "product-ad-video")
+        self.assertEqual(explicit.json()["data"]["workflow_id"], "cuti-product-workflow")
 
         unavailable = self.client.post(
             "/chat-v1/service/v2/runs",
@@ -718,6 +719,29 @@ Keep the requested visual tone consistent.
         self.assertNotIn("or other details that depend on media not generated yet", prompt)
         self.assertNotIn("brief is the requested film", prompt)
         self.assertNotIn("Example: user asked", prompt)
+
+    def test_subtitle_translation_message_reaches_agent(self):
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "Make a film", "idempotency_key": "translation-create"},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        text = "为当前完整成片添加 HyperFrames 字幕，根据实际英文对白生成中文字幕，保持画面和原声不变。"
+        response = self.client.post(
+            f"/chat-v1/service/v2/runs/{run['id']}/messages",
+            json={"content": text, "idempotency_key": "translation-message"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(text, self.deepseek.prompts[-1][1])
+
+    def test_language_conflict_is_actionable_not_server_error(self):
+        response = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "使用中文字幕和英文字幕", "idempotency_key": "language-conflict"},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("字幕", response.json()["detail"])
 
     def test_create_persists_independent_ui_and_content_languages(self):
         created = self.client.post(

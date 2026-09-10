@@ -1,5 +1,7 @@
 # Video Runtime
 
+启用分阶段和持续规划后，产物重生成、结构化编辑和后期编辑预览会创建续作目标，保留当前选中产物及原始编辑要求。DeepSeek 在绑定的同一个 Session 中编写可执行 PlanPatch；编辑预览不重建固定 Workflow DAG，也不自动把待编辑视频当作 Provider 参考视频。任务终态失败先反馈给 Agent，再决定下一次生成提交。编辑完成需要产生新产物，不能仅凭已有视频声明完成。关闭持续规划时保留确定性兼容路径。
+
 `cinematic` Workflow 复用 Seedance2 的自主规划，使用 `reference_mode: multi_reference`：续拍保留原始身份／场景图，并把上一段真实尾帧追加为普通参考图，不锁定首帧。选择 Cinematic 或输入 `$cinematic` 使用；已有 Seedance2 项目不会自动切换。
 
 Seedance 续拍规划将上一段尾帧保存在 `start_image_from_step`，将最初的身份／场景参考图保存在 `reference_from_steps`。WaveSpeed 已公布的 I2V 请求没有普通参考图字段，因此同时要求严格首帧和参考图的新请求会在提交前被拒绝，不再静默丢弃身份约束。已提交的远程任务仍可继续查询。实际执行需要支持组合输入的接口，或用户明确同意不保证严格首帧的多参考模式；Runtime 不会私自更换 Provider 或模式。
@@ -27,7 +29,7 @@ python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 
-设置 `VIDEO_RUNTIME_DATABASE_URL` 可启用 Postgres 持久化。未设置时，独立服务使用 `VIDEO_RUNTIME_LOCAL_STATE_PATH` 指定的原子 JSON 存储（默认 `./data/video-runtime-state.json`）；只有隔离测试才应设置 `VIDEO_RUNTIME_IN_MEMORY=true`。根目录的 `compose.video.yml` 会在启动服务前按顺序执行 `migrations/video_runtime` 中的全部迁移。
+设置 `VIDEO_RUNTIME_DATABASE_URL` 可启用 Postgres 持久化。未设置时，独立服务使用 `VIDEO_RUNTIME_LOCAL_STATE_PATH` 指定的原子 JSON 存储；该变量未设置时，路径与 `@cuti-ai/video-agent-harness` 使用的每用户系统数据目录一致。如果规范路径尚不存在，但检测到旧版工作目录相对状态文件，服务会停止启动并报告来源和迁移目标，而不是创建空项目库。只有隔离测试才应设置 `VIDEO_RUNTIME_IN_MEMORY=true`。根目录的 `compose.video.yml` 会在启动服务前按顺序执行 `migrations/video_runtime` 中的全部迁移。
 
 使用本地存储时，独立入口默认将 `PUBLIC_BASE_URL` 设置为 `http://127.0.0.1:8001`，与文档端口及 `/files/*` 挂载一致；若 Runtime 使用其他域名或端口，需要显式覆盖。发往远程生成服务的媒体仍会经过 media-egress 上传，不会直接把回环地址交给 Provider。
 
@@ -45,9 +47,11 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 
 `VIDEO_SKILL_PATHS` 可以替换进程级 Skill 根目录。未配置时，单一 `VideoSkillRuntime` 会发现内置 system、builtin、external 和 stage-director Skill。共享 Catalog 校验可执行契约和 Workflow 声明，在每个已规划 Build 步骤上冻结辅助 Skill 上下文，并通过 `cuti.skill-workflows` 注册 Workflow 贡献。`GET /api/video/workflows` 同时返回 manifest 工作流与最终生效的 Skill 工作流。
 
-每个可选 Workflow 都必须公开一个具名的专用编译器契约。未知 Skill mode、或没有显式 Runtime 描述的 Workflow 插件会显示为不可用；系统不存在通用／默认 Workflow 编译器回退。
+已安装的 Workflow Skill 可以声明 `workflow.planning.mode: agentic` 和非空的 `allowed_capabilities` 列表，使用 DeepSeek 编写的 PlanPatch 执行，无需按名称绑定编译器。必须同时启用 `VIDEO_STAGED_PLANNING_ENABLED` 和 `VIDEO_CONTINUOUS_PLAN_PATCH_ENABLED`。Catalog 返回 `executionKind: agent_plan_patch`；DeepSeek 加载原始 Skill 指令并提交结构化任务，不生成可执行编译器代码。具名 Cuti 编译器保留原有元数据检查。其他规划模式需要专用编译器；缺少执行支持时显示不可用，不回退到其他 Workflow。
 
-内置适配器复用 Cuti 的文本、图片、音乐、视频、TTS、FFmpeg、字幕与 Lipsync 操作。可选工作流（`mv`、`seedance2`、`short-drama-workflow`、`product-ad-video` 以及 product-workflow 变体）编译与 Provider 无关的 `VideoSpec`；`cuti.style-presets` 在编译前应用已安装的提示词默认值。生产身份可以使用独立 Runtime 的服务 Bearer Token，或组合应用中的 Cuti JWT 适配器；两者均未配置时默认拒绝请求。
+自主规划 Skill 可以声明 `workflow.parameters.completion_artifact_types`，例如纯文档 Workflow 使用 `[script]`，默认值为 `[video]`。完成要求存在新建且已完成的指定类型交付产物，同时没有活动任务；来源素材和意图记录不能满足此条件。上传包含与 Skill 同名目录及其 `SKILL.md` 的 ZIP；安装复用 Cuti 的压缩包校验并重新加载共享 Catalog 与 Resolver。Capability 参数校验、DAG 校验、项目访问控制、签名 Grant 和执行限制仍然强制生效。Skill 能力白名单只能限制能力，不能授予凭据或网络访问权限。
+
+内置适配器复用 Cuti 的文本、图片、音乐、视频、TTS、FFmpeg、字幕与 Lipsync 操作。可选工作流（`mv`、`seedance2`、`short-drama-workflow`、`cuti-product-workflow` 以及 product-workflow 变体）编译与 Provider 无关的 `VideoSpec`；`cuti.style-presets` 在编译前应用已安装的提示词默认值。生产身份可以使用独立 Runtime 的服务 Bearer Token，或组合应用中的 Cuti JWT 适配器；两者均未配置时默认拒绝请求。
 
 每个新的 `ProjectIntent` 和 `VideoSpec` 都持久化一份语言契约，分别记录界面、用户可见内容、对白或旁白、字幕和 Provider 提示词语言。BFF 会把该契约注入首次规划、后续编辑和自动检查点回合；Runtime 生成的用户产物会记录契约，并拒绝明确的文本语言不匹配。只有 `language` 字段的旧文档会为所有内容字段补上相同语言的默认值。
 
@@ -72,3 +76,9 @@ python -m unittest discover -s tests/video_runtime -v
 ```
 
 `tests/` 下还有 Capability、媒体工具和 DeepSeek BFF 的 pytest 覆盖。
+
+实时编辑快照属于发起请求的 Agent 回合，不参与检查点自动投递。空的 agentic 确认只解决当前检查点，不推进计划或规格版本。真实任务完成和失败仍自动通知；后续用户编辑可以打开新的实时快照。
+
+多次编辑支持在一个 PlanPatch 中串联媒体操作，并为同一来源生成多个版本。与项目产物一致的冗余 URL 会归一化为结构化输入。持久化执行历史不参与创作 VideoSpec 校验。
+
+对白字幕使用实际音频转写，不使用剧本提示。Cuti HyperFrames 模板读取持久化转写片段，负责位置和时间轴；默认保留原声语言。显式翻译通过逐片段的 `translated_texts` 提供，保留原时间戳。无需 Workflow 的 PlanPatch 支持原子视频生成并接入拼接。用户提出编辑请求后，从预览直接执行，不再二次确认；排队中的工作必须跟进至用户要求的产物生成。

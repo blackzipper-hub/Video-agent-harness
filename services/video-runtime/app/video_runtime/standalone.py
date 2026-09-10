@@ -33,7 +33,9 @@ from .deepseek_bff import (
 )
 from .deepseek_client import DeepSeekHarnessClient
 from .checkpoint_coordinator import CheckpointCoordinator
+from .session_context import router as session_context_router
 from .local_repository import LocalJsonVideoProjectRepository
+from .local_state_path import resolve_state_path
 from .postgres_repository import PostgresVideoProjectRepository
 from .plugins.registry import configured_plugin_roots
 from .runtime import VideoBuildRuntime
@@ -54,10 +56,7 @@ async def lifespan(_app: FastAPI):
         "1", "true", "yes",
     }:
         repository = LocalJsonVideoProjectRepository(
-            os.getenv(
-                "VIDEO_RUNTIME_LOCAL_STATE_PATH",
-                "./data/video-runtime-state.json",
-            ),
+            resolve_state_path(),
         )
     build_runtime = VideoBuildRuntime(repository=repository)
     roots = configured_plugin_roots()
@@ -105,6 +104,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.include_router(session_context_router)
 app.include_router(router)
 
 # The open-source profile does not require S3. The Cuti Media Service writes

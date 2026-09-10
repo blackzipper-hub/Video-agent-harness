@@ -21,10 +21,23 @@ class SkillResolver:
     ) -> None:
         self.catalog = catalog
         self.capabilities = capabilities
-        self.workflows = workflows or {}
+        self.workflows = workflows if workflows is not None else {}
 
-    def resolve(self, request: SkillResolutionRequest) -> SkillContext | None:
+    def resolve(
+        self,
+        request: SkillResolutionRequest,
+        *,
+        frozen_skills: Mapping[str, tuple[ResolvedSkillRef, str]] | None = None,
+    ) -> SkillContext | None:
+        """Resolve applicable Skills, reusing a running Build's frozen instructions.
+
+        ``frozen_skills`` is accepted only when the installed Skill still declares
+        the version captured by the Project lock. This lets an active Build finish
+        after an unversioned on-disk edit without silently adopting the edit. A
+        declared version change continues to require an explicit Project upgrade.
+        """
         candidates: dict[str, str] = {}
+        frozen_skills = frozen_skills or {}
         project_locks = {
             item.skill_id: item for item in request.project_skill_locks if item.enabled
         }
@@ -62,18 +75,25 @@ class SkillResolver:
             loaded = self.catalog.load(name)
             if not loaded.metadata.enabled:
                 raise ValueError(f"required Skill is disabled: {name}")
+            frozen = None
             if source == "project_lock":
                 from app.domain.skills.service import make_skill_lock
 
                 expected = project_locks[name]
                 current = make_skill_lock(expected.project_id, loaded.metadata)
                 if current.version != expected.version or current.digest != expected.digest:
-                    raise ValueError(
-                        f"project Skill lock is stale: {name}; disable and re-enable it "
-                        "to accept the installed version",
-                    )
+                    frozen = frozen_skills.get(name)
+                    if (
+                        frozen is None
+                        or current.version != expected.version
+                        or frozen[0].version != expected.version
+                    ):
+                        raise ValueError(
+                            f"project Skill lock is stale: {name}; disable and re-enable it "
+                            "to accept the installed version",
+                        )
             raw = dict(loaded.metadata.metadata or {})
-            roles = self._roles(raw)
+            roles = list(frozen[0].roles) if frozen else self._roles(raw)
             if not self._matches(
                 raw,
                 roles=roles,
@@ -82,21 +102,25 @@ class SkillResolver:
                 output_type=request.output_type,
             ):
                 continue
-            hooks = self._hooks(raw)
-            digest = sha256(loaded.metadata.path.read_bytes()).hexdigest()
-            version = str(raw.get("version") or "").strip() or None
-            refs.append(ResolvedSkillRef(
-                skill_id=name,
-                version=version,
-                content_hash=digest,
-                roles=roles,
-                hooks=hooks,
-                source=source,
-            ))
-            instruction_blocks.append(
-                f"Skill `{name}` (roles: {', '.join(roles)}; "
-                f"hooks: {', '.join(hooks)}):\n{loaded.instructions.strip()}"
-            )
+            if frozen:
+                refs.append(frozen[0].model_copy(update={"source": source}))
+                instruction_blocks.append(frozen[1])
+            else:
+                hooks = self._hooks(raw)
+                digest = sha256(loaded.metadata.path.read_bytes()).hexdigest()
+                version = str(raw.get("version") or "").strip() or None
+                refs.append(ResolvedSkillRef(
+                    skill_id=name,
+                    version=version,
+                    content_hash=digest,
+                    roles=roles,
+                    hooks=hooks,
+                    source=source,
+                ))
+                instruction_blocks.append(
+                    f"Skill `{name}` (roles: {', '.join(roles)}; "
+                    f"hooks: {', '.join(hooks)}):\n{loaded.instructions.strip()}"
+                )
 
         if not refs:
             return None

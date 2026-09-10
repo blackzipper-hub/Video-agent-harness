@@ -28,7 +28,7 @@ Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Sessi
 
 `video_project_create`、`video_project_plan` 与 `video_project_build` 增加首次构建路径，但不会增加第二套 Agent Loop。DeepSeek 生成与 Provider 无关的 `VideoSpec`；Workflow Plugin 把它编译为与增量和导出任务共用的持久化 `BuildPlan`。计划包含稳定步骤身份、Capability、依赖、幂等键、输出产物身份和预计成本。
 
-可选 Workflow Skill（`seedance2`、`mv`、`short-drama-workflow`、`product-ad-video`、`cuti-product-workflow`、`cuti-scenario-product-workflow`、`libtv-product-workflow`）把 `VideoSpec` 编译成这份 `BuildPlan`。每个成功步骤立即保存为 draft，服务重启后可直接复用。只有全部媒体与校验步骤通过后，活动 ProjectVersion 才会切换。
+可选 Workflow Skill（`seedance2`、`mv`、`short-drama-workflow`、`cuti-product-workflow`、`cuti-scenario-product-workflow`）把 `VideoSpec` 编译成这份 `BuildPlan`。每个成功步骤立即保存为 draft，服务重启后可直接复用。只有全部媒体与校验步骤通过后，活动 ProjectVersion 才会切换。
 
 `cuti.atomic-providers` 复用 Cuti 的图片、音乐与 Seedance Provider；`cuti.media-core` 复用 Cuti 的 TTS、Media Service 与 FFmpeg 操作；`cuti.continuity-validator` 始终检查时间线和媒体结构，并探测最终视频是否可解码、时长及音轨，也可选择启用 Cuti 已有的 VLM 视频一致性校验。对已经组装完成的不可变版本，MP4 导出是持久化零拷贝导出；格式转换仍作为 Export Build 执行。
 

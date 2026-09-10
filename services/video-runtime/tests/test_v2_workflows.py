@@ -19,10 +19,8 @@ LIVE_WORKFLOWS = (
     "mv",
     "seedance2",
     "short-drama-workflow",
-    "product-ad-video",
     "cuti-product-workflow",
     "cuti-scenario-product-workflow",
-    "libtv-product-workflow",
 )
 
 
@@ -50,16 +48,16 @@ def test_workflow_registry_covers_user_facing_pipelines():
 
 
 def test_parse_explicit_skill_names_accepts_unicode_boundaries():
-    assert parse_explicit_skill_names("$product-ad-video") == ["product-ad-video"]
-    assert parse_explicit_skill_names("$product-ad-video 这个skill") == ["product-ad-video"]
-    assert parse_explicit_skill_names("$product-ad-video，为产品生成广告") == ["product-ad-video"]
-    assert parse_explicit_skill_names("使用$product-ad-video这个skill") == ["product-ad-video"]
-    assert parse_explicit_skill_names("使用/product-ad-video生成广告") == ["product-ad-video"]
+    assert parse_explicit_skill_names("$cuti-product-workflow") == ["cuti-product-workflow"]
+    assert parse_explicit_skill_names("$cuti-product-workflow 这个skill") == ["cuti-product-workflow"]
+    assert parse_explicit_skill_names("$cuti-product-workflow，为产品生成广告") == ["cuti-product-workflow"]
+    assert parse_explicit_skill_names("使用$cuti-product-workflow这个skill") == ["cuti-product-workflow"]
+    assert parse_explicit_skill_names("使用/cuti-product-workflow生成广告") == ["cuti-product-workflow"]
 
 
 def test_parse_explicit_skill_names_rejects_partial_ascii_tokens():
-    assert parse_explicit_skill_names("prefix$product-ad-video") == []
-    assert parse_explicit_skill_names("$product-ad-video_suffix") == []
+    assert parse_explicit_skill_names("prefix$cuti-product-workflow") == []
+    assert parse_explicit_skill_names("$cuti-product-workflow_suffix") == []
 
 
 def test_inject_workflow_parameters_stamps_activated_workflow():

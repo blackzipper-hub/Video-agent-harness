@@ -45,14 +45,14 @@ _VISIBLE_ZH_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"(?:respond|write|display|show|output).{0,12}(?:everything|all content|the plan|the script)?\s*(?:in|as)?\s*(?:chinese|mandarin)",
 ))
 _SUBTITLE_EN_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
-    r"(?:字幕|屏幕文字).{0,12}(?:使用|采用|保持|为|用)?\s*(?:英文|英语)",
+    r"(?:字幕|屏幕文字)\s*(?:请|要|需要)?\s*(?:使用|采用|保持|设为|改为|换成|翻译成|为|用|是)?\s*(?:英文|英语)",
     r"(?:英文|英语)(?:的)?(?:字幕|屏幕文字)",
-    r"(?:subtitles?|captions?|on[- ]screen text).{0,16}(?:in|use|remain|be)?\s*english",
+    r"(?:subtitles?|captions?|on[- ]screen text)\s*(?:(?:should|must)\s+)?(?:(?:in|use|remain|be)\s+)?english\b",
 ))
 _SUBTITLE_ZH_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
-    r"(?:字幕|屏幕文字).{0,12}(?:使用|采用|保持|为|用)?\s*(?:中文|汉语|简体中文)",
+    r"(?:字幕|屏幕文字)\s*(?:请|要|需要)?\s*(?:使用|采用|保持|设为|改为|换成|翻译成|为|用|是)?\s*(?:中文|汉语|简体中文)",
     r"(?:中文|汉语|简体中文)(?:的)?(?:字幕|屏幕文字)",
-    r"(?:subtitles?|captions?|on[- ]screen text).{0,16}(?:in|use|remain|be)?\s*(?:chinese|mandarin)",
+    r"(?:subtitles?|captions?|on[- ]screen text)\s*(?:(?:should|must)\s+)?(?:(?:in|use|remain|be)\s+)?(?:chinese|mandarin)\b",
 ))
 
 
@@ -203,9 +203,8 @@ def resolve_video_language_contract(
     subtitle = canonical_content_language(
         overrides.get("subtitle_language")
         or explicit_subtitle_language(text)
-        or current.get("subtitle_language")
-        or content,
-        fallback=content,
+        or spoken,
+        fallback=spoken,
     )
     provider_prompt = str(
         overrides.get("provider_prompt_language")

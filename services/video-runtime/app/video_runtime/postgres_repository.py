@@ -962,7 +962,8 @@ class PostgresVideoProjectRepository:
             rows = await connection.fetch(
                 f"""SELECT c.* FROM {self.schema}.plan_checkpoints c
                 JOIN {self.schema}.builds b ON b.id=c.build_id
-                WHERE c.status='planning' AND b.status NOT IN ('cancelled','failed','completed')""",
+                WHERE c.status='planning' AND c.phase NOT LIKE 'live:%'
+                AND b.status NOT IN ('cancelled','failed','completed')""",
             )
         return [self._checkpoint(row) for row in rows]
 
@@ -973,6 +974,7 @@ class PostgresVideoProjectRepository:
                 f"""SELECT * FROM {self.schema}.plan_checkpoints c
                 WHERE (status='pending'
                    OR (status='planning' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1))
+                AND c.phase NOT LIKE 'live:%'
                 AND EXISTS (SELECT 1 FROM {self.schema}.builds b
                             WHERE b.id=c.build_id AND b.status NOT IN ('cancelled','failed','completed'))
                 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
@@ -1099,6 +1101,20 @@ class PostgresVideoProjectRepository:
                 raise VideoSpecRevisionConflict(checkpoint.base_spec_revision, latest_spec.revision)
             if stored.status not in {"pending", "planning"}:
                 raise ValueError(f"cannot resolve {stored.status} checkpoint")
+            if updated_plan.current_revision == current_plan.current_revision:
+                await connection.execute(
+                    f"UPDATE {self.schema}.plan_checkpoints SET status='resolved',lease_expires_at=NULL,error=NULL,updated_at=$2 WHERE id=$1",
+                    stored.id, now(),
+                )
+                await connection.execute(
+                    f"UPDATE {self.schema}.builds SET status='running',message='Waiting for task results',updated_at=$2 WHERE id=$1",
+                    stored.build_id, now(),
+                )
+                await self._remember(connection, stored.project_id, operation, idempotency_key, current_plan.id)
+                await self._append_event(connection, stored.project_id, "build.checkpoint.resolved", {
+                    "build_id": stored.build_id, "checkpoint_id": stored.id, "acknowledged_only": True,
+                })
+                return current_plan
             existing_step_ids = {
                 row["plan_step_id"] for row in await connection.fetch(
                     f"SELECT plan_step_id FROM {self.schema}.build_steps WHERE build_id=$1",

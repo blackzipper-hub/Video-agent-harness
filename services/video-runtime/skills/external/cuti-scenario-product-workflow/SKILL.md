@@ -62,7 +62,7 @@ metadata:
 
 Create a short product drama whose surface is an engaging human situation and whose causal outcome makes one product benefit believable. The product is a plot device and proof mechanism, not the subject of every shot.
 
-Use the installed legacy `seedance2` Skill for Chinese prompt grammar, multimodal references, native audio, complete 15-second generation units, continuity, and assembly. Do not load `seedance-20` or Emily2040 subskills.
+Use the installed legacy `seedance2` Skill for Chinese prompt grammar, multimodal references, native audio, complete 15-second generation units, continuity, and assembly. Do not load unrelated prompt-only helper bundles.
 
 ## Creative contract
 

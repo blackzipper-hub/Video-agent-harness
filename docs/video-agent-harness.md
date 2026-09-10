@@ -28,7 +28,7 @@ The Video Runtime is the sole authority for video project state. A DeepSeek Sess
 
 `video_project_create`, `video_project_plan`, and `video_project_build` add the first-build path without adding another agent loop. DeepSeek produces a provider-neutral `VideoSpec`; a Workflow Plugin compiles it into the same persisted `BuildPlan` vocabulary used by incremental and export work. A plan contains stable step identities, capabilities, dependencies, idempotency keys, output artifact identities, and estimated costs.
 
-Selectable Workflow Skills (`seedance2`, `mv`, `short-drama-workflow`, `product-ad-video`, `cuti-product-workflow`, `cuti-scenario-product-workflow`, `libtv-product-workflow`) compile a `VideoSpec` into that `BuildPlan`. Each successful step is saved as a draft and can be reused after restart. The active project version changes only after all media and validation steps pass.
+Selectable Workflow Skills (`seedance2`, `mv`, `short-drama-workflow`, `cuti-product-workflow`, `cuti-scenario-product-workflow`) compile a `VideoSpec` into that `BuildPlan`. Each successful step is saved as a draft and can be reused after restart. The active project version changes only after all media and validation steps pass.
 
 `cuti.atomic-providers` reuses Cuti image, music, and Seedance providers. `cuti.media-core` reuses Cuti's TTS, Media Service, and FFmpeg-facing operations. `cuti.continuity-validator` always checks timeline and media structure, probes the final output for decodability, duration and audio, and can opt into Cuti's existing VLM video-consistency check. MP4 export of an already assembled immutable version is a durable zero-copy export; format conversion remains an export build.
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { createIdempotencyKey, deepAgentV2Client } from './client'
+import { createIdempotencyKey, deepAgentV2Client, isStoppedResumeRequired } from './client'
 import { replayDeepAgentEvents } from './eventParser'
+import { runtimeMessage } from './labels'
 import { deepAgentReducer, initialDeepAgentState } from './reducer'
 import type {
   DeepAgentEvent,
@@ -113,7 +114,7 @@ export function useDeepAgentWorkspace({
       }
     } catch (_error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailed') } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailedGeneric') } })
     }
   }, [])
 
@@ -143,7 +144,7 @@ export function useDeepAgentWorkspace({
       })
     } catch (_error) {
       if (controller.signal.aborted) return
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailed') } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: tRef.current('da.runtime.requestFailedGeneric') } })
     }
   }, [])
 
@@ -351,23 +352,51 @@ export function useDeepAgentWorkspace({
       const resumeMessage = language === 'zh'
         ? '任务已停止。确认恢复并发送这条消息？已完成素材会保留；已提交的外部生成可能仍在运行，恢复时会先查询原任务。'
         : 'This task is stopped. Resume it and send this message? Completed media will be preserved, and submitted provider jobs will be reconciled before retrying.'
-      if (stopped && !window.confirm(resumeMessage)) {
+      const confirmResume = () => window.confirm(resumeMessage)
+      if (stopped && !confirmResume()) {
         dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
         return
       }
-      const run = await (stopped ? deepAgentV2Client.resumeRun : deepAgentV2Client.sendMessage)(
-        state.selectedRunId,
-        normalized,
-        payload,
-        controller.signal,
-      )
+      let run
+      if (stopped) {
+        run = await deepAgentV2Client.resumeRun(
+          state.selectedRunId,
+          normalized,
+          payload,
+          controller.signal,
+        )
+      } else {
+        try {
+          run = await deepAgentV2Client.sendMessage(
+            state.selectedRunId,
+            normalized,
+            payload,
+            controller.signal,
+          )
+        } catch (error) {
+          // Runtime build state is authoritative. If the page held a stale
+          // non-cancelled snapshot, offer the same recovery path and retry the
+          // user's message exactly once through /resume.
+          if (!isStoppedResumeRequired(error)) throw error
+          if (!confirmResume()) {
+            dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
+            return
+          }
+          run = await deepAgentV2Client.resumeRun(
+            state.selectedRunId,
+            normalized,
+            payload,
+            controller.signal,
+          )
+        }
+      }
       persistThreadId(state.selectedRunId, run.thread_id || threadId)
       await hydrateRun(state.selectedRunId)
       return run
     } catch (error) {
       dispatch({ type: 'REMOVE_MESSAGE', messageId: optimisticId })
       if (error instanceof DOMException && error.name === 'AbortError') return undefined
-      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: t('da.runtime.requestFailed') } })
+      dispatch({ type: 'NOTICE', notice: { severity: 'error', message: error instanceof Error && error.message ? runtimeMessage(error.message, t) : t('da.runtime.requestFailedGeneric') } })
       throw error
     } finally {
       // An aborted older request may unwind after a resumed message already

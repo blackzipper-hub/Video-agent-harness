@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.capabilities.models import (
     CapabilityInputs,
     CapabilityManifest,
@@ -9,6 +11,7 @@ from app.capabilities.models import (
 )
 from app.chat.v2.models import AgentRun, Task
 from app.chat.v2.skill_catalog import SkillCatalog
+from app.domain.skills.service import make_skill_lock
 from app.orchestration.skills import SkillResolutionRequest, SkillResolver
 
 
@@ -134,7 +137,7 @@ def test_workflow_only_skill_is_not_copied_into_stage(tmp_path):
 def test_workflow_stage_supervisor_is_injected_only_into_selected_atomic_stages(tmp_path):
     _write_skill(
         tmp_path,
-        "product-ad-video",
+        "cuti-product-workflow",
         metadata="""  kind: workflow
   version: "1.0.0"
   roles: [workflow, stage_supervisor]
@@ -144,7 +147,7 @@ def test_workflow_stage_supervisor_is_injected_only_into_selected_atomic_stages(
     capabilities: [atomic.video.generate]
   hooks: [before_stage, after_stage]
   workflow:
-    mode: product_ad_video
+    mode: cuti_product_workflow
     pipeline: [atomic.video.generate]
     allowed_capabilities: [atomic.video.generate]
 """,
@@ -159,7 +162,7 @@ def test_workflow_stage_supervisor_is_injected_only_into_selected_atomic_stages(
         user_id="user-1",
         objective="Make a product commercial",
         idempotency_key="run-1",
-        activated_skills=["product-ad-video"],
+        activated_skills=["cuti-product-workflow"],
     )
 
     video = _resolve(resolver, "atomic.video.generate", activated=run.activated_skills)
@@ -211,3 +214,97 @@ def test_task_preserves_frozen_skill_context_across_serialization(tmp_path):
         restored.objective_with_skill_context()
     )
     assert "visually consistent" in restored.objective_with_skill_context()
+
+
+def test_running_build_reuses_frozen_skill_after_same_version_edit(tmp_path):
+    metadata = """  kind: workflow
+  version: "1.0.0"
+  roles: [workflow, stage_supervisor]
+  scope: run
+  selectors:
+    capabilities: [atomic.video.generate]
+  hooks: [before_stage]
+"""
+    _write_skill(
+        tmp_path,
+        "locked-workflow",
+        metadata=metadata,
+        instructions="Use the instructions captured when the Build started.",
+    )
+    catalog = SkillCatalog([tmp_path])
+    catalog.discover()
+    resolver = SkillResolver(catalog, _capabilities())
+    lock = make_skill_lock(
+        "project-1", catalog.load("locked-workflow").metadata,
+    )
+    request = SkillResolutionRequest(
+        project_skill_locks=[lock],
+        capability_id="atomic.video.generate",
+        output_type="video",
+    )
+    original = resolver.resolve(request)
+    assert original is not None
+
+    skill_file = tmp_path / "locked-workflow" / "SKILL.md"
+    skill_file.write_text(
+        skill_file.read_text(encoding="utf-8").replace(
+            "Use the instructions captured when the Build started.",
+            "This unversioned edit must apply only to a new Build.",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="project Skill lock is stale"):
+        resolver.resolve(request)
+    resumed = resolver.resolve(
+        request,
+        frozen_skills={
+            "locked-workflow": (
+                original.applied_skills[0],
+                original.instructions,
+            ),
+        },
+    )
+
+    assert resumed is not None
+    assert resumed.instructions == original.instructions
+    assert "unversioned edit" not in resumed.instructions
+
+
+def test_frozen_skill_does_not_bypass_declared_version_change(tmp_path):
+    _write_skill(
+        tmp_path,
+        "locked-workflow",
+        metadata="""  kind: workflow
+  version: "1.0.0"
+  roles: [workflow, stage_supervisor]
+  scope: run
+  selectors:
+    capabilities: [atomic.video.generate]
+""",
+        instructions="Version one instructions.",
+    )
+    catalog = SkillCatalog([tmp_path])
+    catalog.discover()
+    resolver = SkillResolver(catalog, _capabilities())
+    current_lock = make_skill_lock(
+        "project-1", catalog.load("locked-workflow").metadata,
+    )
+    request = SkillResolutionRequest(
+        project_skill_locks=[current_lock],
+        capability_id="atomic.video.generate",
+        output_type="video",
+    )
+    original = resolver.resolve(request)
+    assert original is not None
+    incompatible_lock = current_lock.model_copy(update={"version": "2.0.0"})
+
+    with pytest.raises(ValueError, match="project Skill lock is stale"):
+        resolver.resolve(
+            request.model_copy(update={"project_skill_locks": [incompatible_lock]}),
+            frozen_skills={
+                "locked-workflow": (
+                    original.applied_skills[0],
+                    original.instructions,
+                ),
+            },
+        )

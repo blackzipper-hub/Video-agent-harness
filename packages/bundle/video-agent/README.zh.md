@@ -14,7 +14,7 @@ bundle 本身不提供模型可见内容。它的 Cordis patch 挂载 `@cuti-ai/
 
 #### Token 影响
 
-只有已挂载工具包的固定 schema 和依赖数据的有界结果会占用 Token。
+工具 schema 和结果会占用 Token。视频 patch 启用上游会话压缩器、`/compact` 命令和工具结果精简器，包括 Web Profile 禁用它们的情况。自动上下文压力处理和有限次数的上下文超限恢复支持长视频规划会话；摘要替代较早的模型上下文，Session 日志保留原始事件。
 
 #### KV Cache 影响
 

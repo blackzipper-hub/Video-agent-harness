@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -15,6 +16,13 @@ from app.services.ffmpeg_service import get_video_info
 _CHECKOUT_CLI = Path(".runtime-deps/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs")
 IMAGE_CLI = "/opt/hyperframes/node_modules/.bin/hyperframes"
 CLI_CANDIDATES = (IMAGE_CLI,)
+STYLE_NAMES = {
+    "caption-highlight", "caption-pill-karaoke", "caption-editorial-emphasis",
+    "caption-glitch-rgb", "caption-kinetic-slam", "caption-neon-glow",
+    "caption-neon-accent", "caption-clip-wipe", "caption-gradient-fill",
+    "caption-matrix-decode", "caption-emoji-pop", "caption-parallax-layers",
+    "caption-particle-burst", "caption-texture", "caption-weight-shift",
+}
 
 
 def _checkout_hyperframes_cli(start: Path | None = None) -> str:
@@ -149,6 +157,58 @@ def _sentence_groups(words: list[dict], cues: list[dict]) -> list[dict[str, Any]
     ]
 
 
+def _style_css(style: str, accent: str) -> str:
+    extras = {
+        "caption-pill-karaoke": "background:rgba(8,8,12,.82);border-radius:999px;padding:18px 28px;",
+        "caption-editorial-emphasis": "font-family:'Cuti CJK',serif;font-weight:600;letter-spacing:.01em;",
+        "caption-glitch-rgb": "text-shadow:-4px 0 #00e5ff,4px 0 #ff1745,0 5px 18px #000;",
+        "caption-kinetic-slam": "font-size:clamp(56px,7vw,118px);text-transform:uppercase;",
+        "caption-neon-glow": f"color:#fff;text-shadow:0 0 8px {accent},0 0 24px {accent},0 4px 18px #000;",
+        "caption-neon-accent": "background:linear-gradient(90deg,#00e5ff,#ff2bd6,#ffe600);-webkit-background-clip:text;color:transparent;",
+        "caption-clip-wipe": "border-left:10px solid var(--accent);padding-left:24px;",
+        "caption-gradient-fill": "background:linear-gradient(90deg,#fff,var(--accent));-webkit-background-clip:text;color:transparent;",
+        "caption-matrix-decode": "font-family:'Cuti CJK',monospace;color:#75ff84;text-shadow:0 0 14px #00ff44;",
+        "caption-emoji-pop": "font-family:'Cuti CJK',sans-serif;",
+        "caption-parallax-layers": "text-shadow:5px 5px 0 var(--accent),10px 10px 24px rgba(0,0,0,.7);",
+        "caption-particle-burst": f"text-shadow:0 0 5px #fff,0 0 26px {accent};",
+        "caption-texture": "background:linear-gradient(180deg,#fff3b0,#ff7a18,#b31217);-webkit-background-clip:text;color:transparent;",
+        "caption-weight-shift": "font-variation-settings:'wght' 850;letter-spacing:.04em;",
+    }
+    return extras.get(style, "")
+
+
+def _build_templated_caption_html(
+    *,
+    width: int,
+    height: int,
+    duration: float,
+    groups: list[dict[str, Any]],
+    style: str,
+    accent: str,
+    position: str,
+) -> str:
+    """Cuti DeepAgent's deterministic transcript-to-HyperFrames renderer."""
+    bottom = {"bottom-safe": "7%", "lower-middle": "24%", "center": "44%"}[position]
+    groups_json = json.dumps(groups, ensure_ascii=False).replace("</", "<\\/")
+    css = _style_css(style, accent)
+    return f'''<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width={width},height={height}">
+<script src="assets/gsap.min.js"></script><style>
+@font-face{{font-family:'Cuti CJK';src:url('assets/cuti-cjk.ttf') format('truetype');font-weight:100 900;font-style:normal;font-display:block}}
+*{{box-sizing:border-box}}html,body{{margin:0;width:{width}px;height:{height}px;overflow:hidden;background:#000}}
+#root{{position:relative;width:{width}px;height:{height}px;overflow:hidden;--accent:{accent}}}
+#source-video{{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}}
+#captions{{position:absolute;inset:0;pointer-events:none}}.group{{position:absolute;left:5%;right:5%;bottom:{bottom};display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:.22em;opacity:0;visibility:hidden;text-align:center;font-family:'Cuti CJK',sans-serif;font-size:clamp(34px,4.2vw,78px);font-weight:800;line-height:1.18;color:#fff;text-shadow:0 4px 14px rgba(0,0,0,.95);{css}}}
+.sentence{{display:inline-block;position:relative;padding:.05em .10em;border-radius:.14em}}
+</style></head><body><div id="root" data-composition-id="main" data-start="0" data-duration="{duration:.3f}" data-fps="30" data-width="{width}" data-height="{height}">
+<video id="source-video" class="clip" src="assets/source.mp4" data-start="0" data-duration="{duration:.3f}" data-track-index="0" muted playsinline></video>
+<audio id="source-audio" src="assets/source.mp4" data-start="0" data-duration="{duration:.3f}" data-track-index="10" data-volume="1"></audio>
+<div id="captions" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="20"></div></div>
+<script>(function(){{window.__timelines=window.__timelines||{{}};var GROUPS={groups_json};var host=document.getElementById('captions');var tl=gsap.timeline({{paused:true}});
+GROUPS.forEach(function(g,gi){{var el=document.createElement('div');el.className='group';el.id='cg-'+gi;var s=document.createElement('span');s.className='sentence';s.textContent=g.text;el.appendChild(s);host.appendChild(el);
+tl.set(el,{{visibility:'visible'}},g.start);tl.fromTo(el,{{opacity:0,y:10}},{{opacity:1,y:0,duration:.14,ease:'power1.out'}},g.start);
+tl.to(el,{{opacity:0,y:-12,duration:.12,ease:'power2.in'}},Math.max(g.start,g.end-.12));tl.set(el,{{opacity:0,visibility:'hidden'}},g.end)}});tl.seek(0);window.__timelines.main=tl}})();</script></body></html>'''
+
+
 def _index_groups(
     words: list[dict[str, Any]],
     max_words: int = 4,
@@ -251,8 +311,58 @@ def _prepare_authored_html(
     accent: str,
     has_cjk: bool,
 ) -> str:
-    """Point overlay assets at this workspace. Timing and frame size stay authored."""
-    del duration, width, height
+    """Normalize Agent-authored markup into a renderable HyperFrames composition.
+
+    Agents commonly produce a useful HTML fragment instead of a complete document.
+    HyperFrames deliberately rejects those fragments because a referenced composition
+    must contain a body/template and a composition root.  Accept both forms here and
+    add only the structural/timing contract that the renderer requires; authored
+    styling and content remain untouched.
+    """
+    html = html.strip()
+    _validate_authored_caption_visibility(html)
+
+    def normalize_timed_element(match: re.Match[str]) -> str:
+        tag, attrs = match.group(1), match.group(2)
+        start_match = re.search(r'\bdata-start\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        end_match = re.search(r'\bdata-end\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        if not start_match or not end_match or re.search(r'\bdata-duration\s*=', attrs, re.IGNORECASE):
+            return match.group(0)
+        try:
+            clip_duration = max(0.001, float(end_match.group(1)) - float(start_match.group(1)))
+        except ValueError:
+            return match.group(0)
+        class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs, re.IGNORECASE)
+        if class_match:
+            classes = class_match.group(2).split()
+            if "clip" not in classes:
+                replacement = f'class={class_match.group(1)}{class_match.group(2)} clip{class_match.group(1)}'
+                attrs = attrs[:class_match.start()] + replacement + attrs[class_match.end():]
+        else:
+            attrs += ' class="clip"'
+        attrs += f' data-duration="{clip_duration:.3f}"'
+        return f"<{tag}{attrs}>"
+
+    html = re.sub(r'<([a-zA-Z][\w:-]*)([^<>]*\bdata-start\s*=\s*["\'][^"\']+["\'][^<>]*)>', normalize_timed_element, html)
+
+    has_document_container = bool(re.search(r'<(?:body|template)\b', html, re.IGNORECASE))
+    has_composition_root = bool(re.search(r'\bdata-composition-id\s*=', html, re.IGNORECASE))
+    if not has_composition_root:
+        root_open = (
+            f'<div id="authored-caption-root" data-composition-id="overlay" '
+            f'data-start="0" data-duration="{duration:.3f}" data-fps="30" '
+            f'data-width="{width}" data-height="{height}">'
+        )
+        if re.search(r'<body\b[^>]*>', html, re.IGNORECASE):
+            html = re.sub(r'(<body\b[^>]*>)', rf'\1{root_open}', html, count=1, flags=re.IGNORECASE)
+            html = re.sub(r'</body\s*>', '</div></body>', html, count=1, flags=re.IGNORECASE)
+        elif re.search(r'<template\b[^>]*>', html, re.IGNORECASE):
+            html = re.sub(r'(<template\b[^>]*>)', rf'\1{root_open}', html, count=1, flags=re.IGNORECASE)
+            html = re.sub(r'</template\s*>', '</div></template>', html, count=1, flags=re.IGNORECASE)
+        else:
+            html = f'{root_open}{html}</div>'
+    if not has_document_container:
+        html = f'<!doctype html><html><head><meta charset="UTF-8"></head><body>{html}</body></html>'
     html = re.sub(
         r'<script src="https://cdn\.jsdelivr\.net/npm/gsap[^"]+"></script>',
         '<script src="assets/gsap.min.js"></script>',
@@ -278,11 +388,57 @@ def _prepare_authored_html(
     if has_cjk:
         extra += "html,body{font-family:'Cuti CJK',sans-serif}"
         html = re.sub(r'FONT_FAMILY = "[^"]+"', 'FONT_FAMILY = "Cuti CJK"', html)
-    if "<style>" in html:
-        html = html.replace("<style>", f"<style>\n{extra}\n", 1)
+    # A frequent Agent-authored fragment uses `.cue { display:none }` plus
+    # `.cue.active`, assuming an application script will toggle that class.
+    # HyperFrames already activates `.clip` elements from their data timing, so
+    # there is no such application script. Make those timed elements visible
+    # while HyperFrames owns their lifetime instead of rendering a blank layer.
+    active_selectors = set(re.findall(r'([.#][\w-]+)\.active\s*\{', html, re.IGNORECASE))
+    if active_selectors:
+        extra += "".join(
+            f"{selector}.clip{{display:inline-block!important}}"
+            for selector in sorted(active_selectors)
+        )
+    if re.search(r'<style\b[^>]*>', html, re.IGNORECASE):
+        html = re.sub(r'(<style\b[^>]*>)', rf'\1\n{extra}\n', html, count=1, flags=re.IGNORECASE)
     else:
-        html = html.replace("</head>", f"<style>{extra}</style></head>", 1)
+        html = re.sub(r'</head\s*>', f"<style>{extra}</style></head>", html, count=1, flags=re.IGNORECASE)
     return html
+
+
+def _validate_authored_caption_visibility(html: str) -> None:
+    """Reject authored timed captions that can only render as a blank layer."""
+    timed_classes: set[str] = set()
+    for attrs in re.findall(
+        r'<[a-zA-Z][\w:-]*([^<>]*\bdata-start\s*=\s*["\'][^"\']+["\'][^<>]*)>',
+        html,
+        re.IGNORECASE,
+    ):
+        match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs, re.IGNORECASE)
+        if match:
+            timed_classes.update(match.group(2).split())
+    for class_name in timed_classes:
+        escaped = re.escape(class_name)
+        rules = re.findall(
+            rf'\.{escaped}(?![\w-])[^{{}}]*\{{([^{{}}]*)\}}',
+            html,
+            re.IGNORECASE,
+        )
+        if not rules:
+            continue
+        css = " ".join(rules)
+        if re.search(r'\bdisplay\s*:\s*none\b', css, re.IGNORECASE) and not re.search(
+            rf'\.{escaped}\.active\s*\{{', html, re.IGNORECASE
+        ):
+            raise ValueError(
+                f"Authored HyperFrames caption .{class_name} is permanently hidden by display:none"
+            )
+        if re.search(r'\bopacity\s*:\s*0(?:\D|$)', css, re.IGNORECASE) and not re.search(
+            r'\b(?:gsap|__timelines|classList)\b', html, re.IGNORECASE
+        ):
+            raise ValueError(
+                f"Authored HyperFrames caption .{class_name} starts transparent without a reveal timeline"
+            )
 
 
 def _escape_html(text: str) -> str:
@@ -361,6 +517,7 @@ async def render_captions(
     *,
     words: list[dict],
     cues: list[dict],
+    style: str = "caption-highlight",
     accent_color: str,
     position: str,
     playbook: str | None = None,
@@ -368,11 +525,14 @@ async def render_captions(
     caption_html: str | None = None,
     composition_html: str | None = None,
 ) -> dict[str, Any]:
+    if style not in STYLE_NAMES:
+        raise ValueError(f"Unsupported HyperFrames caption style: {style}")
     authored_caption = (caption_html or "").strip()
     authored_host = (composition_html or "").strip()
-    if not authored_caption and not authored_host:
-        raise ValueError("HyperFrames captions require caption_html or composition_html")
     normalized = _normalize_words(words, cues)
+    groups = _sentence_groups(words, cues)
+    if not authored_caption and not authored_host and not groups:
+        raise ValueError("HyperFrames captions require timestamped words or cues")
     overlay_layers = [item for item in (layers or []) if isinstance(item, dict)]
     info = await get_video_info(video_path)
     width, height = int(info.get("width") or 1920), int(info.get("height") or 1080)
@@ -419,10 +579,21 @@ async def render_captions(
                 encoding="utf-8",
             )
         else:
-            (project / "index.html").write_text(_build_html(
-                width=width, height=height, duration=duration,
-                css_vars=css_vars, layers=overlay_layers,
-            ), encoding="utf-8")
+            if authored_caption:
+                (project / "index.html").write_text(_build_html(
+                    width=width, height=height, duration=duration,
+                    css_vars=css_vars, layers=overlay_layers,
+                ), encoding="utf-8")
+            else:
+                (project / "index.html").write_text(_build_templated_caption_html(
+                    width=width,
+                    height=height,
+                    duration=duration,
+                    groups=groups,
+                    style=style,
+                    accent=accent_color,
+                    position=position,
+                ), encoding="utf-8")
         if design_md:
             (project / "DESIGN.md").write_text(design_md, encoding="utf-8")
         env = os.environ.copy()
@@ -463,7 +634,7 @@ async def render_captions(
         return {
             "renderer": "hyperframes",
             "runtime_version": "0.7.106",
-            "style": "authored",
+            "style": "authored" if authored_caption or authored_host else style,
             "playbook": playbook_data.get("id") or playbook,
             "docker": os.getenv("HYPERFRAMES_DOCKER", "").lower() in {"1", "true", "yes"},
             "accent_color": accent_color, "position": position,

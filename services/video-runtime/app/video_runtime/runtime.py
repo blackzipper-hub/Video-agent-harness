@@ -43,7 +43,11 @@ from .capabilities import RuntimeCapabilityRegistry
 from .execution import CapabilityExecutionGateway
 from .security import CapabilityGrant, CapabilityGrantSigner
 from .skills import VideoSkillRuntime, default_video_skill_runtime
-from app.orchestration.skills import SkillContext, SkillResolutionRequest
+from app.orchestration.skills import (
+    ResolvedSkillRef,
+    SkillContext,
+    SkillResolutionRequest,
+)
 from app.domain.skills.service import make_skill_lock
 from app.capabilities.models import canonical_capability_id
 
@@ -611,6 +615,8 @@ class VideoBuildRuntime:
             description=description,
             target_artifact_version_ids=target_artifact_version_ids,
         )
+        if self.staged_planning_enabled and self.continuous_plan_patch_enabled:
+            return await self._plan_dynamic_edit(change, idempotency_key)
         context = PluginContext(project_id=project_id, values={"change_request": change})
         for loaded in self.plugins.loaded:
             await loaded.implementation.before_plan(context)
@@ -624,6 +630,52 @@ class VideoBuildRuntime:
             plan = await loaded.implementation.after_plan(context, plan)
         await self._resolve_plan_skills(plan)
         return await self.repo.save_change_and_plan(change, plan, idempotency_key)
+
+    async def _plan_dynamic_edit(
+        self, change: ChangeRequest, idempotency_key: str | None,
+    ) -> RebuildPlan:
+        """Continue edits through the same task-feedback loop as a new user goal.
+
+        Selected artifacts are facts, not automatic provider reference inputs.
+        The Agent authors the executable patch from the requested edits; no
+        workflow compiler reconstructs a fixed DAG from old generation recipes.
+        """
+        project = await self.repo.get_project(change.project_id)
+        artifacts = await self.repo.current_artifacts(change.project_id)
+        for version_id in change.target_artifact_version_ids:
+            await self.repo.get_artifact(change.project_id, version_id)
+        version = await self.repo.get_project_version(change.base_project_version_id)
+        content: dict[str, Any] = {}
+        if version.video_spec_revision_id:
+            content = (await self.repo.get_video_spec_revision(version.video_spec_revision_id)).content
+        if not content:
+            spec = next((item for item in artifacts if item.type == "video_spec"), None)
+            if spec and isinstance(spec.metadata.get("content"), dict):
+                content = spec.metadata["content"]
+        fields = {key: deepcopy(value) for key, value in content.items()
+                  if key in ProjectIntent.model_fields and key != "constraints"}
+        fields.setdefault("title", project.title)
+        fields.setdefault("workflow_id", "")
+        if not fields["workflow_id"]:
+            for build in reversed(await self.repo.list_builds(project.id)):
+                previous = await self.repo.get_plan(build.plan_id)
+                if previous.workflow_id:
+                    fields["workflow_id"] = previous.workflow_id
+                    break
+        fields["brief"] = change.description or json.dumps(change.edits, ensure_ascii=False) or "Edit selected artifacts"
+        fields["constraints"] = {
+            "edit_existing_project": True,
+            "edits": deepcopy(change.edits),
+            "target_artifact_version_ids": list(change.target_artifact_version_ids),
+            "previous_video_spec": {key: deepcopy(value) for key, value in content.items()
+                                    if key != "constraints"},
+            "preserve_existing_artifact_version_ids": [item.id for item in artifacts],
+        }
+        return await self.plan_project(
+            project_id=project.id, base_project_version_id=change.base_project_version_id,
+            project_intent=ProjectIntent.model_validate(fields),
+            idempotency_key="dynamic-edit:" + (idempotency_key or change.id),
+        )
 
     async def _editable_dependencies(self, project_id: str) -> list[ArtifactDependency]:
         """Recover selected input edges retained in recipes after output-only version changes."""
@@ -701,6 +753,14 @@ class VideoBuildRuntime:
             from .repository import ProjectVersionConflict
             raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
         artifacts = await self.repo.current_artifacts(project_id)
+        if self.staged_planning_enabled and self.continuous_plan_patch_enabled:
+            targets = [str(edit.get("artifactVersionId") or edit.get("artifact_version_id"))
+                       for edit in edits if edit.get("artifactVersionId") or edit.get("artifact_version_id")]
+            return await self._plan_dynamic_edit(ChangeRequest(
+                project_id=project_id, base_project_version_id=base_project_version_id,
+                description=description, edits=deepcopy(edits),
+                target_artifact_version_ids=targets,
+            ), idempotency_key)
         if edits and all(str(edit.get("type") or edit.get("kind")) == "regenerate_artifact" for edit in edits):
             overrides = {}
             for edit in edits:
@@ -730,7 +790,13 @@ class VideoBuildRuntime:
             )
         if spec_artifact is None or not isinstance(spec_artifact.metadata.get("content"), dict):
             raise ValueError("This structural edit needs a spec patch. Existing artifacts remain editable with regenerate_artifact or a PlanPatch.")
-        spec_data = deepcopy(spec_artifact.metadata["content"])
+        # Revision content also carries execution history written by PlanPatch.
+        # Only creative specification fields belong to the editable VideoSpec.
+        spec_data = {
+            key: deepcopy(value)
+            for key, value in spec_artifact.metadata["content"].items()
+            if key in VideoSpec.model_fields
+        }
         targets: set[str] = set()
         manual_steps: set[str] = set()
         template_roots: set[str] = set()
@@ -868,6 +934,30 @@ class VideoBuildRuntime:
         proposed_spec = await self._apply_project_skill_locks(
             project_id, VideoSpec.model_validate(spec_data),
         )
+        if (
+            spec_artifact.metadata["content"].get("execution_tasks")
+            and self.staged_planning_enabled
+            and self.continuous_plan_patch_enabled
+        ):
+            # Continue Agent-authored projects through their own planner. A
+            # static workflow compiler cannot reconstruct an arbitrary task DAG.
+            intent_fields = {
+                key: value for key, value in proposed_spec.model_dump(mode="json").items()
+                if key in ProjectIntent.model_fields
+            }
+            intent_fields["brief"] = description or json.dumps(edits, ensure_ascii=False)
+            intent_fields["constraints"] = {
+                "edit_existing_project": True,
+                "edits": deepcopy(edits),
+                "proposed_video_spec": proposed_spec.model_dump(mode="json"),
+                "preserve_existing_artifact_version_ids": [item.id for item in artifacts],
+            }
+            return await self.plan_project(
+                project_id=project_id,
+                base_project_version_id=base_project_version_id,
+                project_intent=ProjectIntent.model_validate(intent_fields),
+                idempotency_key=idempotency_key or f"edit:{base_project_version_id}:{json.dumps(edits, sort_keys=True)}",
+            )
         change = ChangeRequest(
             project_id=project_id,
             base_project_version_id=base_project_version_id,
@@ -1183,12 +1273,35 @@ class VideoBuildRuntime:
             return step_id
 
         for order, operation in enumerate(operations, start=1):
+            operation = operation.model_copy(deep=True)
             contract = contracts.get(operation.capability)
             if contract is None:
                 raise ValueError(
                     f"capability is not available for workflow-free media editing: "
                     f"{operation.capability}"
                 )
+            roles = {item.role for item in contract.inputs}
+            for supplied in operation.inputs:
+                if supplied.role not in roles:
+                    aliases = [role for role in roles if role.rstrip("s") == supplied.role.rstrip("s")]
+                    if len(aliases) == 1:
+                        supplied.role = aliases[0]
+            # Models often repeat the URI of an explicitly supplied artifact.
+            # Resolve that redundant spelling to the authoritative input instead
+            # of rejecting an otherwise executable edit.
+            for expected in contract.inputs:
+                supplied = [entry for entry in operation.inputs if entry.role == expected.role]
+                if not supplied:
+                    continue
+                # Explicit artifact inputs are authoritative. Models sometimes
+                # repeat local step aliases; replace them with resolved aliases below.
+                operation.parameters.pop(expected.parameter, None)
+                referenced = [current_by_version.get(entry.artifact_version_id) for entry in supplied]
+                urls = [item.uri for item in referenced if item is not None and item.uri]
+                for key in (f"{expected.role}_url", f"{expected.role.rstrip('s')}_urls"):
+                    value = operation.parameters.get(key)
+                    if value is not None and (value == urls or (len(urls) == 1 and value == urls[0])):
+                        operation.parameters.pop(key)
             reserved = {
                 key for key in operation.parameters
                 if key in {"uri", "url", "remote_operation_id"}
@@ -1206,7 +1319,9 @@ class VideoBuildRuntime:
             for supplied in operation.inputs:
                 if supplied.role not in role_contracts:
                     raise ValueError(
-                        f"{operation.capability} does not accept input role {supplied.role}"
+                        f"{operation.capability} does not accept input role {supplied.role}. "
+                        f"Accepted input roles: {', '.join(sorted(role_contracts)) or '(none)'}. "
+                        "Correct the input role and retry the preview; no operation has been submitted."
                     )
                 grouped_inputs.setdefault(supplied.role, []).append(supplied)
             for role, expected in role_contracts.items():
@@ -1265,18 +1380,21 @@ class VideoBuildRuntime:
                 candidates = artifact_inputs_by_role.get(
                     contract.replaces_input_role, [],
                 )
-                if len(candidates) != 1:
+                chained_inputs = grouped_inputs.get(contract.replaces_input_role, [])
+                chained = len(chained_inputs) == 1 and bool(chained_inputs[0].operation_step_id)
+                if len(candidates) != 1 and not chained:
                     raise ValueError(
                         f"{operation.capability} must replace one selected project "
                         f"{contract.replaces_input_role} ArtifactVersion"
                     )
-                replacement = candidates[0]
-                if replacement.id in replacement_ids:
-                    raise ValueError(
-                        "a media edit plan cannot replace the same ArtifactVersion twice; "
-                        "chain later transforms in a separate confirmed build"
-                    )
-                replacement_ids.add(replacement.id)
+                replacement = candidates[0] if candidates else None
+                if replacement is not None:
+                    # Multiple variants of one source can coexist as artifacts.
+                    # Only the first transform replaces the selected source.
+                    if replacement.id in replacement_ids:
+                        replacement = None
+                    else:
+                        replacement_ids.add(replacement.id)
 
             output_type = replacement.type if replacement else contract.output_artifact_type
             plan_items.append(RebuildPlanItem(
@@ -1309,6 +1427,8 @@ class VideoBuildRuntime:
             target_artifact_version_ids=sorted(replacement_ids),
             edits=[item.model_dump(mode="json") for item in operations],
         )
+        if self.staged_planning_enabled and self.continuous_plan_patch_enabled:
+            return await self._plan_dynamic_edit(change, idempotency_key)
         plan = RebuildPlan(
             project_id=project_id,
             kind="incremental",
@@ -1375,6 +1495,15 @@ class VideoBuildRuntime:
             raise ProjectVersionConflict(base_project_version_id, project.current_version_id)
         supplied: VideoSpec | ProjectIntent = video_spec or project_intent  # type: ignore[assignment]
         supplied = await self._apply_project_skill_locks(project_id, supplied)
+        workflow = self.skills.workflows.get(supplied.workflow_id)
+        if workflow is not None:
+            from .workflow_plans import workflow_execution_kind
+
+            kind = workflow_execution_kind(workflow)
+            if kind == "agent_plan_patch" and not (
+                self.staged_planning_enabled and self.continuous_plan_patch_enabled
+            ):
+                raise ValueError("Workflow requires continuous PlanPatch planning to be enabled")
         if isinstance(supplied, VideoSpec):
             video_spec = supplied
             project_intent = None
@@ -1408,7 +1537,7 @@ class VideoBuildRuntime:
             await loaded.implementation.before_plan(context)
         if self.staged_planning_enabled:
             workflow_id = supplied.workflow_id
-            plugin = self._workflow_plugin(workflow_id)
+            plugin = None if self.continuous_plan_patch_enabled else self._workflow_plugin(workflow_id)
             planning_mode = (
                 "agentic"
                 if self.continuous_plan_patch_enabled
@@ -1618,9 +1747,47 @@ class VideoBuildRuntime:
             context, video_spec,
         )
 
-    async def _resolve_plan_skills(self, plan: RebuildPlan) -> None:
+    @staticmethod
+    def _frozen_plan_skills(
+        plan: RebuildPlan,
+    ) -> dict[str, tuple[ResolvedSkillRef, str]]:
+        """Return exact Skill instruction blocks already persisted on a plan."""
+        frozen: dict[str, tuple[ResolvedSkillRef, str]] = {}
+        separator = "\n\n---\n\n"
+        for item in reversed(plan.items):
+            context = item.skill_context
+            if context is None or not context.applied_skills:
+                continue
+            blocks = context.instructions.split(separator)
+            if len(blocks) != len(context.applied_skills):
+                continue
+            for reference, instructions in zip(
+                context.applied_skills, blocks, strict=True,
+            ):
+                frozen.setdefault(reference.skill_id, (reference, instructions))
+        return frozen
+
+    async def _resolve_plan_skills(
+        self,
+        plan: RebuildPlan,
+        *,
+        frozen_plan: RebuildPlan | None = None,
+    ) -> None:
         activated = list(plan.video_spec.activated_skill_ids) if plan.video_spec else []
         project_locks = await self.repo.list_project_skill_locks(plan.project_id)
+        if not plan.workflow_id:
+            project_locks = [
+                lock for lock in project_locks
+                if (
+                    not self.skills.catalog.has(lock.skill_id)
+                    or (self.skills.catalog.load(lock.skill_id).metadata.metadata or {}).get(
+                        "kind"
+                    ) != "workflow"
+                )
+            ]
+        frozen_skills = (
+            self._frozen_plan_skills(frozen_plan) if frozen_plan is not None else {}
+        )
         for item in plan.items:
             try:
                 capability = self.skills.capabilities.get(
@@ -1630,21 +1797,24 @@ class VideoBuildRuntime:
                 capability_skill_id = capability.skill_name
             except LookupError:
                 capability_skill_id = None
-            context = self.skills.resolver.resolve(SkillResolutionRequest(
-                workflow_skill_id=(
-                    plan.workflow_id
-                    if self.skills.workflows.get(plan.workflow_id) is not None
-                    else None
+            context = self.skills.resolver.resolve(
+                SkillResolutionRequest(
+                    workflow_skill_id=(
+                        plan.workflow_id
+                        if self.skills.workflows.get(plan.workflow_id) is not None
+                        else None
+                    ),
+                    activated_skill_ids=activated,
+                    project_skill_locks=project_locks,
+                    declared_skill_ids=list(item.skill_ids),
+                    capability_id=item.capability,
+                    output_type=item.output_artifact_type,
+                    capability_skill_id=capability_skill_id,
+                    constraint_contract=item.constraint_contract,
+                    require_constraint_contract=False,
                 ),
-                activated_skill_ids=activated,
-                project_skill_locks=project_locks,
-                declared_skill_ids=list(item.skill_ids),
-                capability_id=item.capability,
-                output_type=item.output_artifact_type,
-                capability_skill_id=capability_skill_id,
-                constraint_contract=item.constraint_contract,
-                require_constraint_contract=False,
-            ))
+                frozen_skills=frozen_skills,
+            )
             language_source = plan.video_spec or plan.project_intent
             if language_source is not None:
                 item.language_contract = language_source.language_contract
@@ -1754,6 +1924,25 @@ class VideoBuildRuntime:
         current_spec_revision = await self.repo.get_video_spec_revision(
             plan.video_spec_revision_id,
         )
+        if (checkpoint.planning_mode == "agentic" and not checkpoint.phase.startswith("repair:")
+                and resolution.video_spec is None and not resolution.video_spec_patch
+                and not resolution.proposed_steps and not resolution.cancel_step_ids
+                and not resolution.replace_failed_step_ids and not resolution.phase_inputs
+                and not resolution.goal_satisfied and not resolution.waiting_for_input):
+            saved = await self.repo.resolve_checkpoint(
+                checkpoint=checkpoint, updated_plan=plan, spec_revision=current_spec_revision,
+                plan_revision=BuildPlanRevision(
+                    plan_id=plan.id, project_id=project_id, revision=plan.current_revision,
+                    base_revision=plan.current_revision, checkpoint_id=checkpoint.id,
+                    video_spec_revision_id=current_spec_revision.id,
+                ),
+                idempotency_key=resolution.idempotency_key,
+            )
+            wake = self._continuous_wakes.get(build_id)
+            if wake is not None:
+                wake.set()
+            self._schedule_build(await self.repo.get_build(project_id, build_id))
+            return saved
         intent = plan.project_intent
         intent_base = ({
             "title": intent.title,
@@ -1917,14 +2106,33 @@ class VideoBuildRuntime:
                     if item.status == "completed"
                 ]
                 completed_ids = {item.plan_step_id for item in completed_states}
+                workflow_policy = self._workflow_policy_spec(base_plan.workflow_id)
+                from .workflow_plans import workflow_execution_kind
+
+                completion_types = None
+                if workflow_policy is not None and workflow_execution_kind(workflow_policy) == "agent_plan_patch":
+                    completion_types = workflow_policy.parameters.get("completion_artifact_types", ["video"])
                 playable = any(
                     item.step_id in completed_ids
-                    and "video" in item.output_artifact_type.lower()
+                    and (
+                        item.action == "create" and item.output_artifact_type in completion_types
+                        if completion_types is not None
+                        else "video" in item.output_artifact_type.lower()
+                    )
                     for item in base_plan.items
                 )
+                if base_plan.project_intent.constraints.get("edit_existing_project"):
+                    # Reused media proves the previous goal, not this edit. Edits
+                    # may also produce text/images/audio rather than another video.
+                    playable = any(
+                        item.step_id in completed_ids and item.action == "create"
+                        and item.output_artifact_type not in {"project_intent", "validation_result"}
+                        for item in base_plan.items
+                    )
                 if not playable:
                     raise ValueError(
-                        "goal_satisfied requires a completed video Artifact; queued work is not completion"
+                        f"goal_satisfied requires a completed {', '.join(completion_types or ['video'])} "
+                        "Artifact; queued work is not completion"
                     )
                 updated_plan = base_plan
                 updated_plan.video_spec = supplied_spec
@@ -2139,7 +2347,7 @@ class VideoBuildRuntime:
             ]
             if not added_ids:
                 raise ValueError("checkpoint resolution did not add a build phase")
-        await self._resolve_plan_skills(updated_plan)
+        await self._resolve_plan_skills(updated_plan, frozen_plan=plan)
         topological_steps(updated_plan.items)
         validate_video_generation_steps(updated_plan.items)
         spec_revision.content["execution_tasks"] = [

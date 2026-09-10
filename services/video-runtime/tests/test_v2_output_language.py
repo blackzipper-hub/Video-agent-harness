@@ -15,6 +15,24 @@ import pytest
 from app.chat.v2.skill_catalog import SkillCatalog
 
 
+@pytest.mark.parametrize("text,spoken,subtitle", [
+    ("为当前完整成片添加 HyperFrames 字幕，根据实际英文对白生成中文字幕，保持画面和原声不变。", "en-US", "zh-CN"),
+    ("添加字幕，根据实际中文对白生成英文字幕，保持原声不变。", "zh-CN", "en-US"),
+    ("Add captions in Chinese based on English dialogue.", "en-US", "zh-CN"),
+])
+def test_subtitle_translation_does_not_conflict_with_source_language(text, spoken, subtitle):
+    result = resolve_video_language_contract(text, ui_locale="zh")
+    assert result["spoken_language"] == spoken
+    assert result["subtitle_language"] == subtitle
+
+
+def test_default_captions_follow_speech_not_ui_or_previous_translation():
+    result = resolve_video_language_contract("给视频添加字幕", ui_locale="zh", current={
+        "content_language": "zh-CN", "spoken_language": "en-US", "subtitle_language": "zh-CN",
+    })
+    assert result["subtitle_language"] == "en-US"
+
+
 def test_product_ad_workflow_category_maps_to_legacy_product_launch():
     from app.models.tool_enums import ContentCategory
 

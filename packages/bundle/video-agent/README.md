@@ -14,7 +14,7 @@ The bundle contributes nothing by itself. Its Cordis patch mounts `@cuti-ai/tool
 
 #### Token effect
 
-Only the mounted tool package's fixed schemas and data-dependent bounded results contribute tokens.
+Tool schemas and results contribute tokens. The video patch enables the upstream conversation compactor, `/compact` command and tool-result pruner, including when the Web profile disables them. Automatic pressure handling and bounded context-overflow recovery keep long video planning sessions usable; summaries replace older model context while the Session log retains the original events.
 
 #### KV Cache effect
 

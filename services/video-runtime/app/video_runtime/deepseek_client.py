@@ -117,7 +117,26 @@ class DeepSeekHarnessClient:
         if result.get("accepted") is not True:
             raise DeepSeekHarnessError("session.cancel was not accepted")
 
-    async def rpc(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def compact_session(self, session_id: str) -> dict[str, Any]:
+        """Compact an idle bound Session through the Harness command lifecycle.
+
+        The command records its summary in the existing Session log. Busy,
+        unavailable and failed summarization outcomes remain explicit errors.
+        """
+        result = await self.rpc("commands/execute", {"args": {
+            "agentId": session_id, "line": "/compact", "images": [],
+        }}, timeout_seconds=300)
+        outcome = result.get("result") or {}
+        if outcome.get("kind") != "success":
+            raise DeepSeekHarnessError(
+                str(outcome.get("text") or "Harness session compaction is unavailable"),
+            )
+        return {"session_id": session_id, "command_id": result.get("commandId"),
+                "message": outcome.get("text", ""), "status": "completed"}
+
+    async def rpc(
+        self, method: str, payload: dict[str, Any], *, timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         rpc_id = str(uuid4())
         try:
             response = await self._client.post(
@@ -128,6 +147,7 @@ class DeepSeekHarnessClient:
                     "method": method,
                     "payload": payload,
                 },
+                **({"timeout": timeout_seconds} if timeout_seconds is not None else {}),
             )
         except httpx.RequestError as exc:
             raise DeepSeekHarnessError(f"{method} transport failed: {exc}") from exc

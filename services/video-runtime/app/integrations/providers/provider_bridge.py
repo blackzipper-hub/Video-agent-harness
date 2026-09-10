@@ -198,8 +198,16 @@ def _first_media_value(profile: dict[str, Any], *keys: str) -> str | None:
 
 def _prompt_first_frame_slot(prompt: str) -> int | None:
     for pattern in _FIRST_FRAME_SLOT_PATTERNS:
-        match = pattern.search(prompt)
-        if match:
+        for match in pattern.finditer(prompt):
+            # A substring such as "首帧：@图片1" can belong to "而非首帧：@图片1".
+            # Only affirmative frame assignments may promote an identity reference.
+            prefix = re.split(r"[。！？.!?;；\n]", prompt[:match.start()])[-1]
+            if re.search(
+                r"(?:不|非|勿|禁止|不要)[^，,。；;]{0,24}$|"
+                r"\b(?:not|never|without|don't|do not)\b[^,;.!?]{0,48}$",
+                prefix, re.IGNORECASE,
+            ):
+                continue
             return int(match.group(1))
     return None
 
@@ -554,8 +562,11 @@ async def _wavespeed_generate(
             "unsupported_start_frame_with_references: WaveSpeed Seedance I2V "
             "cannot submit a strict start frame together with ordinary reference images. "
             "Keep the original identity references; do not silently remove them or "
-            "switch providers. Ask the user to choose a supported endpoint or explicitly "
-            "approve multi-reference generation without a strict first-frame guarantee."
+            "switch providers. Inspect the original frame intent: if the task requests "
+            "ordinary references only, correct the input to reference_mode=multi_reference "
+            "without strict frame fields and submit a replacement task. If a strict first "
+            "frame was explicitly required, preserve that requirement and report the "
+            "unsupported combination rather than retrying unchanged parameters."
         )
     created_remote = request_id is None
     try:

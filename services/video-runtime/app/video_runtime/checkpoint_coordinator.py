@@ -105,7 +105,19 @@ def checkpoint_prompt(
             "add_tasks=[] when waiting for existing work. A text-only promise to continue "
             "does not acknowledge this checkpoint. Read the current task snapshot: do not "
             "assume an Artifact is still generating because an earlier message said so.",
-            "Only set goal_satisfied=true when the final playable deliverable exists, never "
+            "For failed tasks, inspect the submitted parameters, capability contract and error. "
+            "Correct format, reference-role or unsupported optional-parameter mistakes with "
+            "add_tasks and replace_failed_task_ids in this turn; preserve the user's explicit "
+            "model, provider and media requirements. Recoverable parameter corrections do not "
+            "require user confirmation. An empty acknowledgment is not a repair. Never resubmit "
+            "unchanged invalid parameters or repeat successful outputs. If no compatible repair "
+            "exists within the request, explain the concrete blocker; do not claim work continues.",
+            "Provider billing/authentication failures (including Insufficient credits) require "
+            "user action, not new paid attempts. Report the exact returned error and stop the "
+            "build instead of guessing timeout or transient failure. A successful submit tool "
+            "only means the task was accepted, not that media generation succeeded.",
+            "Only set goal_satisfied=true when the Workflow's declared deliverable exists "
+            "(a playable video by default, or completion_artifact_types from its parameters), never "
             "merely because work was queued. Do not add tasks in the completion patch; include "
             "any VideoSpec facts learned so far as a final partial patch.",
             "For every video-generation task, parameters.prompt is the final prompt sent to "
@@ -240,8 +252,20 @@ class CheckpointCoordinator:
                     continue
                 lock = self.runtime.session_control_locks.setdefault(checkpoint.project_id, asyncio.Lock())
                 async with lock:
+                    reason = "Agent turn ended without submitting a PlanPatch; refreshing task state"
+                    terminal = next((item.get("event", {}) for item in reversed(history.get("events", []))
+                                     if item.get("event", {}).get("type") == "turn/end"), {})
+                    error = terminal.get("data", {}).get("reason", {}).get("error", {})
+                    if error.get("code") == "CONTEXT_WINDOW_EXCEEDED":
+                        try:
+                            await self.deepseek.compact_session(checkpoint.session_id)
+                            reason = "Harness context compacted; redelivering current checkpoint"
+                        except Exception as exc:
+                            # Consume the existing durable delivery budget even if compaction
+                            # fails, so an unavailable summarizer cannot create an endless loop.
+                            reason = f"Harness context compaction failed: {exc}"
                     await self.runtime.repo.fail_checkpoint_delivery(
-                        checkpoint.id, "Agent turn ended without submitting a PlanPatch; refreshing task state",
+                        checkpoint.id, reason,
                         expected_attempt=checkpoint.delivery_attempts,
                     )
             except Exception:

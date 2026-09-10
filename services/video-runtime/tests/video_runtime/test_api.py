@@ -121,6 +121,11 @@ class VideoRuntimeApiTest(unittest.TestCase):
         cut = next(item for item in capabilities.json()["data"] if item["id"] == "media.audio_cut")
         self.assertIn("parameters_schema", cut)
         self.assertIn("segments", cut["parameters_schema"].get("properties", {}))
+        self.assertTrue(cut["workflow_free_available"])
+        self.assertTrue(cut["workflow_free_inputs"])
+        generate = next(item for item in capabilities.json()["data"] if item["id"] == "api.provider.generate")
+        self.assertTrue(generate["workflow_free_available"])
+        self.assertEqual(generate["workflow_free_inputs"][0]["role"], "images")
 
         preview = self.client.post(
             f"/api/video/projects/{project['projectId']}/plan-patches/preview",

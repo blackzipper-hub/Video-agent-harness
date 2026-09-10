@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from ..models import MediaArtifactVersion
+from ..models import MediaArtifactVersion, MediaCapabilityContract, MediaCapabilityInputContract
 from ..plugins import BaseVideoPlugin
 from ..security import CapabilityExecutionEnvelope
 
@@ -37,6 +37,19 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
         }
         handlers["research.generate"] = self._research
         return handlers
+
+    def plan_patch_capability_contracts(self):
+        """Expose generation through the same project-owned inputs as media edits."""
+        return [MediaCapabilityContract(
+            capability=capability,
+            description="Generate an additional video in the current project; chain its output into media.concat. Specify provider, model and prompt explicitly.",
+            inputs=[MediaCapabilityInputContract(
+                role="images", artifact_types=["image"], parameter="reference_from_steps",
+                required=False, multiple=True,
+            )],
+            output_artifact_type="video",
+            estimated_cost=0.5,
+        ) for capability in ("atomic.video.generate", "api.provider.generate")]
 
     async def _research(
         self,

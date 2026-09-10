@@ -61,7 +61,7 @@ metadata:
 
 # Cuti Product Workflow
 
-Create a product commercial with a short, understandable workflow. Use the installed legacy `seedance2` Skill for video-prompt grammar, but generate through WaveSpeed Seedance 2.5 (`model: seedance-2.5`). Do not load or use `seedance-20` or any Emily2040 subskill.
+Create a product commercial with a short, understandable workflow. Use the installed legacy `seedance2` Skill for video-prompt grammar, but generate through WaveSpeed Seedance 2.5 (`model: seedance-2.5`). Do not load unrelated prompt-only helper bundles.
 
 ## Core rules
 

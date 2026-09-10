@@ -19,9 +19,8 @@ UNAVAILABLE_WORKFLOW_MODES: dict[str, str] = {}
 UNAVAILABLE_WORKFLOW_CAPABILITIES: dict[str, list[str]] = {}
 
 SUPPORTED_WORKFLOW_MODES = {
-    "seedance2", "mv", "short_drama_workflow", "product_ad_video",
+    "seedance2", "mv", "short_drama_workflow",
     "cuti_product_workflow", "cuti_scenario_product_workflow",
-    "libtv_product_workflow",
 }
 
 
@@ -56,19 +55,6 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
             "continuity_mode": "shared_reference_images",
         },
     },
-    "product-ad-video": {
-        "mode": "product_ad_video",
-        "pipeline": (
-            "atomic.text.generate", "atomic.image.generate", "atomic.video.generate",
-            "media.concat",
-        ),
-        "requires_keyframe": False,
-        "parameters": {
-            "workflow_mode": "product_ad_video",
-            "shot_workflow_mode": "product_reference_i2v",
-            "content_category": "product_ad",
-        },
-    },
     "cuti-product-workflow": {
         "mode": "cuti_product_workflow",
         "pipeline": (
@@ -96,19 +82,6 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
             "shot_workflow_mode": "seedance2_scenario_product_ad",
             "content_category": "scenario_product_ad",
             "segment_duration_seconds": 15,
-        },
-    },
-    "libtv-product-workflow": {
-        "mode": "libtv_product_workflow",
-        "pipeline": (
-            "atomic.text.generate", "api.provider.generate",
-            "api.ark_protocol.generate", "atomic.music.generate", "media.concat",
-        ),
-        "requires_keyframe": False,
-        "parameters": {
-            "workflow_mode": "libtv_product_workflow",
-            "shot_workflow_mode": "product_multiref_seedance2",
-            "content_category": "product_ad",
         },
     },
     # $mv was installed in Cuti's runtime Skill store rather than the checked-in
@@ -169,6 +142,36 @@ def validate_original_cuti_workflow_contract(workflow: WorkflowSpec) -> None:
             f"workflow {workflow.skill_name} parameters differ from the original Cuti "
             f"contract: {details}"
         )
+
+
+def workflow_execution_kind(workflow: WorkflowSpec) -> str:
+    """Admit named Cuti compilers or explicitly agent-planned installed Skills.
+
+    A Skill's allowlist restricts execution; it never grants provider, network,
+    or sandbox permissions. New Skills cannot inherit a named production DAG.
+    """
+    if workflow.mode in UNAVAILABLE_WORKFLOW_MODES:
+        raise BuildPlanValidationError(UNAVAILABLE_WORKFLOW_MODES[workflow.mode])
+    if workflow.skill_name in WORKFLOW_ID_COMPILERS:
+        validate_original_cuti_workflow_contract(workflow)
+        return "dedicated_compiler"
+    if workflow.planning.mode != "agentic":
+        raise BuildPlanValidationError(
+            f"workflow {workflow.skill_name} requires planning.mode=agentic "
+            "or an explicitly installed dedicated compiler"
+        )
+    if not workflow.allowed_capabilities:
+        raise BuildPlanValidationError(
+            f"workflow {workflow.skill_name} requires non-empty allowed_capabilities"
+        )
+    outputs = workflow.parameters.get("completion_artifact_types", ["video"])
+    if not isinstance(outputs, list) or not outputs or any(
+        not isinstance(item, str) or not item.strip()
+        or item in {"project_intent", "validation", "validation_result"}
+        or item.startswith("source_") for item in outputs
+    ):
+        raise BuildPlanValidationError("completion_artifact_types must list generated deliverable types")
+    return "agent_plan_patch"
 
 
 class WorkflowPlanBuilder:
@@ -909,63 +912,6 @@ def compile_cuti_product(
     return plan
 
 
-def compile_libtv_product(
-    workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec,
-) -> RebuildPlan:
-    """Original LibTV direct multi-reference Seedance product workflow."""
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    product_refs = _product_image_source_steps(b)
-    if len(product_refs) > 9:
-        raise BuildPlanValidationError("libtv-product-workflow accepts at most 9 reference images")
-    wp = spec.workflow_parameters or {}
-    spec_step = b.add("spec", "video_spec", "runtime.artifact.persist", parameters={
-        "title": spec.title, "content": spec.model_dump(mode="json"),
-    })
-    stage = spec_step
-    stage_contracts = (
-        ("product-intake", "product_analysis", wp.get("product_intake", {})),
-        ("reference-role-map", "reference_map", wp.get("reference_roles", [])),
-        ("product-identity-contract", "product_identity_contract", wp.get("product_identity_contract", {})),
-        ("creative-system", "commercial_strategy", wp.get("creative_system", {})),
-        ("timed-sequence-plan", "shot_plan", [shot.model_dump(mode="json") for shot in spec.shots]),
-        ("shot-reference-packages", "reference_packages", wp.get("shot_reference_packages", {})),
-    )
-    for step_id, artifact_type, content in stage_contracts:
-        stage = b.add(
-            step_id, artifact_type, "runtime.artifact.persist",
-            parameters={"title": step_id.replace("-", " ").title(), "content": content},
-            depends_on=[stage, *product_refs] if step_id == "product-intake" else [stage],
-        )
-    roles = wp.get("reference_roles")
-    if not isinstance(roles, list) or len(roles) != len(product_refs):
-        roles = ["product_identity", *["supporting_reference"] * (len(product_refs) - 1)]
-    reference_purposes = {step: str(roles[index]) for index, step in enumerate(product_refs)}
-    clips: list[str] = []
-    for shot in spec.shots:
-        refs = list(dict.fromkeys([*product_refs, *_shot_image_source_steps(b, shot)]))[:9]
-        at_map = " ".join(f"@图片{index + 1}={reference_purposes.get(ref, 'supporting_reference')}" for index, ref in enumerate(refs))
-        clip = b.add(
-            f"shot-{shot.id}-video", "video_clip", "api.provider.generate",
-            parameters={
-                "prompt": f"{at_map}\n{shot.visual_prompt}".strip(),
-                "duration": shot.duration_seconds, "provider": "wavespeed",
-                "model": "doubao-seedance-2-0-260128", "resolution": spec.resolution,
-                "aspect_ratio": spec.aspect_ratio, "generate_audio": True,
-                "generation_mode": "reference_to_video", "mode": "reference_to_video",
-                "reference_from_steps": refs, "reference_purposes": reference_purposes,
-                "product_identity_reference_steps": product_refs,
-                "max_reference_images": 9,
-            }, depends_on=[stage, *refs], cost=0.65, skills=[],
-            execution_group="libtv-product-shots",
-            max_parallelism=2,
-        )
-        clips.append(clip)
-    plan = b.finish(clips, transition=0.0, require_audio=True)
-    _validate_libtv_product_plan(plan, product_refs)
-    return plan
-
-
 def _product_image_source_steps(b: WorkflowPlanBuilder) -> list[str]:
     """Return only uploaded image artifacts that can be product truth references."""
     refs = [
@@ -1007,92 +953,6 @@ def _shot_image_source_steps(b: WorkflowPlanBuilder, shot) -> list[str]:
             }
         )
     ]
-
-
-def compile_product_ad(
-    workflow: WorkflowSpec, context: PluginContext, spec: VideoSpec,
-) -> RebuildPlan:
-    """Compile the original product-ad-video contract as product-anchored I2V."""
-    if not spec.source_asset_ids:
-        raise BuildPlanValidationError("product-ad-video requires an uploaded product image")
-    b = WorkflowPlanBuilder(workflow, context, spec)
-    b.add_sources()
-    product_refs = _product_image_source_steps(b)
-    # This is a direct product-still workflow, not the generic Cuti production
-    # chain.  Persist only its concrete product brief; creating script,
-    # character, and storyboard stages here made a dedicated compiler look
-    # different while still behaving like the old default compiler.
-    spec_step = b.add(
-        "spec", "video_spec", "runtime.artifact.persist",
-        parameters={"title": spec.title, "content": spec.model_dump(mode="json")},
-    )
-    commercial_brief = b.add(
-        "commercial-brief", "commercial_brief", "runtime.artifact.persist",
-        parameters={
-            "title": f"{spec.title} commercial brief",
-            "content": {
-                "shots": [shot.model_dump(mode="json") for shot in spec.shots],
-                "productReferenceSteps": product_refs,
-                "workflowParameters": dict(spec.workflow_parameters),
-            },
-        },
-        depends_on=[spec_step, *product_refs],
-    )
-    analysis = b.add(
-        "product-analysis", "product_analysis", "atomic.text.generate",
-        parameters={
-            "objective": "Create a commercial concept and shot brief from the supplied product still",
-            "instruction": (
-                "Treat the supplied still as product identity truth. Record silhouette, proportions, "
-                "packaging, colors, label placement, logo geometry, material, finish, and protected "
-                "brand copy. Do not invent claims, prices, ratings, certifications, or testimonials."
-            ),
-            "reference_from_steps": product_refs,
-        },
-        depends_on=[spec_step, *product_refs],
-    )
-    wp = spec.workflow_parameters or {}
-    generate_audio = bool(wp.get("generate_audio", False))
-    clips: list[str] = []
-    for shot in spec.shots:
-        shot_refs = list(dict.fromkeys([*product_refs, *_shot_image_source_steps(b, shot)]))
-        identity_contract = {
-            "protected_attributes": [
-                "silhouette", "proportions", "packaging", "color", "label_placement",
-                "logo_geometry", "material", "finish", "supplied_brand_copy",
-            ],
-            "reject_on_drift": True,
-            "verification_required": True,
-        }
-        clip = b.add(
-            f"shot-{shot.id}-video", "video_clip", "atomic.video.generate",
-            parameters={
-                "prompt": shot.visual_prompt,
-                "duration": shot.duration_seconds,
-                "model": spec.providers.video,
-                "resolution": spec.resolution,
-                "aspect_ratio": spec.aspect_ratio,
-                "generate_audio": generate_audio,
-                "generation_mode": "i2v",
-                "reference_from_steps": shot_refs,
-                "product_identity_reference_steps": product_refs,
-                "reference_purposes": {step: "product identity" for step in product_refs},
-                "product_identity_contract": identity_contract,
-            },
-            depends_on=[commercial_brief, analysis, *shot_refs],
-            cost=0.65,
-            skills=[],
-        )
-        clips.append(clip)
-    audio_step = _source_audio_step(b)
-    plan = b.finish(
-        clips,
-        transition=0.0,
-        require_audio=bool(audio_step or generate_audio),
-        audio_step=audio_step,
-    )
-    _validate_product_ad_plan(plan, product_refs)
-    return plan
 
 
 def _segment_proof(spec: VideoSpec, index: int, shot_id: str) -> str:
@@ -1471,26 +1331,6 @@ def compile_scenario_product(
     return plan
 
 
-def _validate_product_ad_plan(plan: RebuildPlan, product_refs: list[str]) -> None:
-    clips = [item for item in plan.items if item.output_artifact_type == "video_clip"]
-    if not clips:
-        raise BuildPlanValidationError("product-ad-video produced no video shots")
-    for clip in clips:
-        if clip.capability != "atomic.video.generate":
-            raise BuildPlanValidationError("product-ad-video shots must use atomic.video.generate")
-        if clip.parameters.get("generation_mode") != "i2v":
-            raise BuildPlanValidationError("product-ad-video shots must be image-to-video")
-        selected = set(clip.parameters.get("product_identity_reference_steps") or [])
-        if not set(product_refs) <= selected:
-            raise BuildPlanValidationError(
-                "product-ad-video dropped the uploaded product identity reference"
-            )
-        if clip.skill_ids:
-            raise BuildPlanValidationError(
-                "product-ad-video must not inject Director or unrelated helper Skills"
-            )
-
-
 def _validate_cuti_product_plan(
     plan: RebuildPlan, product_refs: list[str], product_setting: str,
 ) -> None:
@@ -1584,47 +1424,6 @@ def _validate_cuti_product_plan(
         raise BuildPlanValidationError(
             "cuti-product must preserve one voice profile across all segments"
         )
-
-
-def _validate_libtv_product_plan(plan: RebuildPlan, product_refs: list[str]) -> None:
-    forbidden_types = {"storyboard", "keyframe", "character_reference", "scene_reference"}
-    present = sorted({item.output_artifact_type for item in plan.items} & forbidden_types)
-    if present:
-        raise BuildPlanValidationError(
-            "libtv direct multi-reference workflow contains forbidden stages: " + ", ".join(present)
-        )
-    if "atomic.image.generate" in _capabilities(plan):
-        raise BuildPlanValidationError("libtv must not synthesize storyboard or reference images")
-    required_stages = {
-        "product-intake", "reference-role-map", "product-identity-contract",
-        "creative-system", "timed-sequence-plan", "shot-reference-packages",
-    }
-    missing = sorted(required_stages - set(_by_id(plan)))
-    if missing:
-        raise BuildPlanValidationError("libtv is missing contract stages: " + ", ".join(missing))
-    for clip in _video_clips(plan):
-        if clip.capability not in {"api.provider.generate", "api.ark_protocol.generate"}:
-            raise BuildPlanValidationError("libtv shots must call the provider bridge directly")
-        if clip.parameters.get("model") != "doubao-seedance-2-0-260128":
-            raise BuildPlanValidationError("libtv shots must use its pinned Seedance 2 model")
-        if clip.parameters.get("generation_mode") != "reference_to_video":
-            raise BuildPlanValidationError("libtv shots must use reference_to_video")
-        if "start_image_from_step" in clip.parameters:
-            raise BuildPlanValidationError("libtv must not force a start or first frame")
-        refs = clip.parameters.get("reference_from_steps") or []
-        if len(refs) > 9 or not set(product_refs) <= set(refs):
-            raise BuildPlanValidationError("libtv shot has an invalid multi-reference package")
-        if clip.parameters.get("generate_audio") is not True or clip.skill_ids:
-            raise BuildPlanValidationError("libtv requires native audio and no legacy Director Skills")
-        if not _contains_cjk(str(clip.parameters.get("prompt") or "")):
-            raise BuildPlanValidationError("libtv Seedance prompts must be written in Chinese")
-        if (
-            clip.execution_group != "libtv-product-shots"
-            or clip.max_parallelism != 2
-        ):
-            raise BuildPlanValidationError(
-                "libtv shots must declare at-most-two concurrency"
-            )
 
 
 def _validate_scenario_product_plan(
@@ -1951,12 +1750,10 @@ WORKFLOW_ID_COMPILERS = {
     "seedance2": ("seedance2", compile_seedance2),
     "mv": ("mv", compile_mv_compat),
     "short-drama-workflow": ("short_drama_workflow", compile_short_drama_workflow),
-    "product-ad-video": ("product_ad_video", compile_product_ad),
     "cuti-product-workflow": ("cuti_product_workflow", compile_cuti_product),
     "cuti-scenario-product-workflow": (
         "cuti_scenario_product_workflow", compile_scenario_product,
     ),
-    "libtv-product-workflow": ("libtv_product_workflow", compile_libtv_product),
 }
 
 if {

@@ -60,7 +60,7 @@ metadata:
 Create a compact narrative in complete 15-second video units. Use the installed
 legacy `seedance2` Skill for Seedance prompt grammar and multi-reference mechanics.
 Generate through WaveSpeed Seedance 2.5 unless the user explicitly selects a
-different available model. Do not load `seedance-20` or its Emily2040 subskills.
+different available model. Do not load unrelated prompt-only helper bundles.
 
 ## Workflow identity
 

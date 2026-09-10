@@ -20,17 +20,35 @@ interface ResponseModel<T> {
   code: number
   message: string
   data: T
+  error_code?: string
 }
 
 export class DeepAgentApiError extends Error {
   constructor(
     readonly code: number,
     message: string,
+    readonly reason?: string,
   ) {
     super(message)
     this.name = 'DeepAgentApiError'
   }
 }
+
+const STOPPED_RESUME_MESSAGE = 'Task stopped. Confirm resume before sending a continuation.'
+
+/**
+ * The run snapshot can briefly lag behind the authoritative Runtime build state.
+ * Keep this check in one place so the Create workspace can recover that race by
+ * retrying through the explicit resume endpoint instead of trapping the user.
+ */
+export const isStoppedResumeRequired = (error: unknown): boolean => (
+  error instanceof DeepAgentApiError
+  && error.code === 409
+  && (
+    error.reason === 'task_stopped_resume_required'
+    || error.message.includes(STOPPED_RESUME_MESSAGE)
+  )
+)
 
 async function parseResponse<T>(response: Response, fallback: string): Promise<ResponseModel<T>> {
   const raw = await response.text()
@@ -38,7 +56,16 @@ async function parseResponse<T>(response: Response, fallback: string): Promise<R
     throw new DeepAgentApiError(response.status || 500, fallback)
   }
   try {
-    return JSON.parse(raw) as ResponseModel<T>
+    const parsed = JSON.parse(raw)
+    if (!response.ok && parsed.detail && !parsed.message) {
+      const detail = parsed.detail
+      parsed.message = typeof detail === 'string'
+        ? detail
+        : detail.message || JSON.stringify(detail)
+      parsed.error_code = typeof detail === 'object' ? detail.code : undefined
+      parsed.code = response.status
+    }
+    return parsed as ResponseModel<T>
   } catch {
     const message = response.ok
       ? fallback
@@ -60,7 +87,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
   const result = await parseResponse<T>(response, 'Deep Agent service returned an invalid response')
   if (!response.ok || result.code !== 0) {
-    throw new DeepAgentApiError(result.code, result.message || 'Deep Agent request failed')
+    throw new DeepAgentApiError(result.code, result.message || 'Deep Agent request failed', result.error_code)
   }
   return result.data
 }
@@ -73,7 +100,7 @@ async function studioRequest<T>(path: string, init: RequestInit = {}): Promise<T
   })
   const result = await parseResponse<T>(response, 'Studio service returned an invalid response')
   if (!response.ok || result.code !== 0) {
-    throw new DeepAgentApiError(result.code, result.message || 'Studio request failed')
+    throw new DeepAgentApiError(result.code, result.message || 'Studio request failed', result.error_code)
   }
   return result.data
 }

@@ -37,6 +37,29 @@ def test_hyperframes_authored_html_keeps_llm_words():
     assert "Cuti CJK" in html
 
 
+@pytest.mark.parametrize(
+    ("css", "message"),
+    [
+        (".cap{display:none}", "permanently hidden"),
+        (".cap{opacity:0}", "without a reveal timeline"),
+    ],
+)
+def test_hyperframes_rejects_permanently_hidden_authored_captions(css, message):
+    source = (
+        f"<style>{css}</style>"
+        '<div class="cap" data-start="1" data-end="2">字幕</div>'
+    )
+    with pytest.raises(ValueError, match=message):
+        hyperframes_service._prepare_authored_html(
+            source,
+            duration=3,
+            width=1280,
+            height=720,
+            accent="#ffcc00",
+            has_cjk=True,
+        )
+
+
 TOKYO_LYRIC_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -113,6 +136,30 @@ def test_hyperframes_authored_html_leaves_demo_frame_and_points_gsap_local():
     assert "cdn.jsdelivr.net" not in html
 
 
+def test_hyperframes_wraps_agent_authored_caption_fragment():
+    source = """<div class="captions">
+      <div class="cue" data-start="2" data-end="4">最近怎么样？</div>
+      <div class="cue" data-start="4" data-end="6">我可能得先走。</div>
+    </div><style>.cue{display:none}.cue.active{display:inline-block}</style>"""
+
+    html = hyperframes_service._prepare_authored_html(
+        source,
+        duration=30.176,
+        width=1920,
+        height=1080,
+        accent="#F5C76B",
+        has_cjk=True,
+    )
+
+    assert "<body>" in html
+    assert 'data-composition-id="overlay"' in html
+    assert 'data-duration="30.176"' in html
+    assert 'class="cue clip"' in html
+    assert 'data-start="2" data-end="4" data-duration="2.000"' in html
+    assert ".cue.clip{display:inline-block!important}" in html
+    assert "最近怎么样？" in html
+
+
 def test_hyperframes_html_uses_direct_video_audio_and_local_gsap():
     rendered = hyperframes_service._build_html(
         width=1280, height=720, duration=1.0,
@@ -130,19 +177,33 @@ def test_hyperframes_html_uses_direct_video_audio_and_local_gsap():
     assert "旷野黄金时" in rendered
 
 
-def test_hyperframes_request_requires_authored_html():
-    from pydantic import ValidationError
-
+def test_hyperframes_request_defaults_to_cuti_template_renderer():
     from app.models.subtitle import HyperframesCaptionRequest
 
-    with pytest.raises(ValidationError):
-        HyperframesCaptionRequest(video_url="https://example.com/a.mp4", run_id="r1")
     req = HyperframesCaptionRequest(
         video_url="https://example.com/a.mp4",
         run_id="r1",
-        caption_html="<!doctype html><html></html>",
+        cues=[{"start": 1, "end": 2, "text": "字幕"}],
     )
-    assert req.caption_html.startswith("<!doctype")
+    assert req.style == "caption-highlight"
+    assert req.caption_html is None
+
+
+def test_cuti_template_renderer_has_timed_visible_sentence_animation():
+    html = hyperframes_service._build_templated_caption_html(
+        width=1280,
+        height=720,
+        duration=4,
+        groups=[{"text": "字幕可见", "start": 1, "end": 3}],
+        style="caption-editorial-emphasis",
+        accent="#F4C76B",
+        position="bottom-safe",
+    )
+
+    assert "字幕可见" in html
+    assert "tl.set(el,{visibility:'visible'},g.start)" in html
+    assert "opacity:1" in html
+    assert "display:none" not in html
 
 
 def test_hyperframes_playbook_bridge_still_loads():

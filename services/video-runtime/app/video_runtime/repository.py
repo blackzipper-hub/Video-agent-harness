@@ -512,6 +512,7 @@ class InMemoryVideoProjectRepository:
     async def list_planning_checkpoints(self) -> list[PlanCheckpoint]:
         return [deepcopy(item) for item in self.checkpoints.values()
                 if item.status == "planning"
+                and not item.phase.startswith("live:")
                 and self.builds[item.build_id].status not in {"cancelled", "failed", "completed"}]
 
     async def claim_pending_checkpoint(self, lease_seconds: int = 120) -> PlanCheckpoint | None:
@@ -520,7 +521,8 @@ class InMemoryVideoProjectRepository:
             candidates = sorted(self.checkpoints.values(), key=lambda item: item.created_at)
             checkpoint = next((
                 item for item in candidates
-                if self.builds[item.build_id].status not in {"cancelled", "failed", "completed"}
+                if not item.phase.startswith("live:")
+                and self.builds[item.build_id].status not in {"cancelled", "failed", "completed"}
                 and (item.status == "pending" or (
                     item.status == "planning"
                     and item.lease_expires_at is not None
@@ -609,6 +611,19 @@ class InMemoryVideoProjectRepository:
                 raise VideoSpecRevisionConflict(checkpoint.base_spec_revision, latest_spec.revision)
             if stored.status not in {"pending", "planning"}:
                 raise ValueError(f"cannot resolve {stored.status} checkpoint")
+            if updated_plan.current_revision == plan.current_revision:
+                stored.status = "resolved"
+                stored.lease_expires_at = None
+                stored.error = None
+                stored.updated_at = now()
+                build.status = "running"
+                build.message = "Waiting for task results"
+                self.idempotency[key] = plan.id
+                self._append_event(stored.project_id, "build.checkpoint.resolved", {
+                    "build_id": build.id, "checkpoint_id": stored.id,
+                    "acknowledged_only": True,
+                })
+                return deepcopy(plan)
             existing_steps = set(self.build_steps[stored.build_id])
             added = [item for item in updated_plan.items if item.step_id not in existing_steps]
             for step_id in plan_revision.cancelled_step_ids:

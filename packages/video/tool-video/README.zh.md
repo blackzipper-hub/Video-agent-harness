@@ -1,5 +1,7 @@
 # @cuti-ai/tool-video
 
+检查点查询向模型展示检查点 JSON，包括两个版本号、产物摘要和规划要求。提交时将 `base_plan_revision` 对应到 `base_revision`，保留 `base_spec_revision`；不能根据阶段名称猜测版本号。
+
 [English](README.md) | 中文
 
 一组稳定的高层工具，使 DeepSeek agent 能够操作带版本的视频项目，而不暴露 Provider 专用调用。
@@ -11,6 +13,8 @@
 修改参数后重试时，提交 `replace_failed_task_ids`，将失败 ID 映射到 `add_tasks` 中的新任务键。Runtime 原子替换待执行的下游任务，保留可复用的已完成产物。失败的持续 Build 可通过 `checkpoint_id="live"` 查看，并保持停止直到修复补丁提交。
 
 ## Model Experience
+
+明确的编辑请求授权预览后直接执行，无需再次确认。Build 结果区分排队与完成，并指引 Agent 完成依赖步骤。无需 Workflow 的 PlanPatch 能力包含已安装的视频生成与媒体操作；生成片段可在同一计划中接入拼接。
 
 ### 项目视频工具
 

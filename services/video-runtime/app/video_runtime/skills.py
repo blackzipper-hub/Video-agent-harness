@@ -72,7 +72,8 @@ class VideoSkillRuntime:
 
     def prompt_view(self) -> list[dict]:
         """Return the public catalog shape consumed by the migrated Cuti UI."""
-        from .workflow_plans import WORKFLOW_ID_COMPILERS, UNAVAILABLE_WORKFLOW_MODES
+        from .workflow_plans import workflow_execution_kind
+        from .plan_utils import BuildPlanValidationError
         capabilities_by_skill = {
             item.skill_name: item
             for item in self.capabilities.list(include_disabled=True)
@@ -107,18 +108,18 @@ class VideoSkillRuntime:
             if kind == "workflow":
                 workflow = self.workflows.get(metadata.name)
                 mode = workflow.mode if workflow is not None else ""
-                contract = WORKFLOW_ID_COMPILERS.get(metadata.name)
-                available = (
-                    workflow is not None
-                    and contract is not None
-                    and contract[0] == mode
-                )
+                reason = None
+                execution_kind = "unavailable"
+                try:
+                    if workflow is None:
+                        raise BuildPlanValidationError(f"Workflow is not registered: {metadata.name}")
+                    execution_kind = workflow_execution_kind(workflow)
+                except BuildPlanValidationError as exc:
+                    reason = str(exc)
                 view.update({
-                    "available": available,
-                    "unavailable_reason": UNAVAILABLE_WORKFLOW_MODES.get(mode) or (
-                        None if available
-                        else f"No dedicated compiler for workflow {metadata.name} with mode {mode}"
-                    ),
+                    "available": reason is None,
+                    "unavailable_reason": reason,
+                    "execution_kind": execution_kind,
                     "workflow_mode": mode,
                 })
             else:
