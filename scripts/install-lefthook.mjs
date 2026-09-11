@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './materialize-root-configs.mjs'
 import { randomUUID } from 'node:crypto'
 import {
   closeSync,

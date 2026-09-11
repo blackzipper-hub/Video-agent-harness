@@ -88,3 +88,17 @@ apps/video-cli/*.tgz
 # Workspace lock is the root pnpm-lock.yaml. Nested locks appear from local package installs.
 packages/**/pnpm-lock.yaml
 vendor/**/pnpm-lock.yaml
+# Root tool entrypoints are generated from config/root during pnpm install.
+/.oxlintrc.json
+/.oxlintrc.staged.json
+/.jscpd.json
+/knip.json
+/lefthook.yml
+/pytest.ini
+/tsconfig.json
+/tsconfig.base.json
+/tsconfig.base.client.json
+/tsconfig.host.json
+/tsconfig.client.json
+/tsdown.config.ts
+/vitest.config.ts

@@ -58,13 +58,13 @@ The shallow, blob-filtered clone still checks out every file needed to build and
 macOS or Linux:
 
 ```sh
-cp .env.example .env
+cp config/.env.example .env
 ```
 
 Windows PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item config/.env.example .env
 ```
 
 Open `.env` and fill in the keys for the capabilities you intend to use. Never commit this file. The useful minimum for chat plus the default video workflow is:
@@ -116,11 +116,13 @@ Try a low-cost first prompt such as:
 
 ## Development mode
 
+Tool configuration sources live in `config/root/`. `pnpm install` generates the Git-ignored root entrypoints required by TypeScript, editors, tests, and Git hooks. Edit the source files there, and run `node scripts/materialize-root-configs.mjs` after pulling configuration updates or when installing with `--ignore-scripts`.
+
 To run Video Studio with Vite hot reload, keep the complete local stack running, then use another terminal:
 
 ```sh
 cd apps/video-studio
-cp .env.example .env.local
+cp ../../config/.env.example .env.local
 ```
 
 Set these values in `apps/video-studio/.env.local`:

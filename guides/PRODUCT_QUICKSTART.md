@@ -79,13 +79,13 @@ cd Video-agent-harness
 macOS 或 Linux：
 
 ```bash
-cp .env.example .env
+cp config/.env.example .env
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item config/.env.example .env
 ```
 
 编辑 `.env`，至少填写：
@@ -275,4 +275,4 @@ Provider 调用可能产生真实费用。首次使用时建议选择短视频�
 
 ## License
 
-本项目使用 [MIT License](../LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录参见 [Source Provenance](../docs/source-provenance.md)，第三方依赖及许可证参见 [Third-Party Notices](../THIRD_PARTY_NOTICES.md)。
+本项目使用 [MIT License](../LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录参见 [Source Provenance](../docs/source-provenance.md)，第三方依赖及许可证参见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。

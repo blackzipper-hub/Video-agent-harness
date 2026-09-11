@@ -639,7 +639,7 @@ Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/
 
 ### `video_edit_preview`
 
-Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. This only previews impact and cost; do not execute until the user confirms.
+Resolve creative VideoSpec edits (character, scene, shot, music intent, timeline, or regeneration) into an executable incremental plan while preserving the selected generation Workflow. When changing total duration, first inspect the project, then send patch_timeline.patch.target_duration_seconds together with patch.shots: partial records for every resized existing shot and complete id/order/duration_seconds/beat/visual_prompt records for every new shot. The Runtime will not stretch clips or invent missing creative content. For post-production such as subtitles, captions, audio mixing, extraction, concatenation, or lipsync use video_plan_patch_preview instead. After preview, execute the requested edit without a second confirmation.
 
 ```json
 {
@@ -760,7 +760,7 @@ Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/
 
 ### `video_plan_patch_preview`
 
-Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. This only previews impact and cost; wait for user confirmation before video_rebuild_apply. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.
+Preview a Harness-wide dynamic PlanPatch against currently selected project Artifacts. First call video_artifact_list and video_plan_patch_capability_list, then load any recommended Skill. Chain steps by operation_step_id. After preview, call video_rebuild_apply immediately for the requested operation. No second confirmation is needed. Never switch or recompile the generation Workflow for subtitles, captions, trimming, mixing, concatenation, frame extraction, or lipsync.
 
 ```json
 {
@@ -1509,7 +1509,7 @@ Source: [`packages/video/tool-video/src/index.ts`](../packages/video/tool-video/
 
 ### `video_rebuild_apply`
 
-Apply an approved rebuild plan against its exact base project version.
+Apply the user-requested rebuild plan against its exact base project version without a second confirmation. Continue tracking the build and completing dependent steps.
 
 ```json
 {

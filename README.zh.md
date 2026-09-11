@@ -58,13 +58,13 @@ cd Video-agent-harness
 macOS 或 Linux：
 
 ```sh
-cp .env.example .env
+cp config/.env.example .env
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item config/.env.example .env
 ```
 
 打开 `.env`，填写计划使用的能力所需的 Key，且不要提交该文件。对话加默认视频 Workflow 的常用最小配置是：
@@ -116,14 +116,16 @@ Doctor 应将每个组件显示为 `OK`，健康检查应返回 `{"status":"heal
 
 ## 开发模式
 
+工具配置源文件位于 `config/root/`。`pnpm install` 会在根目录生成由 Git 忽略的配置入口，供 TypeScript、编辑器、测试和 Git 钩子使用。请编辑 `config/root/` 中的源文件；拉取配置更新后，或使用 `--ignore-scripts` 安装时，运行 `node scripts/materialize-root-configs.mjs`。
+
 如果需要使用 Vite 热更新，请保持完整本地服务栈运行，然后在另一个终端执行：
 
 ```sh
 cd apps/video-studio
-cp .env.example .env.local
+cp ../../config/.env.example .env.local
 ```
 
-Windows PowerShell 同样可以使用 `Copy-Item .env.example .env.local`。在 `apps/video-studio/.env.local` 中设置：
+Windows PowerShell 同样可以使用 `Copy-Item ../../config/.env.example .env.local`。在 `apps/video-studio/.env.local` 中设置：
 
 ```dotenv
 VITE_VIDEO_RUNTIME_URL=http://127.0.0.1:8001

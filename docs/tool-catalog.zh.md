@@ -643,7 +643,7 @@
 
 ### `video_edit_preview`
 
-将 VideoSpec 创作编辑（角色、场景、镜头、音乐意图、时间线或重新生成）转换为可执行的增量计划，并保留选中的生成 Workflow。修改总时长时先查看项目，再同时提供 patch_timeline.patch.target_duration_seconds 和 patch.shots：调整已有镜头提供局部记录，新增镜头提供完整 id/order/duration_seconds/beat/visual_prompt。Runtime 不会拉伸片段或编造缺失创作内容。字幕、音频混合、提取、拼接或口型同步等后期操作使用 video_plan_patch_preview。此工具只预览影响与费用，用户确认前不要执行。
+将 VideoSpec 创作编辑（角色、场景、镜头、音乐意图、时间线或重新生成）转换为可执行的增量计划，并保留选中的生成 Workflow。修改总时长时先查看项目，再同时提供 patch_timeline.patch.target_duration_seconds 和 patch.shots：调整已有镜头提供局部记录，新增镜头提供完整 id/order/duration_seconds/beat/visual_prompt。Runtime 不会拉伸片段或编造缺失创作内容。字幕、音频混合、提取、拼接或口型同步等后期操作使用 video_plan_patch_preview。预览后执行用户请求的编辑，无需再次确认。
 
 ```json
 {
@@ -764,7 +764,7 @@
 
 ### `video_plan_patch_preview`
 
-针对当前选中的项目产物预览 Harness 通用动态 PlanPatch。先调用 video_artifact_list 和 video_plan_patch_capability_list，再加载推荐 Skill。用 operation_step_id 串联步骤。此工具仅预览影响和费用；用户确认后才能调用 video_rebuild_apply。字幕、裁切、混音、拼接、抽帧或口型同步不应切换或重新编译生成 Workflow。
+针对当前选中的项目产物预览 Harness 通用动态 PlanPatch。先调用 video_artifact_list 和 video_plan_patch_capability_list，再加载推荐 Skill。用 operation_step_id 串联步骤。预览后立即调用 video_rebuild_apply 执行用户请求的操作，无需再次确认。字幕、裁切、混音、拼接、抽帧或口型同步不应切换或重新编译生成 Workflow。
 
 ```json
 {
@@ -1513,7 +1513,7 @@
 
 ### `video_rebuild_apply`
 
-针对确定的基础项目版本执行已批准的重建计划。
+针对确定的基础项目版本执行用户请求的重建计划，无需再次确认。持续跟踪 Build 并完成依赖步骤。
 
 ```json
 {

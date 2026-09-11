@@ -1,5 +1,5 @@
 /**
- * Generate `THIRD_PARTY_NOTICES.md` from the workspace manifests: every
+ * Generate `guides/THIRD_PARTY_NOTICES.md` from the workspace manifests: every
  * external dependency named by a workspace `package.json`, the vendored-package
  * manifest in `vendor/README.md`, the Python `pyproject.toml` files, and the
  * pnpm patch list. License and repository metadata come from the installed
@@ -15,7 +15,7 @@ import { parse as parseToml, type TomlTableWithoutBigInt, type TomlValueWithoutB
 import parseSpdx from 'spdx-expression-parse'
 
 const root = resolve(import.meta.dirname, '..')
-const OUT = 'THIRD_PARTY_NOTICES.md'
+const OUT = 'guides/THIRD_PARTY_NOTICES.md'
 
 /** Dependency-declaration kinds a consumer resolves at runtime. */
 const RUNTIME_KINDS = ['dependencies', 'optionalDependencies'] as const
@@ -659,7 +659,7 @@ ${rows.join('\n')}
 
 /**
  * Render the complete notices document.
- * @returns the exact bytes `THIRD_PARTY_NOTICES.md` must hold.
+ * @returns the exact bytes `guides/THIRD_PARTY_NOTICES.md` must hold.
  */
 export function render(): string {
   verifyBuildTimePins()

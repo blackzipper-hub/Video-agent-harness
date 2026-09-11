@@ -35,7 +35,7 @@ test('loads dotenv without overriding the caller environment', () => {
 })
 
 test('repository dotenv template excludes process-launch settings', () => {
-  const template = readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8')
+  const template = readFileSync(new URL('../../../config/.env.example', import.meta.url), 'utf8')
   for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY']) {
     assert.doesNotMatch(template, new RegExp(`^${name}=`, 'm'))
   }

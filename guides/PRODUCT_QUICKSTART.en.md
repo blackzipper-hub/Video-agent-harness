@@ -79,13 +79,13 @@ cd Video-agent-harness
 On macOS or Linux:
 
 ```bash
-cp .env.example .env
+cp config/.env.example .env
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item config/.env.example .env
 ```
 
 Open `.env` and add at least:
@@ -273,4 +273,4 @@ Provider calls may incur real costs. Begin with short videos, fewer shots, and l
 
 ## License
 
-This project is licensed under the [MIT License](../LICENSE). DeepSeek and imported Cuti provenance is documented in [Source Provenance](../docs/source-provenance.md). Third-party dependencies and licenses are listed in [Third-Party Notices](../THIRD_PARTY_NOTICES.md).
+This project is licensed under the [MIT License](../LICENSE). DeepSeek and imported Cuti provenance is documented in [Source Provenance](../docs/source-provenance.md). Third-party dependencies and licenses are listed in [Third-Party Notices](THIRD_PARTY_NOTICES.md).
