@@ -27,7 +27,7 @@ python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 
-Set `VIDEO_RUNTIME_DATABASE_URL` for Postgres durability. Without it, the standalone service uses the atomic local JSON repository at `VIDEO_RUNTIME_LOCAL_STATE_PATH`; when unset, the path is the same per-user system data directory used by `@cuti-ai/video-agent-harness`. If the canonical file is absent but a legacy checkout-relative state file exists, startup stops and reports the source and migration destination instead of creating an empty project library. Set `VIDEO_RUNTIME_IN_MEMORY=true` only for isolated tests. The root `compose.video.yml` applies every ordered migration in `migrations/video_runtime` before starting the service.
+Set `VIDEO_RUNTIME_DATABASE_URL` for Postgres durability. Without it, the standalone service uses the atomic local JSON repository at `VIDEO_RUNTIME_LOCAL_STATE_PATH`; when unset, the path is the same per-user system data directory used by `@cuti-ai/video-agent-harness`. If the canonical file is absent but a legacy checkout-relative state file exists, startup stops and reports the source and migration destination instead of creating an empty project library. Set `VIDEO_RUNTIME_IN_MEMORY=true` only for isolated tests. `deploy/compose.video.yml` applies every ordered migration in `migrations/video_runtime` before starting the service.
 
 For local storage the standalone entrypoint defaults `PUBLIC_BASE_URL` to `http://127.0.0.1:8001`, matching its documented port and `/files/*` mount. Set it explicitly when the Runtime is exposed on another origin. Provider-bound media is still uploaded through the media-egress adapter, so loopback URLs are never sent to remote generation services.
 

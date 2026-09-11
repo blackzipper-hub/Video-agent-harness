@@ -28,4 +28,4 @@ pnpm --filter @cuti-ai/video-studio run dev
 pnpm --filter @cuti-ai/video-studio run build
 ```
 
-根目录的 `compose.video.yml` 会构建应用并在 `http://127.0.0.1:3000` 提供服务。本地镜像把 `/api/video` 代理到独立运行时。生产环境的身份与聊天路由仍由部署方集成。
+`deploy/compose.video.yml` 会构建应用并在 `http://127.0.0.1:3000` 提供服务。本地镜像把 `/api/video` 代理到独立运行时。生产环境的身份与聊天路由仍由部署方集成。

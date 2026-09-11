@@ -79,6 +79,18 @@ export function loadDotEnv(path, environment = process.env) {
   return environment
 }
 
+export function loadLocalCredentialEnvironment(layout, environment = process.env) {
+  loadDotEnv(join(layout.root, '.env'), environment)
+  if (!layout.source) return environment
+
+  const workspaceRoot = dirname(layout.root)
+  for (const path of [
+    join(workspaceRoot, 'cuti-video-agent', '.env'),
+    join(workspaceRoot, 'cuti-video-agent', 'services', 'agent', '.env'),
+  ]) loadDotEnv(path, environment)
+  return environment
+}
+
 export function resolveLayout(options, packageRoot) {
   if (options.sourceRoot) {
     const root = options.sourceRoot
@@ -332,7 +344,7 @@ export async function runLocalWeb(options, packageRoot) {
   const layout = resolveLayout(options, packageRoot)
   const dataDirectory = options.dataDir || defaultDataDirectory()
   mkdirSync(dataDirectory, { recursive: true })
-  loadDotEnv(join(layout.root, '.env'))
+  loadLocalCredentialEnvironment(layout)
   importWindowsProxy(process.env)
   const python = await ensurePython(dataDirectory, options.useSystemPython)
   const dependencyPath = ensurePythonDependencies(python, layout, dataDirectory)

@@ -6,7 +6,7 @@ Self-host with the root compose file. That is the supported product path:
 
 ```sh
 cp .env.example .env
-docker compose --env-file .env -f compose.video.yml up --build -d
+docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 
 Then start DeepSeek Harness as described in the [root README](../README.md). Identity is `local-user`. Object storage defaults to the local disk (`STORAGE_BACKEND=local`).

@@ -107,7 +107,7 @@ ARK_API_KEY=your-ark-key
 ### 3. Start the Video Services
 
 ```bash
-docker compose --env-file .env -f compose.video.yml up --build -d
+docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 
 This starts:
@@ -121,7 +121,7 @@ This starts:
 Check the containers:
 
 ```bash
-docker compose -f compose.video.yml ps
+docker compose -f deploy/compose.video.yml ps
 ```
 
 Check Video Runtime health:
@@ -242,7 +242,7 @@ Open:
 | The UI opens, but sending a prompt produces no response | Confirm DeepSeek Harness is running on port `3080` and its process received `OPENAI_API_KEY`. |
 | `401`, `NO_AUTH`, or model authentication error | Check `.env` and verify that the DeepSeek Harness process loaded the OpenAI key. |
 | Image or video generation fails | Configure the key required by the selected Workflow. The default Seedance path requires WaveSpeed or Ark. |
-| A Build remains queued | Run `docker compose -f compose.video.yml ps` and inspect the Runtime and Worker status. |
+| A Build remains queued | Run `docker compose -f deploy/compose.video.yml ps` and inspect the Runtime and Worker status. |
 | A port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, and `18080`. |
 | Sandbox Worker is unhealthy on Windows | Ensure Docker Desktop is running Linux containers. |
 | Model or provider calls time out behind a proxy | Configure `HTTP_PROXY` and `HTTPS_PROXY`; Node also requires `NODE_USE_ENV_PROXY=1`. |
@@ -250,19 +250,19 @@ Open:
 Inspect Video Runtime logs:
 
 ```bash
-docker compose -f compose.video.yml logs video-runtime
+docker compose -f deploy/compose.video.yml logs video-runtime
 ```
 
 Stop the services:
 
 ```bash
-docker compose -f compose.video.yml down
+docker compose -f deploy/compose.video.yml down
 ```
 
 Only use the following command when you intentionally want to delete the local database and generated-media volumes:
 
 ```bash
-docker compose -f compose.video.yml down -v
+docker compose -f deploy/compose.video.yml down -v
 ```
 
 ## Project Status
@@ -273,4 +273,4 @@ Provider calls may incur real costs. Begin with short videos, fewer shots, and l
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). DeepSeek and imported Cuti provenance is documented in [Source Provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+This project is licensed under the [MIT License](../LICENSE). DeepSeek and imported Cuti provenance is documented in [Source Provenance](../docs/source-provenance.md). Third-party dependencies and licenses are listed in [Third-Party Notices](../THIRD_PARTY_NOTICES.md).

@@ -107,7 +107,7 @@ ARK_API_KEY=your-ark-key
 ### 3. 启动视频服务
 
 ```bash
-docker compose --env-file .env -f compose.video.yml up --build -d
+docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 
 该命令会启动：
@@ -121,7 +121,7 @@ docker compose --env-file .env -f compose.video.yml up --build -d
 检查服务状态：
 
 ```bash
-docker compose -f compose.video.yml ps
+docker compose -f deploy/compose.video.yml ps
 ```
 
 检查 Video Runtime：
@@ -244,7 +244,7 @@ pnpm --filter @cuti-ai/video-studio run dev
 | 页面可以打开，但发送消息后没有响应 | 确认 DeepSeek Harness 正在 `3080` 端口运行，并且启动终端中已设置 `OPENAI_API_KEY`。 |
 | 出现 `401`、`NO_AUTH` 或模型认证错误 | 检查 `.env` 和 DeepSeek Harness 进程是否正确读取 OpenAI Key。 |
 | 图片或视频生成失败 | 检查所选 Workflow 需要的 Provider Key；默认 Seedance 流程需要 WaveSpeed 或 Ark。 |
-| Build 长时间停留在 queued | 使用 `docker compose -f compose.video.yml ps` 检查 Runtime 和 Worker 状态。 |
+| Build 长时间停留在 queued | 使用 `docker compose -f deploy/compose.video.yml ps` 检查 Runtime 和 Worker 状态。 |
 | 端口已被占用 | 检查并释放或重新映射 `3000`、`3080`、`8001`、`8090` 和 `18080`。 |
 | Windows 下 Sandbox Worker 不健康 | 确认 Docker Desktop 正在使用 Linux containers。 |
 | 模型或 Provider 请求超时 | 配置 `HTTP_PROXY`、`HTTPS_PROXY`，Node 环境还需要设置 `NODE_USE_ENV_PROXY=1`。 |
@@ -252,19 +252,19 @@ pnpm --filter @cuti-ai/video-studio run dev
 查看 Video Runtime 日志：
 
 ```bash
-docker compose -f compose.video.yml logs video-runtime
+docker compose -f deploy/compose.video.yml logs video-runtime
 ```
 
 停止服务：
 
 ```bash
-docker compose -f compose.video.yml down
+docker compose -f deploy/compose.video.yml down
 ```
 
 只有在确定需要删除本地数据库和生成媒体时，才使用：
 
 ```bash
-docker compose -f compose.video.yml down -v
+docker compose -f deploy/compose.video.yml down -v
 ```
 
 ## 项目状态
@@ -275,4 +275,4 @@ Provider 调用可能产生真实费用。首次使用时建议选择短视频�
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录参见 [Source Provenance](docs/source-provenance.md)，第三方依赖及许可证参见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
+本项目使用 [MIT License](../LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录参见 [Source Provenance](../docs/source-provenance.md)，第三方依赖及许可证参见 [Third-Party Notices](../THIRD_PARTY_NOTICES.md)。

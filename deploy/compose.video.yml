@@ -21,7 +21,7 @@ services:
     environment:
       PGPASSWORD: video_harness_local
     volumes:
-      - ./services/video-runtime/migrations/video_runtime:/migrations:ro
+      - ../services/video-runtime/migrations/video_runtime:/migrations:ro
     command:
       - sh
       - -c
@@ -29,7 +29,7 @@ services:
 
   video-runtime:
     build:
-      context: .
+      context: ..
       dockerfile: services/video-runtime/Dockerfile.runtime
     depends_on:
       video-db-migrate:
@@ -79,7 +79,7 @@ services:
 
   media-service:
     build:
-      context: ./services/media-service
+      context: ../services/media-service
     shm_size: "2gb"
     environment:
       ENVIRONMENT: development
@@ -109,7 +109,7 @@ services:
 
   sandbox-worker:
     build:
-      context: ./services/sandbox-worker
+      context: ../services/sandbox-worker
     environment:
       SANDBOX_ENVIRONMENT: development
       SANDBOX_INTERNAL_TOKEN: video-harness-sandbox-local
@@ -127,7 +127,7 @@ services:
 
   video-studio:
     build:
-      context: .
+      context: ..
       dockerfile: apps/video-studio/Dockerfile
       args:
         VITE_LOCAL_SINGLE_USER_MODE: "true"

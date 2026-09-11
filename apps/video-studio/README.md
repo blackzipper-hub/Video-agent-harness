@@ -28,4 +28,4 @@ The development server uses `VITE_VIDEO_RUNTIME_URL` for `/api/video`; its defau
 pnpm --filter @cuti-ai/video-studio run build
 ```
 
-The root `compose.video.yml` builds and serves the app at `http://127.0.0.1:3000`. The local image proxies `/api/video` to the standalone runtime. Production identity and chat routing remain deployment-owned integrations.
+`deploy/compose.video.yml` builds and serves the app at `http://127.0.0.1:3000`. The local image proxies `/api/video` to the standalone runtime. Production identity and chat routing remain deployment-owned integrations.

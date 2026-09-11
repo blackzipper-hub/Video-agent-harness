@@ -29,7 +29,7 @@ python -m pip install -e .
 python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 ```
 
-设置 `VIDEO_RUNTIME_DATABASE_URL` 可启用 Postgres 持久化。未设置时，独立服务使用 `VIDEO_RUNTIME_LOCAL_STATE_PATH` 指定的原子 JSON 存储；该变量未设置时，路径与 `@cuti-ai/video-agent-harness` 使用的每用户系统数据目录一致。如果规范路径尚不存在，但检测到旧版工作目录相对状态文件，服务会停止启动并报告来源和迁移目标，而不是创建空项目库。只有隔离测试才应设置 `VIDEO_RUNTIME_IN_MEMORY=true`。根目录的 `compose.video.yml` 会在启动服务前按顺序执行 `migrations/video_runtime` 中的全部迁移。
+设置 `VIDEO_RUNTIME_DATABASE_URL` 可启用 Postgres 持久化。未设置时，独立服务使用 `VIDEO_RUNTIME_LOCAL_STATE_PATH` 指定的原子 JSON 存储；该变量未设置时，路径与 `@cuti-ai/video-agent-harness` 使用的每用户系统数据目录一致。如果规范路径尚不存在，但检测到旧版工作目录相对状态文件，服务会停止启动并报告来源和迁移目标，而不是创建空项目库。只有隔离测试才应设置 `VIDEO_RUNTIME_IN_MEMORY=true`。`deploy/compose.video.yml` 会在启动服务前按顺序执行 `migrations/video_runtime` 中的全部迁移。
 
 使用本地存储时，独立入口默认将 `PUBLIC_BASE_URL` 设置为 `http://127.0.0.1:8001`，与文档端口及 `/files/*` 挂载一致；若 Runtime 使用其他域名或端口，需要显式覆盖。发往远程生成服务的媒体仍会经过 media-egress 上传，不会直接把回环地址交给 Provider。
 

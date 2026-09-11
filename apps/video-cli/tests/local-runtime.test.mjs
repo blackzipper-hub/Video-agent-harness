@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createStudioGateway, loadDotEnv, parseArguments } from '../src/local-runtime.mjs'
+import {
+  createStudioGateway,
+  loadDotEnv,
+  loadLocalCredentialEnvironment,
+  parseArguments,
+} from '../src/local-runtime.mjs'
 
 test('parses portable local web options', () => {
   assert.deepEqual(parseArguments([
@@ -34,6 +39,26 @@ test('repository dotenv template excludes process-launch settings', () => {
   for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY']) {
     assert.doesNotMatch(template, new RegExp(`^${name}=`, 'm'))
   }
+})
+
+test('source launcher inherits missing credentials from the sibling Cuti checkout', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'video-agent-workspace-'))
+  const root = join(workspace, 'video-agent-harness')
+  const legacy = join(workspace, 'cuti-video-agent')
+  const agent = join(legacy, 'services', 'agent')
+  mkdirSync(root, { recursive: true })
+  mkdirSync(agent, { recursive: true })
+  writeFileSync(join(root, '.env'), 'REPO_SETTING=repo-value\n')
+  writeFileSync(join(legacy, '.env'), 'OPENAI_API_KEY=legacy-key\nWAVESPEED_API_KEY=wavespeed-key\n')
+  writeFileSync(join(agent, '.env'), 'SUNO_API_KEY=music-key\n')
+
+  const environment = {}
+  loadLocalCredentialEnvironment({ root, source: true }, environment)
+
+  assert.equal(environment.REPO_SETTING, 'repo-value')
+  assert.equal(environment.OPENAI_API_KEY, 'legacy-key')
+  assert.equal(environment.WAVESPEED_API_KEY, 'wavespeed-key')
+  assert.equal(environment.SUNO_API_KEY, 'music-key')
 })
 
 test('studio gateway serves the single-page application', async () => {
