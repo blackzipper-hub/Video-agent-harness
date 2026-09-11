@@ -11,22 +11,24 @@ Cuti 平台的媒体处理微服务，负责 FFmpeg 视频与音频处理、图�
 - **FastAPI** REST API
 - **FFmpeg** 视频与音频处理，并带并发控制
 - **Pillow** 图片处理
-- **S3** 输入与输出存储
+- **本地磁盘** 作为输入与输出存储（`STORAGE_BACKEND=local`）；S3 可选
 - 按 `run_id` 隔离工作目录，并基于 TTL 清理
-- 使用 Helm、HPA 自动扩缩容部署到 AWS EKS
 
 ## 快速开始
 
+推荐从仓库根目录用 compose 启动整套服务。媒体服务端口是 `18080`。
+
 ```bash
-# Local development
+# 仓库根目录
+cp .env.example .env
+docker compose --env-file .env -f compose.video.yml up --build -d
+
+# 仅本服务（本目录）
 pip install -r requirements.txt
-cp .env.example .env  # edit with your AWS credentials
+cp .env.example .env
 uvicorn app.main:app --reload --port 8080
 
-# Docker
-docker-compose up --build
-
-# Run tests
+# 测试
 pip install pytest pytest-asyncio httpx
 pytest tests/ -v
 ```
@@ -64,14 +66,12 @@ pytest tests/ -v
 
 ## 部署
 
-```bash
-# Build and push to ECR
-aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.ap-southeast-2.amazonaws.com
-docker build -t <account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service:latest .
-docker push <account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service:latest
+这条线只支持本地 compose。集群 Helm、ECR、EKS 留在私有分支。
 
-# Deploy to EKS via Helm
-helm upgrade --install cuti-media-service ./helm/cuti-media-service \
-  --set image.repository=<account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service \
-  --set image.tag=latest
+```bash
+# 仓库根目录
+cp .env.example .env
+docker compose --env-file .env -f compose.video.yml up --build -d
 ```
+
+身份是 `local-user`。对象存储默认本地磁盘（`STORAGE_BACKEND=local`）。见[根目录部署说明](../../deploy/README.md)。

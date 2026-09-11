@@ -11,20 +11,22 @@ Windows local captions require Node.js, FFmpeg and the HyperFrames runtime. Run 
 - **FastAPI** REST API
 - **FFmpeg** for video/audio processing with concurrency control
 - **Pillow** for image processing
-- **S3** for input/output storage
+- **Local disk** for input/output storage (`STORAGE_BACKEND=local`); S3 is optional
 - **Workspace isolation** per `run_id` with TTL-based cleanup
-- **AWS EKS** deployment with Helm + HPA autoscaling
 
 ## Quick Start
 
-```bash
-# Local development
-pip install -r requirements.txt
-cp .env.example .env  # edit with your AWS credentials
-uvicorn app.main:app --reload --port 8080
+The supported product path is the root compose file. Media Service listens on `18080`.
 
-# Docker
-docker-compose up --build
+```bash
+# From the repository root
+cp .env.example .env
+docker compose --env-file .env -f compose.video.yml up --build -d
+
+# Service-only (this directory)
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8080
 
 # Run tests
 pip install pytest pytest-asyncio httpx
@@ -64,14 +66,12 @@ pytest tests/ -v
 
 ## Deployment
 
-```bash
-# Build and push to ECR
-aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.ap-southeast-2.amazonaws.com
-docker build -t <account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service:latest .
-docker push <account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service:latest
+This track is local compose only. Cluster Helm, ECR, and EKS stay on the private branch.
 
-# Deploy to EKS via Helm
-helm upgrade --install cuti-media-service ./helm/cuti-media-service \
-  --set image.repository=<account>.dkr.ecr.ap-southeast-2.amazonaws.com/cuti-media-service \
-  --set image.tag=latest
+```bash
+# From the repository root
+cp .env.example .env
+docker compose --env-file .env -f compose.video.yml up --build -d
 ```
+
+Identity is `local-user`. Object storage defaults to the local disk (`STORAGE_BACKEND=local`). See the [root deploy README](../../deploy/README.md).
