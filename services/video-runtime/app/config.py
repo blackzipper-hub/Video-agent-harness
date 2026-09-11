@@ -196,12 +196,11 @@ class Settings(BaseSettings):
     # AWS settings
     AWS_REGION: str = Field(
         default="ap-southeast-2",
-        description="AWS region (uses IAM role on EC2, no credentials needed)"
+        description="AWS region"
     )
 
     # S3-compatible storage endpoint (for open-source / self-hosted: point to MinIO)
-    # 默认 None = 使用真实 AWS S3（IAM role），行为不变；
-    # 设为如 http://minio:9000 即切到 S3 兼容存储（MinIO），配合下面的 access key + path-style。
+    # 默认 None = 使用 AWS S3；设为如 http://minio:9000 即切到 S3 兼容存储。
     S3_ENDPOINT_URL: Optional[str] = Field(
         default=None,
         description="Custom S3-compatible endpoint (e.g. http://minio:9000). None = real AWS S3."

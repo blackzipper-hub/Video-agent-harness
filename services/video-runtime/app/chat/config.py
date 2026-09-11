@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # 与 Cuti-VideoAgent 一致：用户上传图片/音频/视频经 S3 后返回 CDN URL（供前端展示与下游使用）
     AWS_REGION: str = Field(
         default="ap-southeast-2",
-        description="AWS 区域（本机可 ~/.aws/credentials 或环境变量）",
+        description="AWS region",
     )
     S3_BUCKET_NAME: str = Field(
         default="",
@@ -61,11 +61,9 @@ class Settings(BaseSettings):
         description="Optional public base URL when using object storage",
     )
 
-    # Cuti-Media-Service：上传 S3 后对音频做 audio/info 补时长（与 Cuti-VideoAgent 一致）
-    # 本地/开发：在 .env.development 或 .env.local 里设为与 dev 集群一致（见仓库 .env.development 示例）
     MEDIA_SERVICE_URL: str = Field(
         default="http://localhost:8080",
-        description="Cuti-Media-Service base URL；未配置时可指向 dev 内网或 kubectl port-forward 到本机端口",
+        description="Media Service base URL",
     )
 
     # ==================== Prompt Shield（Input/Output Rail） ====================

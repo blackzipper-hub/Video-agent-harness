@@ -15,7 +15,6 @@ type LegacyApiValue = unknown
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
-// Cuti-VideoAgent 专用 API 基础 URL（env 控制走 K8s 还是 EC2）
 export const CUTI_VIDEO_API_BASE_URL = '/api/cv-v1'
 // VideoChatAgent（与 main FastAPI 网关同域时走 /chat-v1/service；本地见 vite proxy）
 export const VIDEOCHAT_AGENT_SERVICE_PREFIX = '/chat-v1/service'

@@ -65,8 +65,7 @@ class S3Utils:
 
     @staticmethod
     def _build_s3_client():
-        """构建 S3 客户端。默认走真实 AWS S3（IAM role）；
-        当配置 S3_ENDPOINT_URL 时切到 S3 兼容存储（如 MinIO），使用 path-style 寻址。"""
+        """构建 S3 客户端。默认走 AWS S3；配置 S3_ENDPOINT_URL 时切到 MinIO 等兼容存储。"""
         endpoint_url = getattr(settings, "S3_ENDPOINT_URL", None)
         if not endpoint_url:
             return boto3.client('s3', region_name=settings.AWS_REGION)
