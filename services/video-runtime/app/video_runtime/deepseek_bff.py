@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .api import get_runtime
+from .api import _artifact_payload, get_runtime
 from .deepseek_client import DeepSeekHarnessClient, DeepSeekHarnessError
 from .runtime import VideoBuildRuntime
 from .models import MediaArtifactVersion
@@ -993,7 +993,7 @@ async def _snapshot(
     project = await runtime.repo.get_project(project.id)
     events, artifacts, version, builds = await asyncio.gather(
         _history(dsh, session_id),
-        runtime.repo.current_artifacts(project.id),
+        runtime.repo.list_artifact_versions(project.id),
         runtime.repo.get_project_version(project.current_version_id),
         runtime.repo.list_builds(project.id),
     )
@@ -1046,7 +1046,7 @@ async def _snapshot(
         "revisions": [],
         "tasks": runtime_tasks,
         "artifacts": [{
-            **item.model_dump(mode="json"),
+            **_artifact_payload(project.id, item, set(version.selections.values())),
             "artifact_type": item.type,
             "produced_by_task_id": item.provenance.get("task_id", ""),
         } for item in artifacts],

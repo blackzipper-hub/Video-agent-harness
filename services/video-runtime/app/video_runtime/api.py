@@ -279,18 +279,36 @@ def _logical_artifact_id(project_id: str, artifact) -> str:
     }.get(step, step)
 
 
-_HEAVY_ARTIFACT_METADATA_TYPES = {"project_intent", "video_spec"}
+# Workspace cards render content / prompts / research JSON. skill_context is
+# the only metadata blob that is both large and unused by the Create panel.
+_DROP_ARTIFACT_METADATA_KEYS = {"skill_context"}
+
+
+def _workspace_artifact_metadata(artifact) -> dict:
+    metadata = dict(artifact.metadata or {})
+    for key in _DROP_ARTIFACT_METADATA_KEYS:
+        metadata.pop(key, None)
+    return metadata
 
 
 def _artifact_payload(project_id: str, artifact, selected_ids: set[str]) -> dict:
-    value = artifact.model_dump(mode="json")
-    if artifact.type in _HEAVY_ARTIFACT_METADATA_TYPES:
-        metadata = dict(value.get("metadata") or {})
-        metadata.pop("content", None)
-        value["metadata"] = metadata
-    value["logicalId"] = _logical_artifact_id(project_id, artifact)
-    value["isSelected"] = artifact.id in selected_ids
-    return value
+    created_at = artifact.created_at
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "id": artifact.id,
+        "artifact_id": artifact.artifact_id,
+        "type": artifact.type,
+        "version": artifact.version,
+        "status": artifact.status,
+        "uri": artifact.uri,
+        "title": artifact.title,
+        "summary": artifact.summary,
+        "metadata": _workspace_artifact_metadata(artifact),
+        "created_at": created_at,
+        "logicalId": _logical_artifact_id(project_id, artifact),
+        "isSelected": artifact.id in selected_ids,
+    }
 
 
 def _workspace_step_payload(item) -> dict:

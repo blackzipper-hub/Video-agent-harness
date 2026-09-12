@@ -450,6 +450,8 @@ const isReadableTextArtifact = (artifact: DeepAgentArtifact): boolean => {
 
 const isAudioArtifact = (artifact: DeepAgentArtifact): boolean => [
   'audio',
+  'audio_cut',
+  'audio_bgm',
   'bgm',
   'music',
   'narration',

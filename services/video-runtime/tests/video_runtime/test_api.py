@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -324,7 +325,32 @@ class VideoRuntimeApiTest(unittest.TestCase):
             title="Rain night still",
             uri="https://cdn.test/frame.webp",
         )
+        fat = MediaArtifactVersion(
+            project_id=project_id,
+            type="video_clip",
+            title="clip",
+            uri="https://cdn.test/clip.mp4",
+            metadata={
+                "build_id": "b2",
+                "video_url": "https://cdn.test/clip.mp4",
+                "skill_context": {"brief": "SKILL_CONTEXT_BLOB" * 200, "plan": "y" * 5000},
+                "raw": {"provider": "x" * 8000},
+                "generation_parameters": {
+                    "prompt": "rain girl on the platform",
+                    "seed": 7,
+                    "internal_trace": "z" * 4000,
+                },
+            },
+        )
+        script = MediaArtifactVersion(
+            project_id=project_id,
+            type="script",
+            title="导演方案",
+            metadata={"content": "夜雨站台，五秒动漫MV。", "skill_context": {"unused": True}},
+        )
         self.runtime.repo.artifacts[project_id][orphan.id] = orphan
+        self.runtime.repo.artifacts[project_id][fat.id] = fat
+        self.runtime.repo.artifacts[project_id][script.id] = script
         workspace = self.client.get(
             f"/api/video/projects/{project_id}/workspace",
             headers=self.headers,
@@ -339,7 +365,21 @@ class VideoRuntimeApiTest(unittest.TestCase):
         self.assertGreaterEqual(data["projectVersionCount"], 1)
         self.assertLessEqual(len(data["builds"]), 1)
         intent = next(item for item in data["artifacts"] if item["type"] == "project_intent")
-        self.assertNotIn("content", intent.get("metadata") or {})
+        self.assertEqual(intent["metadata"]["content"]["title"], "Slim")
         self.assertEqual(intent["metadata"]["build_id"], "b1")
         self.assertTrue(intent["isSelected"])
         self.assertTrue(any(item["id"] == orphan.id and item["uri"] == orphan.uri for item in data["artifacts"]))
+        clip = next(item for item in data["artifacts"] if item["id"] == fat.id)
+        self.assertEqual(clip["uri"], fat.uri)
+        self.assertEqual(clip["metadata"]["build_id"], "b2")
+        self.assertEqual(clip["metadata"]["generation_parameters"]["prompt"], "rain girl on the platform")
+        self.assertEqual(clip["metadata"]["generation_parameters"]["seed"], 7)
+        self.assertIn("raw", clip["metadata"])
+        self.assertNotIn("skill_context", clip["metadata"])
+        self.assertNotIn("provenance", clip)
+        story = next(item for item in data["artifacts"] if item["id"] == script.id)
+        self.assertEqual(story["metadata"]["content"], "夜雨站台，五秒动漫MV。")
+        self.assertNotIn("skill_context", story["metadata"])
+        encoded = json.dumps(data["artifacts"])
+        self.assertNotIn('"skill_context"', encoded)
+        self.assertNotIn("SKILL_CONTEXT_BLOB", encoded)
