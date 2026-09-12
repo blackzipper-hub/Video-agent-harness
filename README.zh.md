@@ -37,7 +37,7 @@ Provider / Workflow / Validator / Media plugins
 - Git。
 - Node.js `22.19+` 或 `24+`。
 - pnpm `11.x`。先运行 `pnpm --version`；如果尚未安装 pnpm，执行 `corepack enable`。
-- Python `3.11`。
+- Conda（Miniconda、Miniforge 或 Anaconda）。
 - 环境准备阶段需要联网，以便安装 Python 依赖以及采用各自许可证的 FFmpeg/FFprobe 工具。
 
 ### 1. 克隆开源分支
@@ -92,23 +92,23 @@ pnpm run build
 
 ### 4. 准备本地环境
 
-创建并激活 Python 3.11 虚拟环境。macOS 或 Linux：
+根据仓库提交的环境定义创建具名 Conda 环境，然后激活它。Windows、macOS 和 Linux 使用相同命令：
 
 ```sh
-python3.11 -m venv .venv
-source .venv/bin/activate
+conda env create --file environment.yml
+conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
-Windows PowerShell：
+如果环境已经存在，先同步其中的基础 Python 和 pip 约束，再重新执行准备命令：
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```sh
+conda env update --file environment.yml --prune
+conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
-环境准备命令会把固定版本的 Python 服务依赖安装进当前环境，并把 FFmpeg/FFprobe 安装到 `.video-agent-harness-data`；它不会启动任何服务。Python requirements 变化或改用新的数据目录后，需要重新运行该命令。
+Conda 定义负责环境名称、Python 3.11 和 pip。环境准备命令会验证当前激活的正是该 Conda 环境，把固定版本的 Python 服务依赖安装进去，并把 FFmpeg/FFprobe 安装到 `.video-agent-harness-data`；它不会启动任何服务。Python requirements 变化或改用新的数据目录后，需要重新运行该命令。
 
 如果希望由环境准备命令下载经过校验和验证的便携 Python，可以显式传入 `--portable-python`。这是一条可选路径，不是默认行为：
 
@@ -118,7 +118,7 @@ pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
 
 ### 5. 启动完整本地服务栈
 
-保持 Python 环境处于激活状态，然后运行：
+保持 `cuti-video-agent` Conda 环境处于激活状态，然后运行：
 
 ```sh
 pnpm video:local -- --data-dir .video-agent-harness-data
@@ -136,7 +136,7 @@ pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 
 ### 6. 验证服务栈
 
-在第二个终端中激活同一个 Python 环境，然后进入仓库根目录执行：
+在第二个终端中执行 `conda activate cuti-video-agent`，然后进入仓库根目录运行：
 
 ```sh
 pnpm video:doctor -- --data-dir .video-agent-harness-data

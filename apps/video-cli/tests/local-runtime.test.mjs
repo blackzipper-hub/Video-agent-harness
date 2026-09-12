@@ -12,7 +12,7 @@ import {
   runLocalWeb,
 } from '../src/local-runtime.mjs'
 
-test('parses local web options with configured Python as the default', () => {
+test('parses local web options with Conda Python as the default', () => {
   assert.deepEqual(parseArguments([
     'web', '--no-open', '--runtime-port', '8101',
   ]), {
@@ -20,6 +20,29 @@ test('parses local web options with configured Python as the default', () => {
     dataDir: undefined, studioPort: 3000, harnessPort: 3080, runtimePort: 8101,
     mediaPort: 18080, sandboxPort: 8090,
   })
+})
+
+test('start requires the named Conda environment by default', async () => {
+  const previousPrefix = process.env.CONDA_PREFIX
+  const previousName = process.env.CONDA_DEFAULT_ENV
+  delete process.env.CONDA_PREFIX
+  delete process.env.CONDA_DEFAULT_ENV
+  const dataDirectory = mkdtempSync(join(tmpdir(), 'video-agent-no-conda-'))
+  const options = parseArguments([
+    'web', '--source-root', fileURLToPath(new URL('../../..', import.meta.url)),
+    '--data-dir', dataDirectory,
+  ])
+  try {
+    await assert.rejects(
+      runLocalWeb(options, fileURLToPath(new URL('..', import.meta.url))),
+      /Conda environment 'cuti-video-agent'.*is not active/,
+    )
+  } finally {
+    if (previousPrefix === undefined) delete process.env.CONDA_PREFIX
+    else process.env.CONDA_PREFIX = previousPrefix
+    if (previousName === undefined) delete process.env.CONDA_DEFAULT_ENV
+    else process.env.CONDA_DEFAULT_ENV = previousName
+  }
 })
 
 test('portable Python is an explicit setup option', () => {

@@ -28,7 +28,7 @@ Video Runtime 使用小型本地异步工具封装保存 Provider 元数据并�
 
 每次运行只有一个规划与上下文压缩责任方。包含 `research.generate` 的已有 Plan 必须依据当前 Capability Catalog 重新规划。图片与视频生成保留有界的 Provider 重试和降级，但不再额外调用模型判断一致性或重写 Prompt。已移除的结构化输出恢复工具不能用于新 Provider 代码；新的叶级集成使用官方 Provider SDK 或确定性逻辑。
 
-源码用户先执行文档中的根构建，再用 `pnpm video:setup` 准备声明的 Python 3.11 环境，最后执行 `pnpm video:local`。启动过程不会安装依赖。
+源码用户先执行文档中的根构建，激活 `cuti-video-agent` Conda 环境，用 `pnpm video:setup` 准备它，最后在该环境中执行 `pnpm video:local`。启动过程不会安装依赖。
 
 ## 验证
 

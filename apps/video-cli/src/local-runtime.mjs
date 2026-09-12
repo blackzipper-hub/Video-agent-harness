@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { homedir, platform, arch } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join, delimiter, relative, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, delimiter, relative, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createRequire } from 'node:module'
@@ -12,6 +12,7 @@ import { x as extractTar } from 'tar'
 const require = createRequire(import.meta.url)
 const PYTHON_RELEASE = '20260901'
 const PYTHON_VERSION = '3.11.16'
+const CONDA_ENVIRONMENT_NAME = 'cuti-video-agent'
 const PYTHON_ASSETS = {
   'win32-x64': ['x86_64-pc-windows-msvc', '6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6'],
   'win32-arm64': ['aarch64-pc-windows-msvc', '3a983c8d8e60ac38653bce3063b1875b8deb9816b4e6f58c0623f537530b2025'],
@@ -143,27 +144,24 @@ function commandWorks(command, args, environment = process.env) {
   return result.status === 0
 }
 
-function findSystemPython(environment = process.env) {
-  const virtualPython = environment.VIRTUAL_ENV
-    ? platform() === 'win32'
-      ? join(environment.VIRTUAL_ENV, 'Scripts', 'python.exe')
-      : join(environment.VIRTUAL_ENV, 'bin', 'python')
-    : undefined
-  const candidates = environment.VIDEO_AGENT_PYTHON
-    ? [environment.VIDEO_AGENT_PYTHON]
-    : platform() === 'win32' ? [virtualPython, 'python', 'py'] : [virtualPython, 'python3', 'python']
-  for (const candidate of candidates) {
-    if (!candidate) continue
-    const args = basename(candidate).toLowerCase() === 'py' ? ['-3.11', '-c', 'import sys; assert sys.version_info[:2] == (3, 11)'] : ['-c', 'import sys; assert sys.version_info[:2] == (3, 11)']
-    if (commandWorks(candidate, args, environment)) return { command: candidate, prefix: basename(candidate).toLowerCase() === 'py' ? ['-3.11'] : [] }
-  }
-  return undefined
+function condaPythonExecutable(root) {
+  return platform() === 'win32' ? join(root, 'python.exe') : join(root, 'bin', 'python')
 }
 
-function requireSystemPython() {
-  const system = findSystemPython()
-  if (!system) throw new Error('Python 3.11 was not found; create and activate a Python 3.11 environment before running setup or start')
-  return system
+function findCondaPython(environment = process.env) {
+  const root = environment.CONDA_PREFIX?.trim()
+  if (!root || environment.CONDA_DEFAULT_ENV !== CONDA_ENVIRONMENT_NAME) return undefined
+  const executable = condaPythonExecutable(root)
+  const args = ['-c', 'import sys; assert sys.version_info[:2] == (3, 11)']
+  return commandWorks(executable, args, environment) ? { command: executable, prefix: [] } : undefined
+}
+
+function requireCondaPython() {
+  const python = findCondaPython()
+  if (!python) {
+    throw new Error(`Conda environment '${CONDA_ENVIRONMENT_NAME}' with Python 3.11 is not active; create it from environment.yml and run 'conda activate ${CONDA_ENVIRONMENT_NAME}'`)
+  }
+  return python
 }
 
 function preparedPortablePython(dataDirectory) {
@@ -173,7 +171,7 @@ function preparedPortablePython(dataDirectory) {
 }
 
 export async function preparePython(dataDirectory, portablePython) {
-  if (!portablePython) return requireSystemPython()
+  if (!portablePython) return requireCondaPython()
   const prepared = preparedPortablePython(dataDirectory)
   if (prepared) return prepared
   const installRoot = join(dataDirectory, `python-${PYTHON_VERSION}`)
@@ -195,7 +193,7 @@ export async function preparePython(dataDirectory, portablePython) {
 }
 
 function requirePreparedPython(dataDirectory, portablePython) {
-  if (!portablePython) return requireSystemPython()
+  if (!portablePython) return requireCondaPython()
   const prepared = preparedPortablePython(dataDirectory)
   if (!prepared) throw new Error('portable Python is not prepared; run the setup command with --portable-python and the same --data-dir')
   return prepared
@@ -210,18 +208,19 @@ function run(command, args, options = {}) {
 function pythonDependencyState(python, layout, dataDirectory) {
   const requirementHash = createHash('sha256').update(readFileSync(layout.requirements)).digest('hex')
   const marker = join(dataDirectory, '.python-requirements-sha256')
-  const ready = existsSync(marker) && readFileSync(marker, 'utf8') === requirementHash
+  const environmentRevision = `${requirementHash}\n${resolve(python.command)}`
+  const ready = existsSync(marker) && readFileSync(marker, 'utf8') === environmentRevision
     && commandWorks(python.command, [...python.prefix, '-c', 'import fastapi,uvicorn,httpx,docker,numpy'])
-  return { marker, requirementHash, ready }
+  return { marker, environmentRevision, ready }
 }
 
 export function preparePythonDependencies(python, layout, dataDirectory) {
-  const { marker, requirementHash, ready } = pythonDependencyState(python, layout, dataDirectory)
+  const { marker, environmentRevision, ready } = pythonDependencyState(python, layout, dataDirectory)
   if (ready) return
   console.log('video-agent-harness: installing Python service dependencies into the configured environment')
   run(python.command, [...python.prefix, '-m', 'ensurepip', '--upgrade'])
   run(python.command, [...python.prefix, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', layout.requirements])
-  writeFileSync(marker, requirementHash)
+  writeFileSync(marker, environmentRevision)
 }
 
 function requirePreparedPythonDependencies(python, layout, dataDirectory) {
@@ -489,14 +488,14 @@ export async function setupLocalEnvironment(options, packageRoot) {
 export async function doctor(options, packageRoot) {
   const layout = resolveLayout(options, packageRoot)
   const dataDirectory = options.dataDir || defaultDataDirectory()
-  const system = findSystemPython()
+  const conda = findCondaPython()
   const portable = preparedPortablePython(dataDirectory)
-  const selected = options.portablePython ? portable : system
+  const selected = options.portablePython ? portable : conda
   const dependenciesReady = selected ? pythonDependencyState(selected, layout, dataDirectory).ready : false
   const rows = [
     ['Node.js', process.version, true],
     ['Portable Python', pythonExecutable(join(dataDirectory, `python-${PYTHON_VERSION}`)), Boolean(portable)],
-    ['System Python 3.11', system?.command || 'not found', Boolean(system)],
+    [`Active Conda environment (${CONDA_ENVIRONMENT_NAME})`, conda?.command || 'not active', Boolean(conda)],
     ['Python service dependencies', layout.requirements, dependenciesReady],
     ['Local FFmpeg/FFprobe', join(dataDirectory, 'media-tools'), Boolean(mediaToolPaths(dataDirectory).ffmpeg && mediaToolPaths(dataDirectory).ffprobe)],
     ['Video Runtime', layout.videoRuntime, existsSync(layout.videoRuntime)],

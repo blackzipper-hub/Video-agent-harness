@@ -37,7 +37,7 @@ This is the release acceptance path for the open-source branch. The setup comman
 - Git.
 - Node.js `22.19+` or `24+`.
 - pnpm `11.x`. Run `pnpm --version`; if pnpm is missing, run `corepack enable`.
-- Python `3.11`.
+- Conda (Miniconda, Miniforge, or Anaconda).
 - Internet access during environment setup so the setup command can install Python packages and separately licensed FFmpeg/FFprobe tools.
 
 ### 1. Clone the open-source branch
@@ -92,23 +92,23 @@ The root build also produces the Video Studio bundle required by the local launc
 
 ### 4. Prepare the local environment
 
-Create and activate a Python 3.11 virtual environment. On macOS or Linux:
+Create the repository's named Conda environment from the committed environment definition, then activate it. The same commands apply on Windows, macOS, and Linux:
 
 ```sh
-python3.11 -m venv .venv
-source .venv/bin/activate
+conda env create --file environment.yml
+conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
-On Windows PowerShell:
+If the environment already exists, synchronize its base Python and pip constraints before rerunning setup:
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```sh
+conda env update --file environment.yml --prune
+conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
-The setup command installs the pinned Python service dependencies into the active environment and installs FFmpeg/FFprobe under `.video-agent-harness-data`. It does not start any service. Run it again after the Python requirements change or when using a new data directory.
+The Conda definition owns the environment name, Python 3.11, and pip. The setup command verifies that this exact Conda environment is active, installs the pinned Python service dependencies into it, and installs FFmpeg/FFprobe under `.video-agent-harness-data`. It does not start any service. Run it again after the Python requirements change or when using a new data directory.
 
 To let setup download a checksum-verified portable Python instead of using an existing Python environment, pass `--portable-python`. This is an explicit alternative, not the default:
 
@@ -118,7 +118,7 @@ pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
 
 ### 5. Start the complete local stack
 
-Keep the Python environment activated, then run:
+Keep the `cuti-video-agent` Conda environment activated, then run:
 
 ```sh
 pnpm video:local -- --data-dir .video-agent-harness-data
@@ -136,7 +136,7 @@ When the terminal prints `Video Agent Harness is ready`, open [http://127.0.0.1:
 
 ### 6. Verify the running stack
 
-In a second terminal, activate the same Python environment and run from the repository root:
+In a second terminal, run `conda activate cuti-video-agent`, then run from the repository root:
 
 ```sh
 pnpm video:doctor -- --data-dir .video-agent-harness-data

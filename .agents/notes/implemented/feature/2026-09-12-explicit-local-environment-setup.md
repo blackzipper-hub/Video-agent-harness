@@ -10,11 +10,11 @@ The local start command downloaded a Python distribution and installed Python an
 
 ## Decision
 
-Local source and npm launches use an existing Python 3.11 environment by default. The explicit `setup` command installs the pinned Python service requirements into that environment, installs FFmpeg and FFprobe in the selected data directory, and records the requirements revision there. The `web` command only accepts a Python environment whose recorded requirements are current and a data directory whose media tools are present; otherwise it exits with a setup instruction before starting services.
+Local source and npm launches require the named `cuti-video-agent` Conda environment with Python 3.11 by default. The repository commits `environment.yml` to create that base environment consistently. The explicit `setup` command verifies the active Conda identity, installs the pinned Python service requirements into it, installs FFmpeg and FFprobe in the selected data directory, and records both the requirements revision and interpreter path there. The `web` command only accepts the same active environment with current recorded requirements and a data directory whose media tools are present; otherwise it exits with a setup instruction before starting services.
 
 Portable Python remains an opt-in path. `setup --portable-python` downloads and prepares the pinned distribution, and `web --portable-python` selects that prepared interpreter. Startup never downloads the portable distribution, even when the option is present.
 
-The Python resolver prioritizes `VIDEO_AGENT_PYTHON`, then an activated virtual environment, then compatible Python commands on `PATH`. Every selected interpreter must report Python 3.11.
+The default resolver uses `CONDA_PREFIX` only when `CONDA_DEFAULT_ENV` is `cuti-video-agent`, resolves Python directly inside that prefix, and verifies Python 3.11. It does not fall back to an unrelated virtual environment or a global interpreter on `PATH`.
 
 ## Alternatives considered
 
@@ -26,8 +26,8 @@ The Python resolver prioritizes `VIDEO_AGENT_PYTHON`, then an activated virtual 
 
 ## Consequences
 
-A new checkout requires Python 3.11 environment activation followed by one setup command before startup. Requirements changes and new data directories require setup again. Startup works without installation side effects or network access after preparation, while portable users pass the same explicit option to both setup and startup.
+A new checkout creates the environment from `environment.yml`, activates `cuti-video-agent`, and runs one setup command before startup. Requirements changes and new data directories require setup again. Each new terminal activates the same named environment before startup. Startup works without installation side effects or network access after preparation, while portable users pass the same explicit option to both setup and startup.
 
 ## Verification
 
-CLI parsing tests assert that configured Python is the default and portable Python requires an explicit setup option. A local-runtime regression test starts against an empty portable data directory, checks the setup diagnostic, and verifies that startup writes no download or installation files. An isolated Python 3.11 virtual-environment smoke run prepared the environment and confirmed through `doctor` that the interpreter, service requirements, media tools, service sources, and Studio build were ready.
+CLI parsing tests assert that Conda is the default and portable Python requires an explicit setup option. A local-runtime regression test verifies that startup rejects a missing named Conda environment, while another starts against an empty portable data directory, checks the setup diagnostic, and verifies that startup writes no download or installation files. The launcher tests can run without Conda installed; a real Conda environment smoke remains an integration check on a Conda-equipped host.

@@ -10,11 +10,11 @@ Status: implemented
 
 ## 决策
 
-本地源码和 npm 启动默认使用已有的 Python 3.11 环境。显式 `setup` 命令负责把固定版本的 Python 服务 requirements 安装进该环境，在指定数据目录安装 FFmpeg 和 FFprobe，并在其中记录 requirements 版本。`web` 命令只接受 requirements 记录仍为最新的 Python 环境和已经包含媒体工具的数据目录；条件不满足时，它会在启动任何服务前退出并提示执行环境准备。
+本地源码和 npm 启动默认要求名为 `cuti-video-agent`、使用 Python 3.11 的 Conda 环境。仓库提交 `environment.yml`，以一致方式创建基础环境。显式 `setup` 命令验证当前激活的 Conda 身份，把固定版本的 Python 服务 requirements 安装进去，在指定数据目录安装 FFmpeg 和 FFprobe，并在其中同时记录 requirements 版本和解释器路径。`web` 命令只接受同一个已激活环境、仍为最新的 requirements 记录以及已经包含媒体工具的数据目录；条件不满足时，它会在启动任何服务前退出并提示执行环境准备。
 
 便携 Python 作为自愿选择的路径保留。`setup --portable-python` 下载并准备固定版本的发行版，`web --portable-python` 选择已经准备好的解释器。即使提供该选项，启动过程也绝不下载便携发行版。
 
-Python 解析器依次选择 `VIDEO_AGENT_PYTHON`、已激活虚拟环境中的解释器，以及 `PATH` 上兼容的 Python 命令。每个被选中的解释器都必须报告 Python 3.11。
+默认解析器只在 `CONDA_DEFAULT_ENV` 为 `cuti-video-agent` 时使用 `CONDA_PREFIX`，直接解析该前缀内的 Python，并验证其为 Python 3.11。它不会回退到无关虚拟环境或 `PATH` 上的全局解释器。
 
 ## 考虑过的替代方案
 
@@ -26,8 +26,8 @@ Python 解析器依次选择 `VIDEO_AGENT_PYTHON`、已激活虚拟环境中的�
 
 ## 影响
 
-新的检出目录需要先激活 Python 3.11 环境并执行一次环境准备命令，再启动服务。requirements 变化或改用新的数据目录后必须重新准备。环境准备完成后，启动过程不再产生安装副作用，也不需要网络；便携模式用户需要在准备与启动时传入同一个显式选项。
+新的检出目录需要根据 `environment.yml` 创建环境，激活 `cuti-video-agent`，再执行一次环境准备命令并启动服务。requirements 变化或改用新的数据目录后必须重新准备；每个新终端都要在启动前激活同一个具名环境。环境准备完成后，启动过程不再产生安装副作用，也不需要网络；便携模式用户需要在准备与启动时传入同一个显式选项。
 
 ## 验证
 
-CLI 参数测试确认已有 Python 是默认路径，便携 Python 必须通过环境准备选项显式选择。本地运行时回归测试针对空的便携数据目录执行启动，检查环境准备诊断，并确认启动不会写入任何下载或安装文件。隔离的 Python 3.11 虚拟环境冒烟运行已完成环境准备，并通过 `doctor` 确认解释器、服务 requirements、媒体工具、服务源码与 Studio 构建均已就绪。
+CLI 参数测试确认 Conda 是默认路径，便携 Python 必须通过环境准备选项显式选择。一项本地运行时回归测试确认缺少具名 Conda 环境时启动会被拒绝；另一项针对空的便携数据目录执行启动，检查环境准备诊断，并确认启动不会写入任何下载或安装文件。启动器测试无需安装 Conda 即可执行；真实 Conda 环境冒烟测试留给装有 Conda 的主机完成。

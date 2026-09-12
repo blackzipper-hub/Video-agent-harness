@@ -28,7 +28,7 @@ The source launcher builds Video Studio as part of the root build. Its explicit 
 
 Runs have one owner for planning and context compression. Existing plans that name `research.generate` must be replanned against the current capability catalog. Image and video generation retain bounded provider retry and fallback but no longer spend additional model calls judging consistency or rewriting prompts. The removed structured-output recovery utilities are unavailable to new provider code; new leaf integrations use official provider SDKs or deterministic logic.
 
-Source users run the documented root build, prepare a declared Python 3.11 environment with `pnpm video:setup`, and then start with `pnpm video:local`. Startup performs no dependency installation.
+Source users run the documented root build, activate the `cuti-video-agent` Conda environment, prepare it with `pnpm video:setup`, and then start with `pnpm video:local` in that environment. Startup performs no dependency installation.
 
 ## Verification
 
