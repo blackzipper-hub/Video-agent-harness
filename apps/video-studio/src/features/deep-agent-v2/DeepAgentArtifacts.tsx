@@ -38,19 +38,40 @@ function formatTimestamp(seconds: number): string {
   return `${mins}:${displayValue(secs).padStart(2, '0')}.${displayValue(frac).padStart(2, '0')}`
 }
 
+function useWhenVisible(eager = false) {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(eager)
+  useEffect(() => {
+    if (eager || visible) return
+    const node = hostRef.current
+    if (!node) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return
+      setVisible(true)
+      observer.disconnect()
+    }, { rootMargin: '240px 0px' })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [eager, visible])
+  return { hostRef, visible }
+}
+
 function VideoFramePicker({
   mediaUri,
   title,
   extracting,
+  eager = false,
   onExtract,
 }: {
   mediaUri: string
   title?: string
   extracting: boolean
+  eager?: boolean
   onExtract: (timestamp: number) => void | Promise<void>
 }) {
   const { t } = useLanguage()
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const { hostRef, visible } = useWhenVisible(eager)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -73,7 +94,11 @@ function VideoFramePicker({
 
   return (
     <div className="space-y-3">
-      <div className="flex max-h-[calc(100dvh-14rem)] w-full min-w-0 items-center justify-center overflow-hidden rounded-lg bg-black">
+      <div
+        ref={hostRef}
+        className="flex min-h-[12rem] max-h-[calc(100dvh-14rem)] w-full min-w-0 items-center justify-center overflow-hidden rounded-lg bg-black"
+      >
+        {visible ? (
         <video
           ref={videoRef}
           key={mediaUri}
@@ -90,6 +115,9 @@ function VideoFramePicker({
           onSeeked={capturePreview}
           onPause={capturePreview}
         />
+        ) : (
+          <Film className="h-8 w-8 text-white/40" />
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="font-mono text-[11px]">
@@ -798,11 +826,9 @@ export function DeepAgentArtifacts({
       'video_spec.revised', 'plan.revised',
     ]
     eventNames.forEach((name) =>{  events.addEventListener(name, scheduleLoad) })
-    const interval = window.setInterval(() => void load(), 10000)
     return () => {
       active = false
       window.clearTimeout(debounceTimer)
-      window.clearInterval(interval)
       eventNames.forEach((name) =>{  events.removeEventListener(name, scheduleLoad) })
       events.close()
     }
@@ -1092,6 +1118,8 @@ export function DeepAgentArtifacts({
                       <img
                         src={file.url}
                         alt={file.filename || t('da.workspace.productReference')}
+                        loading="lazy"
+                        decoding="async"
                         className="mx-auto block h-auto max-h-[min(420px,calc(100dvh-14rem))] max-w-full rounded-lg object-contain"
                       />
                     </CardContent>
@@ -1138,6 +1166,7 @@ export function DeepAgentArtifacts({
                     <VideoFramePicker
                       mediaUri={latestMediaUri}
                       title={latestMediaArtifact.title || latestMediaArtifact.type}
+                      eager
                       extracting={extractingKey === `latest-${latestMediaArtifact.id}`}
                       onExtract={timestamp => handleExtractFrame({
                         key: `latest-${latestMediaArtifact.id}`,
@@ -1150,6 +1179,7 @@ export function DeepAgentArtifacts({
                     <img
                       src={latestMediaUri}
                       alt={artifactTitle(latestMediaArtifact.title, latestMediaArtifact.type, t) || t('da.workspace.latestGeneratedImage')}
+                      decoding="async"
                       className="mx-auto block h-auto max-h-[calc(100dvh-14rem)] max-w-full rounded-lg object-contain"
                     />
                   )}
@@ -1450,6 +1480,8 @@ export function DeepAgentArtifacts({
                           <img
                             src={mediaUri}
                             alt={title || t('da.workspace.generatedImage')}
+                            loading="lazy"
+                            decoding="async"
                             className="mx-auto block h-auto max-h-[min(360px,calc(100dvh-14rem))] max-w-full rounded-lg object-contain"
                           />
                         ) : (
@@ -1599,7 +1631,7 @@ export function DeepAgentArtifacts({
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {mediaUri ? (
-                        <audio src={mediaUri} controls className="w-full" />
+                        <audio src={mediaUri} controls preload="none" className="w-full" />
                       ) : (
                         <p className="text-xs text-muted-foreground">{t('da.workspace.audioMissing')}</p>
                       )}
@@ -1644,7 +1676,7 @@ export function DeepAgentArtifacts({
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {mediaUri ? (
-                        <audio src={mediaUri} controls className="w-full" />
+                        <audio src={mediaUri} controls preload="none" className="w-full" />
                       ) : null}
                       <AudioAnalysisDetails artifact={artifact} />
                     </CardContent>
