@@ -40,16 +40,18 @@ This is the release acceptance path for the open-source branch. One command star
 ### 1. Clone the open-source branch
 
 ```sh
-git clone --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
+git clone --depth 1 --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
 ```
 
 The HTTPS command works anonymously after the repository visibility is set to **Public**. Before public release, an invited collaborator with a configured GitHub SSH key can use:
 
 ```sh
-git clone --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
+git clone --depth 1 --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
 ```
+
+The shallow clone contains everything needed to build and run. Contributors who later need the complete history can run `git fetch --unshallow`.
 
 ### 2. Configure provider keys
 

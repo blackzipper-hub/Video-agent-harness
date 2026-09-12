@@ -40,16 +40,18 @@ Provider / Workflow / Validator / Media plugins
 ### 1. 克隆开源分支
 
 ```sh
-git clone --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
+git clone --depth 1 --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
 ```
 
 仓库可见性设为 **Public** 后，任何人都能匿名执行上述 HTTPS 命令。正式公开前，已获邀请且配置了 GitHub SSH Key 的协作者可以使用：
 
 ```sh
-git clone --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
+git clone --depth 1 --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
 ```
+
+浅克隆已包含构建和运行所需的全部内容；后续确实需要完整历史时，可以执行 `git fetch --unshallow`。
 
 ### 2. 配置 Provider Key
 
