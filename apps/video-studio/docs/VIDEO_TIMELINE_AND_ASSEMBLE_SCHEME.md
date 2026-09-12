@@ -8,7 +8,7 @@
 
 | 方式 | 触发者 | 代码/路径 | 说明 |
 |------|--------|------------|------|
-| **流程内自动** | LangGraph 跑到汇聚边 | `video_assembly` 节点 → `video_assembly_node` → `execute_video_merge_core` | 不经过 HTTP 的 `video-assembly`；在 **同一 thread、同一 state** 上从 DB 拉全量资源。 |
+| **流程内自动** | Runtime 到达汇聚步骤 | `video_assembly` 步骤 → `execute_video_merge_core` | 不经过 HTTP 的 `video-assembly`；在 **同一 thread、同一 state** 上从 DB 拉全量资源。 |
 | **用户主动** | 前端/管理端调 API | `POST /agent-router/video-editing/video-assembly` | `VideoAssemblyRequest`：`thread_id` 必填；`videos`（按 shot 选版 + 可先 **sync**）；`segment_versions`（按 segment 选版，偏 audio-driven）。 |
 
 **注意**
@@ -37,7 +37,7 @@
 
 | 维度 | 主流程 | Regenerate（关键帧/镜头） |
 |------|--------|---------------------------|
-| 入口 | LangGraph 节点内排队生成 | `task_enqueue_service.execute_regenerate_keyframes` / `execute_regenerate_videos` 等，新建 **`conversation_run`**，类型为 REGENERATE_* |
+| 入口 | Runtime 步骤内排队生成 | `task_enqueue_service.execute_regenerate_keyframes` / `execute_regenerate_videos` 等，新建 **`conversation_run`**，类型为 REGENERATE_* |
 | 写库 | 正常 workflow 写版本 | **追加新版本**；产品约定：**不自动**把新结果设为 current（可依赖 `select_version`） |
 | 结束动作 | 继续走图、直到 `video_assembly` | **不自动**接一段「再 assemble」；需用户/助手再调 **显式** `video-assembly` 或等下一轮全片流程。 |
 | 与终片关系 | 自然产出 `video_assembly` 与 `VideoAssembly` 记录 | 只更新某 shot 的**素材版本**；**终片**要么旧、要么再点一次合成/更新视频。 |

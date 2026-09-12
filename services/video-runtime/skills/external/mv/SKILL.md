@@ -2,8 +2,8 @@
 name: mv
 description: >-
   Workflow: MV / 歌曲卡点 / 角色唱这首歌。
-  参考调研 → 听歌分析并切窗切段 → 定妆出图 → 分段出画 → 拼接 → 叠回原曲 → 词上成片。
-  能力顺序：research.generate、suno.generate、media.audio_analyze、media.audio_cut、
+  参考搜索 → 听歌分析并切窗切段 → 定妆出图 → 分段出画 → 拼接 → 叠回原曲 → 词上成片。
+  能力顺序：suno.generate、media.audio_analyze、media.audio_cut、
   atomic.image.generate、api.provider.generate、media.concat、media.mix_audio、
   media.hyperframes_caption。
   触发词：MV、歌曲、卡点、角色唱这首歌、beat sync、music video、$mv.
@@ -25,7 +25,6 @@ metadata:
           instruction: Plan shots and captions from the real duration, beats, lyrics, and cut window.
     entrypoints: [text, image, audio, video]
     pipeline:
-      - research.generate
       - suno.generate
       - media.audio_analyze
       - media.audio_cut
@@ -38,7 +37,6 @@ metadata:
     requires_keyframe: false
     allowed_capabilities:
       - actions.suggest
-      - research.generate
       - suno.generate
       - atomic.image.generate
       - api.provider.generate
@@ -76,11 +74,11 @@ metadata:
 
 ## 能力与工具
 
-- **看源**：看用户文本和这次请求附上的源媒体。把看见的写进 `ProjectIntent.brief`：用户要什么，源里是什么。后面搜索、设定图、出画用这份 brief。`research.generate` 的 `user_input` 从 brief 取已经写成字的主语。
+- **看源**：看用户文本和这次请求附上的源媒体。把看见的写进 `ProjectIntent.brief`：用户要什么，源里是什么。后面搜索、设定图、出画用这份 brief。
 - **创意构思**：从 brief 或一首歌发散多个创意方向，挑最有记忆点的展开
 - **文案扩写**：把模糊需求扩成完整中文提示词，融入运镜/光影/节奏/风格
 - **web_search**：搜当下流行 prompt 写法，借鉴句式融入文案
-- **参考调研**：看源之后才用 `research.generate` 搜外部参考（方法见 `video_skill_load("video-research")`）。`user_input` 从 brief 取。三条里走质量和效果更好的那条。用户明确不要搜，就跳过。
+- **参考调研**：看源之后由 Harness 直接用 `web_search` 搜外部参考（方法见 `video_skill_load("video-research")`）。三条里走质量和效果更好的那条。用户明确不要搜，就跳过。
 - **词库选词**：从 [reference.md](reference.md) 的镜头语言/风格/导演/作画词库中取词，不自编
 - **图片诊断**：检查分辨率(300–6000px)、宽高比(0.4–2.5)、构图问题；发现运镜风险时主动提示
 - **搭配验证**：判断「图 + prompt + 运镜 + 这段音乐（情绪、人声）」是否协调，不搭就局部修改。有搜过参考，也看看跟那条路搭不搭，不搭就改。
@@ -160,7 +158,7 @@ metadata:
 
 ## 搜索建议
 
-对着 brief、用户的话、歌去搜。用户明确不要搜，就跳过。方法论见 `video_skill_load("video-research")`。`research.generate` 的 `user_input` 从 brief 取。
+对着 brief、用户的话、歌去搜。用户明确不要搜，就跳过。方法论见 `video_skill_load("video-research")`。搜索在当前 Harness 循环内完成，不创建额外任务。
 
 只想补一两句 prompt 句式时直接 `web_search`：
 
@@ -175,7 +173,7 @@ metadata:
 
 ## 怎么拍
 
-1. **先看源，再决定要不要搜。** 看源进 brief。然后才 `research.generate`（可跳过）。三条里走质量和效果更好的那条，后面设定图和每段 prompt 用上。
+1. **先看源，再决定要不要搜。** 看源进 brief，然后在当前 Harness 循环内直接搜索（可跳过）。三条里走质量和效果更好的那条，后面设定图和每段 prompt 用上。
 2. **先有歌。** 用户已经丢了音频，直接听它。
 
    没歌就出一首，交给 `suno.generate`。先 `video_skill_load("suno-song")`，按那条 skill 走词和 Style Box。唱不唱、要不要词、描述还是填词，由你定。唱的人按班子走，落在 `tags` 起首和 `vocal_gender`。字段看这条 capability。搜过参考的话，曲风和情绪取你选的那条方向的 `mood_direction`。

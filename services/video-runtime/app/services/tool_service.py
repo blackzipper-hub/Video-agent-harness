@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import logging
 from langsmith import get_current_run_tree
 
-from langchain_core.tools import BaseTool
+from app.tools.runtime import BaseTool
 
 from ..models.user_options import (
     ImageGenerationTool,
@@ -237,7 +237,7 @@ Use photographic and cinematic language to control the composition. Terms like w
 @dataclass
 class ToolInfo:
     """单个工具信息"""
-    tool: BaseTool  # 工具对象（LangChain Tool）
+    tool: BaseTool  # 工具对象
     tool_name: str  # 工具名称（tool.name）
     tool_type: ToolType  # 工具类型（融合的）
     provider: ToolProvider  # 提供商
@@ -2034,11 +2034,10 @@ class ToolService:
 
     @staticmethod
     def get_credit_callback(config=None):
-        """从 RunnableConfig 中提取 CreditCheckCallbackHandler（如果存在）。
+        """从显式运行配置中提取 CreditCheckCallbackHandler（如果存在）。
         
         供 tool 内部在 calculate_cost 之后调用 callback.add_tool_cost()。
-        config 优先从参数取；若为 None，则尝试从 LangChain 当前执行上下文的
-        var_child_runnable_config 中取（适用于没有 runtime 参数的 tool）。
+        没有显式配置时返回 None。
         """
         try:
             from ..callbacks.credit_check_callback import CreditCheckCallbackHandler
@@ -2059,14 +2058,7 @@ class ToolService:
                             return c
                 return None
 
-            result = _extract(config)
-            if result is not None:
-                return result
-
-            # fallback：从 LangChain 当前执行上下文取
-            from langchain_core.runnables.config import var_child_runnable_config
-            ctx_config = var_child_runnable_config.get()
-            return _extract(ctx_config)
+            return _extract(config)
         except Exception:
             pass
         return None

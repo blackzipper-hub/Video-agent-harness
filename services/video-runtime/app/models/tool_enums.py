@@ -52,6 +52,8 @@ class ToolType(str, Enum):
     每个枚举值对应一个具体的模型名称
     """
     # ==================== 图像生成工具 ====================
+    GEMINI_2_5_FLASH = "gemini-2.5-flash"
+
     # Nano Banana (Google Gemini, via WaveSpeed)
     GEMINI_2_5_FLASH_IMAGE = "gemini-2.5-flash-image"
     GEMINI_3_PRO_IMAGE_PREVIEW = "gemini-3-pro-image-preview"
@@ -115,10 +117,10 @@ class ToolType(str, Enum):
     LIPSYNC_2_PRO = "sync/lipsync-2-pro"
 
 
-# ==================== Tool 函数名（LangChain @tool 注册名） ====================
+# ==================== Tool 函数名 ====================
 
 class ToolName(str, Enum):
-    """LangChain @tool 注册的函数名枚举。
+    """运行时注册的工具函数名枚举。
     
     每个值对应一个 @tool("xxx") 装饰器里的字符串，
     是 on_tool_end 的 kwargs["name"] 里拿到的名字。

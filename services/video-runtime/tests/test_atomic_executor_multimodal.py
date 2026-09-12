@@ -12,20 +12,16 @@ from app.chat.v2.models import AgentRun, ArtifactVersion, InputFile, Task
 async def test_atomic_text_receives_run_uploaded_image(monkeypatch):
     captured = {}
 
-    class FakeModel:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def ainvoke(self, messages):
-            captured["messages"] = messages
-            return SimpleNamespace(content="product facts")
+    async def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return "product facts"
 
     async def fake_inline(url):
         captured["source_url"] = url
         return "data:image/webp;base64,AAAA"
 
     monkeypatch.setattr(
-        "app.llm.openai_failover.FailoverChatOpenAI", FakeModel,
+        "app.llm.openai_text.generate_openai_text", fake_generate,
     )
     monkeypatch.setattr(
         "app.utils.file_utils.inline_local_image_url_for_llm", fake_inline,
@@ -60,7 +56,7 @@ async def test_atomic_text_receives_run_uploaded_image(monkeypatch):
         idempotency_key="attempt-product",
     )
 
-    content = captured["messages"][0].content
+    content = captured["content"]
     assert captured["source_url"].endswith("/files/images/product.webp")
     assert content[0] == {
         "type": "text", "text": "Inspect the supplied product image.",
@@ -73,19 +69,15 @@ async def test_atomic_text_receives_run_uploaded_image(monkeypatch):
 async def test_atomic_text_merges_reference_image_aliases_without_duplicates(monkeypatch):
     captured = {}
 
-    class FakeModel:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def ainvoke(self, messages):
-            captured["content"] = messages[0].content
-            return SimpleNamespace(content="ok")
+    async def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return "ok"
 
     async def fake_inline(url):
         return url
 
     monkeypatch.setattr(
-        "app.llm.openai_failover.FailoverChatOpenAI", FakeModel,
+        "app.llm.openai_text.generate_openai_text", fake_generate,
     )
     monkeypatch.setattr(
         "app.utils.file_utils.inline_local_image_url_for_llm", fake_inline,
@@ -130,15 +122,12 @@ async def test_atomic_text_merges_reference_image_aliases_without_duplicates(mon
 async def test_atomic_text_ignores_video_model_and_uses_configured_llm(monkeypatch):
     captured = {}
 
-    class FakeModel:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        async def ainvoke(self, messages):
-            return SimpleNamespace(content="production blueprint")
+    async def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return "production blueprint"
 
     monkeypatch.setattr(
-        "app.llm.openai_failover.FailoverChatOpenAI", FakeModel,
+        "app.llm.openai_text.generate_openai_text", fake_generate,
     )
     monkeypatch.setattr(
         "app.chat.v2.atomic_executor.get_settings",
@@ -179,7 +168,6 @@ async def test_atomic_text_ignores_video_model_and_uses_configured_llm(monkeypat
 
     assert captured["model"] == "gpt-5.6-terra"
     assert captured["timeout"] == 900
-    assert captured["streaming"] is True
     assert artifact["metadata"]["model"] == "gpt-5.6-terra"
     assert artifact["metadata"]["ignored_non_text_model"] == "seedance-2.5"
 

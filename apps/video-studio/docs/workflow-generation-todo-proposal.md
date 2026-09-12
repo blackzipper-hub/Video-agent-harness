@@ -101,7 +101,7 @@
 
 ### 7.1 目标
 
-- **后端**（VideoAgent / LangGraph 或 router）输出**可版本化**的 **本 run 的步骤路径 + 每步粗粒度状态**。
+- **后端 Runtime 或 router** 输出**可版本化**的 **本 run 的步骤路径 + 每步粗粒度状态**。
 - **前端**根据该结构渲染 Sticky Todo；**不依赖**前端扫全量 `event_type` 来「猜」顺序（可作兜底）。
 
 ### 7.2 方案 A / B / C 对比（含「每会话 workflow 不同」与「少暴露信息」）
@@ -124,7 +124,7 @@
 **少暴露信息（你关心的点）**
 
 - 对外只约定：**`workflow_version` + 有序 `path[]`**，每项仅 **展示用 `id`、i18n `label_key`、粗 `state`、可选 `progress`**。
-- **不要**放进 payload：图数据库 id、LangGraph 内部节点名、prompt、工具参数、可反推业务的敏感字段。
+- **不要**放进 payload：内部执行节点名、prompt、工具参数、可反推业务的敏感字段。
 - **`current_node_id` 不必下发**：前端用 **path 顺序 + 每步 `state`** 即可推导「进行到哪」——例如第一个 `running`，或第一个非 `completed`/`skipped`/`failed` 的节点；若全完成则全部打勾。**只定「path + 各步状态」就够用。**
 
 ### 7.3 字段释义（`id` / `label_key` / `state` / `progress`）

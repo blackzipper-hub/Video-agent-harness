@@ -132,7 +132,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`supports-color`](https://github.com/chalk/supports-color) | MIT |
 | [`tailwind-merge`](https://github.com/dcastil/tailwind-merge) | MIT |
 | [`tailwindcss-animate`](https://github.com/jamiebuilds/tailwindcss-animate) | MIT |
-| [`tar`](https://github.com/isaacs/node-tar) | ISC |
+| [`tar`](https://github.com/isaacs/node-tar) | BlueOak-1.0.0 |
 | [`tsx`](https://github.com/privatenumber/tsx) | MIT |
 | [`turndown`](https://github.com/mixmark-io/turndown) | MIT |
 | [`typescript`](https://github.com/microsoft/TypeScript) | Apache-2.0 |

@@ -271,9 +271,8 @@ class Settings(BaseSettings):
         description="智能剪辑总开关：False 时 gate_after_music interrupt 不带 smart_clip payload",
     )
 
-    # ==================== Stage runtime（deep agent + 本地 artifact JSON） ====================
-    # Creative LLM stages always use create_deep_agent + skills (no VIA_DEEP_AGENT flags).
-    # 详见 docs/stage-artifact-layout.md、stage_runtime/registry.py。媒体仍走 S3/CDN。
+    # ==================== Runtime workspace ====================
+    # 本地运行数据与媒体缓存目录；持久媒体仍走 S3/CDN。
     STAGE_ARTIFACT_ROOT: str = Field(
         default="data/run_workspaces",
         description="Per-run workspace root relative to services/agent (not under kit/). Absolute paths allowed.",

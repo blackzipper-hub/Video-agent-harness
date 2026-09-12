@@ -358,46 +358,6 @@ class ContinuityValidatorPlugin(BaseVideoPlugin):
             except BaseException as exc:
                 issues.append(f"final video probe failed: {exc}")
 
-        llm_validation = (
-            os.getenv("VIDEO_CONTINUITY_LLM_ENABLED", "").lower() in {"1", "true", "yes"}
-        )
-        if not issues and artifact.type == "video_clip" and llm_validation:
-            resolved = artifact.metadata.get("resolved_generation_parameters") or parameters
-            image_urls = list(resolved.get("image_urls") or resolved.get("images") or [])
-            continuity_image_url = resolved.get("start_image_url") or (
-                image_urls[0] if image_urls else None
-            )
-            if continuity_image_url:
-                try:
-                    prompt = str(resolved.get("prompt") or parameters.get("prompt") or "")
-                    from app.tools.video.video_consistency import check_video_consistency_llm
-                    checked = await check_video_consistency_llm(
-                        str(continuity_image_url), str(artifact.uri), prompt,
-                        character_ref_image_urls=image_urls,
-                    )
-                    metadata = {
-                        "mode": "cuti-video-consistency",
-                        "result": checked.model_dump(mode="json"),
-                    }
-                    reason = str(checked.reason_overall or "").strip()
-                    fail_open_result = checked.passed and any(
-                        marker in reason.casefold()
-                        for marker in (
-                            "默认通过", "skip validation", "skipped validation",
-                            "validation skipped", "validation error",
-                        )
-                    )
-                    if fail_open_result:
-                        issues.append(
-                            "required visual consistency verification is incomplete: "
-                            + (reason or "validator returned a fail-open result")
-                        )
-                    elif not checked.passed:
-                        issues.append(
-                            checked.reason_overall or "video continuity check failed"
-                        )
-                except BaseException as exc:
-                    issues.append(f"required visual consistency verification is incomplete: {exc}")
         return [ValidationResult(
             project_id=artifact.project_id,
             build_id=context.build_id or "",

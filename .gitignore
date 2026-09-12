@@ -74,6 +74,7 @@ logs/
 data/
 .local-media/
 .local-state/
+.video-agent-harness-data/
 tmp-*.png
 deploy/.env.__probe__
 deploy/harness-test/

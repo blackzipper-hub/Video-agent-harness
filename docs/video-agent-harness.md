@@ -56,7 +56,7 @@ The imported `/chat-v1/service/v2` and `/chat-v1/service/studio` APIs remain ava
 
 ## Runtime selection
 
-`VIDEO_AGENT_BACKEND` accepts only `deepseek`. Product startup mounts the DeepSeek compatibility BFF, loads the configured Video Plugins and Skill Workflows, and submits structured Workflow or Rebuild plans to `VideoBuildRuntime`; it never starts the imported DeepAgents/LangGraph coordinator as a second planner. `VIDEO_INCREMENTAL_ENGINE_ENABLED` remains a compatibility deployment control for the normalized project repository and defaults to enabled; plugin dispatch is not optional on the new path.
+`VIDEO_AGENT_BACKEND` accepts only `deepseek`. Product startup mounts the DeepSeek compatibility BFF, loads the configured Video Plugins and Skill Workflows, and submits structured Workflow or Rebuild plans to `VideoBuildRuntime`. The DeepSeek Harness is the only planning loop; provider tools do not start a second planner. `VIDEO_INCREMENTAL_ENGINE_ENABLED` remains a compatibility deployment control for the normalized project repository and defaults to enabled; plugin dispatch is not optional on the new path.
 
 Imported Cuti media services still provide Provider and media implementation code. Their Skill-backed prompts resolve through the same process-owned catalog rather than reading stage directories directly.
 

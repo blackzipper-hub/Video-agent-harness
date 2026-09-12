@@ -5,7 +5,6 @@
 跑：
   conda run -n cuti-video-local pytest tests/services/test_music_smart_clip_service.py -v -s
 """
-import asyncio
 from typing import Any
 import pytest
 
@@ -57,8 +56,8 @@ async def test_passthrough_when_audio_short_enough():
 
 
 @pytest.mark.asyncio
-async def test_heuristic_section_picks_closest_section_combo(monkeypatch):
-    """无 AI 走 heuristic_section：sections 累加最接近 target 处停。"""
+async def test_heuristic_section_picks_closest_section_combo():
+    """heuristic_section 在 sections 累加最接近 target 处停。"""
     sections = [
         {"section_type": "intro", "start_time": 0.0, "end_time": 8.0,
          "section_emotion": "warm", "musical_features": "soft bells"},
@@ -70,15 +69,6 @@ async def test_heuristic_section_picks_closest_section_combo(monkeypatch):
          "section_emotion": "soft", "musical_features": "fade"},
     ]
     tr = _make_transcription(duration=70.0, sections=sections)
-
-    # 强制 AI 路径失败 → 走启发式
-    async def _boom(*a, **kw):
-        raise RuntimeError("AI disabled in unit test")
-
-    monkeypatch.setattr(
-        "app.services.agent.video.music_smart_clip_service._ai_analyze_with_transcription",
-        _boom,
-    )
 
     out = await analyze_music_smart_clip(
         audio_url="https://example.com/song.mp3",
@@ -97,17 +87,9 @@ async def test_heuristic_section_picks_closest_section_combo(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_heuristic_center_when_no_sections(monkeypatch):
-    """无 sections + AI 失败 → 走 heuristic_center。"""
+async def test_heuristic_center_when_no_sections():
+    """无 sections 时走 heuristic_center。"""
     tr = _make_transcription(duration=180.0, sections=None)
-
-    async def _boom(*a, **kw):
-        raise RuntimeError("AI disabled")
-
-    monkeypatch.setattr(
-        "app.services.agent.video.music_smart_clip_service._ai_analyze_with_transcription",
-        _boom,
-    )
 
     out = await analyze_music_smart_clip(
         audio_url="https://example.com/song.mp3",
@@ -122,16 +104,14 @@ async def test_heuristic_center_when_no_sections(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_normalize_clamps_ai_output(monkeypatch):
-    """AI 给逻辑越界（end > audio_duration / actual_duration 错算）但 schema 合法时，
+async def test_normalize_clamps_analysis_output():
+    """逻辑越界（end > audio_duration / actual_duration 错算）但 schema 合法时，
     _normalize_analysis 应 clamp 到合法范围 + 重算 duration / error。"""
     from app.services.agent.video.music_smart_clip_service import (
         SmartClipSelection,
         SmartCutCandidate,
         SmartCutKind,
     )
-    tr = _make_transcription(duration=120.0)
-
     bogus = SmartClipAnalysis(
         audio_duration_sec=120.0,
         target_duration_sec=30.0,
@@ -159,20 +139,8 @@ async def test_normalize_clamps_ai_output(monkeypatch):
         method="ai_reuse_transcription",
     )
 
-    async def _ok(*a, **kw):
-        return bogus
-
-    monkeypatch.setattr(
-        "app.services.agent.video.music_smart_clip_service._ai_analyze_with_transcription",
-        _ok,
-    )
-
-    out = await analyze_music_smart_clip(
-        audio_url="https://example.com/song.mp3",
-        target_duration_sec=30.0,
-        transcription=tr,
-        audio_duration_sec=120.0,
-    )
+    from app.services.agent.video.music_smart_clip_service import _normalize_analysis
+    out = _normalize_analysis(bogus, 120.0, 30.0)
     assert 0.0 <= out.recommended.start_sec <= 120.0
     assert 0.0 <= out.recommended.end_sec <= 120.0
     assert out.recommended.end_sec == 120.0  # clamp 到 audio_duration

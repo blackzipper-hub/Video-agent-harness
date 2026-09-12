@@ -26,112 +26,80 @@ The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@
 
 Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
 
-## Run
+## Clone and run from source (recommended)
 
-### Local npm CLI (no Docker)
+This is the release acceptance path for the open-source branch. One command starts Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, Redis, and a system Python installation are not required.
 
-Node.js `22.19+` (or `24+`) is the only system runtime requirement. Put `OPENAI_API_KEY` and the media Provider keys used by your Workflow in `.env`, then run:
-
-```sh
-npx @cuti-ai/video-agent-harness web
-```
-
-The CLI supervises Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. On first use it installs a checksum-verified portable Python runtime and separately licensed FFmpeg/FFprobe tools in the OS user-data directory. Project state and generated media persist there; PostgreSQL is not required.
-
-From a source checkout, use:
-
-```sh
-corepack enable && pnpm install --frozen-lockfile && pnpm run build
-pnpm video:local
-```
-
-Run `pnpm video:doctor` to inspect the components. Local npm mode is intended for a trusted single-user machine: its subprocess worker is not a security isolation boundary. Keep Docker Compose for production, PostgreSQL, multi-user deployment, or untrusted executable plugins.
-
-### Run from source
-
-#### Prerequisites
+### Prerequisites
 
 - Git.
-- Docker Desktop or Docker Engine with Docker Compose v2. Use Linux containers on Windows.
-- Node.js `22.19+` (or `24+`) and Corepack.
-- At least one OpenAI API key for conversation and planning.
+- Node.js `22.19+` or `24+`.
+- pnpm `11.x`. Run `pnpm --version`; if pnpm is missing, run `corepack enable`.
+- Internet access on the first run so the launcher can download its checksum-verified portable Python runtime, Python packages, and separately licensed FFmpeg/FFprobe tools.
 
-For a real default video build, also configure either `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by workflows that generate music. Other provider keys are optional.
-
-#### 1. Clone and configure
+### 1. Clone the open-source branch
 
 ```sh
-git clone https://github.com/blackzipper-hub/Video-agent-harness.git
+git clone --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
+```
+
+### 2. Configure provider keys
+
+macOS or Linux:
+
+```sh
 cp .env.example .env
 ```
 
-On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Open `.env` and fill in your keys. Never commit that file.
+Windows PowerShell:
 
-Minimum useful configuration:
+```powershell
+Copy-Item .env.example .env
+```
+
+Open `.env` and fill in the keys for the capabilities you intend to use. Never commit this file. The useful minimum for chat plus the default video workflow is:
 
 ```dotenv
 OPENAI_API_KEY=your-openai-key
 WAVESPEED_API_KEY=your-wavespeed-key
 ```
 
-The UI and local APIs can start without paid-provider keys, but chat or media generation will fail only when the corresponding capability is invoked.
+`OPENAI_API_KEY` powers the DeepSeek Harness conversation and planning model. For the default video workflow, use `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by music-generating workflows. The UI and health endpoints can start without keys, but the corresponding model or media call will fail when invoked.
 
-#### 2. Start the video services
+### 3. Install and build
 
-```sh
-docker compose --env-file .env -f compose.video.yml up --build -d
-docker compose -f compose.video.yml ps
-```
-
-This starts Postgres, applies database migrations, and starts Video Runtime, Media Service, Sandbox Worker, and Video Studio. Wait until `video-runtime`, `media-service`, and `sandbox-worker` are healthy.
-
-Verify the Runtime:
+Run from the repository root:
 
 ```sh
-curl http://127.0.0.1:8001/health
-```
-
-The expected response is `{"status":"healthy"}`.
-
-#### 3. Build and start DeepSeek Harness
-
-Run this once after cloning:
-
-```sh
-corepack enable
 pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-The DeepSeek process must receive the OpenAI key from the shell. On macOS or Linux:
+The root build also produces the Video Studio bundle required by the local launcher.
+
+### 4. Start the complete local stack
 
 ```sh
-export OPENAI_API_KEY="your-openai-key"
-export VIDEO_AGENT_MODEL="gpt-5.6-terra"
-export VIDEO_RUNTIME_URL="http://127.0.0.1:8001"
-export VIDEO_RUNTIME_SERVICE_TOKEN="video-harness-runtime-local"
-pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
+pnpm video:local -- --data-dir .video-agent-harness-data
 ```
 
-On Windows PowerShell:
+Keep this terminal open. The first run can take several minutes while local runtime dependencies are installed. Later runs reuse `.video-agent-harness-data`, which is ignored by Git. The explicit repository-local data directory also avoids cross-volume rename errors on some Windows installations.
 
-Fill in `OPENAI_API_KEY` and the required media provider keys in `.env` before starting.
+When the terminal prints `Video Agent Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
 
-```powershell
-Copy-Item .env.example .env
-.\scripts\start-video-harness.ps1
+### 5. Verify the running stack
+
+In a second terminal, from the same repository root:
+
+```sh
+pnpm video:doctor -- --data-dir .video-agent-harness-data
+curl http://127.0.0.1:8001/health
 ```
 
-The Windows launcher reads the repository `.env`. In a migration workspace without that file, it can temporarily reuse keys from the sibling `cuti-video-agent/.env`. It also passes an enabled Windows user proxy to Node so model requests do not time out while browser networking still works.
+Doctor should report every component as `OK`; the health response should be `{"status":"healthy"}`. Port `3000` is Video Studio, `3080` is DeepSeek Harness, `8001` is Video Runtime, `8090` is Sandbox Worker, and `18080` is Media Service.
 
-Keep this terminal running. DeepSeek Harness listens at `http://127.0.0.1:3080` by default.
-
-#### 4. Open the product
-
-Open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create).
-
-Video Studio at port `3000` is the main video creation and editing UI. Port `3080` exposes the generic DeepSeek Harness UI, and port `8001` exposes the Runtime API.
+Stop the stack with `Ctrl+C` in its terminal. Local npm mode is intended for a trusted single-user machine: its subprocess worker is not a security isolation boundary. Use Docker Compose deployment for PostgreSQL, multi-user operation, or untrusted executable plugins.
 
 Try a low-cost first prompt such as:
 
@@ -139,7 +107,7 @@ Try a low-cost first prompt such as:
 
 ## Development mode
 
-To run Video Studio with Vite hot reload, keep the Docker services and DeepSeek Harness running, then use a third terminal:
+To run Video Studio with Vite hot reload, keep the complete local stack running, then use another terminal:
 
 ```sh
 cd apps/video-studio
@@ -169,21 +137,13 @@ Open [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create).
 
 | Symptom | Check |
 | --- | --- |
-| The UI opens but sending a prompt has no response | Confirm DeepSeek Harness is still running on port `3080` and `OPENAI_API_KEY` is set in that terminal. |
-| `401`, `NO_AUTH`, or model authentication error | The `.env` file is used by Docker, but is not automatically loaded into the DeepSeek terminal. Export `OPENAI_API_KEY` there. |
+| The UI opens but sending a prompt has no response | Confirm DeepSeek Harness is still running on port `3080` and `OPENAI_API_KEY` is present in the repository `.env`. |
+| `401`, `NO_AUTH`, or model authentication error | Check `OPENAI_API_KEY` in `.env`, then restart the local stack so the launcher reloads it. |
 | Video or image generation fails | Configure the provider key required by the selected workflow; the default Seedance path needs `WAVESPEED_API_KEY` or `ARK_API_KEY`. |
-| Build remains queued or the Runtime is unavailable | Run `docker compose -f compose.video.yml ps` and inspect `docker compose -f compose.video.yml logs video-runtime`. |
+| Build remains queued or the Runtime is unavailable | Run `pnpm video:doctor -- --data-dir .video-agent-harness-data` and inspect the launcher terminal. |
 | Port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, or `18080`. Keep URLs and proxy settings consistent. |
-| Sandbox Worker is unhealthy on Windows | Ensure Docker Desktop is using Linux containers and allows access to the Docker socket. |
-| Model or provider calls time out behind a proxy | Set `HTTP_PROXY` and `HTTPS_PROXY` before starting the stack, plus `NODE_USE_ENV_PROXY=1` for Node. Compose passes the settings consistently to Video Runtime, Media Service, and DeepSeek Harness. |
-
-Stop the Docker stack with:
-
-```sh
-docker compose -f compose.video.yml down
-```
-
-Add `-v` only when you intentionally want to delete the local Postgres and generated-media volumes.
+| `EXDEV` or `cross-device` appears during first-run installation | Use the documented `--data-dir .video-agent-harness-data` command and do not point the data directory at another drive. |
+| Model or provider calls time out behind a proxy | Set `HTTP_PROXY`, `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` before starting the stack. |
 
 ## Tests
 

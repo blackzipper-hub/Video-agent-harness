@@ -6,8 +6,8 @@
 关键设计：
 1. 仅在 lyrics_provided / auto_lyrics_song 路径调用（纯 BGM 不做智能剪辑，由后端 mix loop 处理）。
 2. 输入：transcription（已含 sections / segments / vocal_presence / global_bpm）+ target_duration。
-3. **不**重新上传整段音频给 Gemini —— 走纯文本结构化推理，省钱、快、确定性更好。
-4. AI 失败时回退 ``_heuristic_section_based_analysis``，仍能给可用结果。
+3. **不**重新上传整段音频给模型，直接对已有结构做确定性分析。
+4. sections 不可用时回退中点裁切，仍能给可用结果。
 5. 结果被写入 ``music_generations.additional_data.smart_clip``，由 ``gate_after_music_node`` 在
    ``interrupt()`` payload 中带给前端，用户在 after_music 暂停 UI 内确认 → resume 时一并 trim。
 """
@@ -117,85 +117,16 @@ async def analyze_music_smart_clip(
     if audio_duration_sec <= float(target_duration_sec) + _PASSTHROUGH_GAP_SEC:
         return _passthrough_analysis(audio_duration_sec, target_duration_sec)
 
-    # —— 3. 走 AI（纯文本结构化推理；不重传 audio）
+    # —— 3. 基于转录结构做确定性分析，不再创建独立 LLM/agent 子循环
     try:
-        result = await _ai_analyze_with_transcription(
+        result = _heuristic_section_based_analysis(
             audio_duration_sec, target_duration_sec, transcription,
         )
     except Exception as e:
-        logger.warning("smart_clip AI 失败，回退启发式: %s", e)
-        try:
-            result = _heuristic_section_based_analysis(
-                audio_duration_sec, target_duration_sec, transcription,
-            )
-        except Exception as e2:
-            logger.warning("smart_clip 基于 sections 启发式失败，回退中点：%s", e2)
-            result = _heuristic_center_analysis(audio_duration_sec, target_duration_sec)
+        logger.warning("smart_clip 基于 sections 启发式失败，回退中点：%s", e)
+        result = _heuristic_center_analysis(audio_duration_sec, target_duration_sec)
     # 任意路径返回前都做一次 sanity normalize（clamp 越界 / 重算 duration_error）
     return _normalize_analysis(result, audio_duration_sec, target_duration_sec)
-
-
-# ==================== AI 路径 ====================
-
-
-async def _ai_analyze_with_transcription(
-    audio_duration_sec: float,
-    target_duration_sec: float,
-    transcription: Any,
-) -> SmartClipAnalysis:
-    """纯文本结构化推理（不上传 audio）。"""
-    from langchain_core.messages import SystemMessage, HumanMessage
-    from app.orchestration.skills.prompt_context import (
-        facts_human_message,
-        skill_system_message,
-    )
-    from prompts.prompt_config import PROMPTS_CONFIG, PromptName
-    from app.services.agent.utils.llm_resilience import (
-        StructuredResilienceKind, ainvoke_structured_resilient,
-    )
-
-    sections_view = _build_sections_view(transcription)
-    segments_view = _build_segments_view(transcription)
-
-    system = skill_system_message(
-        "music-smart-clip-director",
-        lead="Follow music-smart-clip-director.",
-    )
-    facts = {
-        "audio_duration_sec": round(float(audio_duration_sec), 2),
-        "target_duration_sec": round(float(target_duration_sec), 2),
-        "global_bpm": _safe_str(
-            getattr(transcription, "global_bpm", None) or _extra_get(transcription, "global_bpm")
-        ),
-        "global_emotion": _safe_str(
-            getattr(transcription, "global_emotion", None)
-            or _extra_get(transcription, "global_emotion")
-        ),
-        "genre": _safe_str(_extra_get(transcription, "genre")),
-        "sections": sections_view or "",
-        "segments": segments_view or "",
-    }
-    messages = [
-        SystemMessage(content=system),
-        HumanMessage(content=facts_human_message(facts)),
-    ]
-    parsed = await ainvoke_structured_resilient(
-        prompt_entry=PROMPTS_CONFIG[PromptName.VIDEO_MUSIC_SMART_CLIP_ANALYSIS],
-        kind=StructuredResilienceKind.STRUCTURED_CHAT_MESSAGES,
-        structured_chat_messages=messages,
-        include_raw=False,
-        structured_schema=SmartClipAnalysis,
-    )
-    # ainvoke_structured_resilient 在 include_raw=False 时直接返回结构化对象
-    if isinstance(parsed, SmartClipAnalysis):
-        result = parsed
-    else:
-        result = SmartClipAnalysis.model_validate(parsed)
-
-    # 主入口出口处会统一 _normalize_analysis，这里仅修补 method 字段缺失
-    if not result.method:
-        result = result.model_copy(update={"method": "ai_reuse_transcription"})
-    return result
 
 
 # ==================== 启发式回退 ====================

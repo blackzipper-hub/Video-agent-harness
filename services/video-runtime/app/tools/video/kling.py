@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from ...services.tool_service import ToolInfo
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 from langsmith import traceable
 
 from ...llm.wavespeed_service import get_wavespeed_service, WaveSpeedService
@@ -53,7 +53,7 @@ class KlingVideoInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 

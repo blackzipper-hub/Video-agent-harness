@@ -5,7 +5,7 @@
 
 import logging
 from typing import Optional, List, TYPE_CHECKING
-from langchain_core.tools import tool
+from app.tools.runtime import tool
 from langsmith import traceable
 
 if TYPE_CHECKING:

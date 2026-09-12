@@ -10,8 +10,6 @@ from __future__ import annotations
 import os
 from typing import Any, Awaitable, Callable
 
-from langchain_core.messages import HumanMessage
-
 from app.chat.config import get_settings
 
 from .models import AgentRun, ArtifactVersion, Task
@@ -181,18 +179,6 @@ def _atomic_input_images(
     return images
 
 
-def _message_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
-                parts.append(str(block.get("text") or ""))
-        return "".join(parts)
-    return str(content or "")
-
-
 def _atomic_image_model_value(run: AgentRun, params: dict[str, Any]) -> str:
     """Resolve one requested image model without silently changing providers."""
     configured = None
@@ -246,7 +232,7 @@ async def execute_atomic(
     operation_id = str(params.get("run_id") or f"atomic:{task.id}")
 
     if task.capability_id == "atomic.text.generate":
-        from app.llm.openai_failover import FailoverChatOpenAI
+        from app.llm.openai_text import generate_openai_text
         from app.utils.file_utils import inline_local_image_url_for_llm
 
         settings = get_settings()
@@ -254,19 +240,10 @@ async def execute_atomic(
             params,
             str(settings.DEEP_AGENT_V2_MODEL),
         )
-        model = FailoverChatOpenAI(
-            model=model_name,
-            api_key=(settings.DEEP_AGENT_V2_OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip(),
-            fallback_api_key=settings.OPENAI_API_KEY_FALLBACK,
-            base_url=settings.DEEP_AGENT_V2_OPENAI_BASE_URL,
-            timeout=_atomic_text_timeout(settings),
-            temperature=0,
-            use_responses_api=model_name.startswith("gpt-5"),
-            # Long production blueprints can take several minutes. Streaming
-            # keeps the upstream connection alive while LangChain still
-            # aggregates the chunks into one durable text Artifact.
-            streaming=True,
-        )
+        api_key = (
+            settings.DEEP_AGENT_V2_OPENAI_API_KEY
+            or os.getenv("OPENAI_API_KEY", "")
+        ).strip()
         image_urls = _atomic_input_images(run, params, selected)
         if image_urls:
             inlined_urls = [
@@ -281,8 +258,14 @@ async def execute_atomic(
             ]
         else:
             message_content = prompt
-        response = await model.ainvoke([HumanMessage(content=message_content)])
-        text = _message_text(response.content)
+        text = await generate_openai_text(
+            model=model_name,
+            content=message_content,
+            api_key=api_key,
+            fallback_api_key=settings.OPENAI_API_KEY_FALLBACK,
+            base_url=settings.DEEP_AGENT_V2_OPENAI_BASE_URL,
+            timeout=_atomic_text_timeout(settings),
+        )
         if not text.strip():
             raise RuntimeError("atomic text model returned empty content")
         return operation_id, {

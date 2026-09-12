@@ -53,7 +53,6 @@ class TestDestMvCompileGraph(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             list(views["mv"]["pipeline"]),
             [
-                "research.generate",
                 "suno.generate",
                 "media.audio_analyze",
                 "media.audio_cut",
@@ -407,7 +406,6 @@ class TestDestMvCapabilityIds(unittest.TestCase):
 
         registry = CapabilityRegistry()
         for capability_id in (
-            "research.generate",
             "suno.generate",
             "media.audio_analyze",
             "media.audio_cut",

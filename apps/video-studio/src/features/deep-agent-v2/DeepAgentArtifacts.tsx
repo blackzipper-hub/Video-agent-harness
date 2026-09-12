@@ -948,8 +948,7 @@ export function DeepAgentArtifacts({
   // Runtime task objectives are execution labels; only legacy runs use them as document fallbacks.
   const segmentScripts = (runtimeWorkspace ? [] : [...snapshot.tasks])
     .filter(task =>
-      task.capability_id !== 'research.generate'
-      && /generate|seedance|video_gen|provider|ark_protocol|image\.|shot\.|keyframe\.|outline|scene|character/i
+      /generate|seedance|video_gen|provider|ark_protocol|image\.|shot\.|keyframe\.|outline|scene|character/i
         .test(task.capability_id)
       && task.objective.trim().length > 20
       && !storyArtifacts.some(artifact => artifact.produced_by_task_id === task.id)

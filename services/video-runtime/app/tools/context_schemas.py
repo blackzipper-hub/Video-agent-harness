@@ -2,7 +2,7 @@
 图像和视频生成的 Context Schema 定义
 
 用于 create_agent 的 context_schema 参数，通过 context=Context(...) 传递
-使用 dataclass 定义，符合 LangChain 最新 API
+使用 dataclass 定义，供轻量运行时上下文注入。
 """
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Dict

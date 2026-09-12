@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ...services.tool_service import ToolInfo
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
+from app.tools.runtime import tool
 
 from ...llm.openai_sora_service import get_openai_sora_service, OpenAISoraService
 from ...models.image_result import VideoGenerationResult, VideoProvider
@@ -18,7 +18,7 @@ from ...utils.file_utils import convert_image_url, ImageFormat
 from ...services.account.account_router import get_account_router
 from ..context_schemas import VideoGenerationContext
 from ...models.tool_enums import DefaultValues, ToolName
-from langchain.tools import ToolRuntime
+from app.tools.runtime import ToolRuntime
 from langsmith import traceable
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class SoraT2VInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 
@@ -66,7 +66,7 @@ class SoraI2VInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 

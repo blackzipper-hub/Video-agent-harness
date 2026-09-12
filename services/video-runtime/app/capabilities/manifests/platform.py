@@ -149,31 +149,6 @@ def platform_capabilities() -> list[CapabilityManifest]:
                 "additionalProperties": True,
             },
         ),
-        _manifest(
-            "research.generate",
-            "Research real references for a brief with web search and return grounded creative directions (research_summary + ≥3 directions + ≥5 source URLs). Any workflow can run this before writing prompts; it produces no media and picks no winner.",
-            "local.service",
-            "research",
-            alias="generate-research",
-            service_target="generate_research_by_request",
-            optional=["text", "image", "music", "video"],
-            parameters_schema={
-                "type": "object",
-                "properties": {
-                    "user_input": {
-                        "type": "string",
-                        "description": (
-                            "Text brief for web research. This capability searches from "
-                            "text only. Name the locked visible facts as the subject."
-                        ),
-                    },
-                    "content_category": {"type": "string"},
-                    "detected_language": {"type": "string"},
-                    "run_id": {"type": "string"},
-                },
-                "additionalProperties": True,
-            },
-        ),
         _manifest("actions.suggest", "Produce structured recommended next actions.", "local.structured", "action_suggestions", alias="suggest-actions", service_target="action_suggestions"),
         _manifest(
             "media.concat",

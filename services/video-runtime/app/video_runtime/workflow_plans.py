@@ -90,7 +90,7 @@ ORIGINAL_CUTI_WORKFLOW_CONTRACTS: dict[str, dict[str, Any]] = {
     "mv": {
         "mode": "mv",
         "pipeline": (
-            "research.generate", "suno.generate", "media.audio_analyze",
+            "suno.generate", "media.audio_analyze",
             "media.audio_cut", "atomic.image.generate", "api.provider.generate",
             "media.concat", "media.mix_audio", "media.transcribe",
             "media.hyperframes_caption",

@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Awaitable, Callable
 
-from langchain_core.callbacks import AsyncCallbackHandler
-
 from .models import DomainEvent
 
 
@@ -80,7 +78,7 @@ def _requested_tokens(error: BaseException) -> int:
     return int(match.group(1).replace(",", "")) if match else 0
 
 
-class V2TokenUsageCallback(AsyncCallbackHandler):
+class V2TokenUsageCallback:
     """Persist one auditable event for every V2 LLM request and result."""
 
     def __init__(self, repo: Any, *, run_id: str, scope: str, task_id: str | None = None,

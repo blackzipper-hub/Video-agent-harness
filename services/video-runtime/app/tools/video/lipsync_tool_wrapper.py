@@ -16,8 +16,8 @@ from typing import List, Optional, Annotated, Any, Tuple, FrozenSet, TYPE_CHECKI
 
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 
 from app.models.image_result import VideoGenerationResult
 from app.models.tool_enums import ToolType, ToolMode, ToolName
@@ -122,7 +122,7 @@ class LipsyncWrapperI2VInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)",
+        description="Provider runtime context (internal use only)",
     )
 
 

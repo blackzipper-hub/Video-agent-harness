@@ -3,7 +3,7 @@ Minimax Speech 2.5 语音合成工具（通过 WaveSpeed API）
 """
 import logging
 from typing import List, TYPE_CHECKING
-from langchain_core.tools import tool
+from app.tools.runtime import tool
 from langsmith import traceable
 
 if TYPE_CHECKING:

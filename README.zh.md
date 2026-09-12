@@ -26,112 +26,80 @@ Provider / Workflow / Validator / Media plugins
 
 规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后， Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
 
-## Run
+## 从源码克隆并运行（推荐）
 
-### npm CLI 本地模式（无需 Docker）
+这是开源分支的发布验收路径。一个命令会同时启动 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL、Redis 或系统 Python。
 
-系统只需安装 Node.js `22.19+`（或 `24+`）。在 `.env` 中填写 `OPENAI_API_KEY` 以及 Workflow 使用的媒体 Provider Key，然后运行：
-
-```sh
-npx @cuti-ai/video-agent-harness web
-```
-
-CLI 会统一管理 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker。首次使用时会在操作系统用户数据目录中安装经过校验和验证的便携 Python，以及采用各自许可证的 FFmpeg/FFprobe 工具；这些二进制文件不会重新打包进本项目。项目状态和生成媒体也保存在该目录中，无需 PostgreSQL。
-
-从源码检出运行：
-
-```sh
-corepack enable && pnpm install --frozen-lockfile && pnpm run build
-pnpm video:local
-```
-
-运行 `pnpm video:doctor` 可以检查各组件。npm 本地模式面向可信的单用户机器，子进程 Worker 不构成安全隔离边界。生产、PostgreSQL、多用户部署或不受信任的可执行插件继续使用 Docker Compose。
-
-### Run from source
-
-#### 前置条件
+### 前置条件
 
 - Git。
-- Docker Desktop，或安装了 Docker Compose v2 的 Docker Engine。Windows 需要使用 Linux 容器。
-- Node.js `22.19+`（或 `24+`）以及 Corepack。
-- 至少一个 OpenAI API Key，用于对话和规划。
+- Node.js `22.19+` 或 `24+`。
+- pnpm `11.x`。先运行 `pnpm --version`；如果尚未安装 pnpm，执行 `corepack enable`。
+- 首次运行需要联网，以便启动器下载经过校验和验证的便携 Python、Python 依赖，以及采用各自许可证的 FFmpeg/FFprobe 工具。
 
-如果要进行真实的默认视频构建，还需要配置 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`。只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`，其他 Provider Key 均为可选。
-
-#### 1. 克隆并配置
+### 1. 克隆开源分支
 
 ```sh
-git clone https://github.com/blackzipper-hub/Video-agent-harness.git
+git clone --branch deepseek-harness-open --single-branch https://github.com/blackzipper-hub/Video-agent-harness.git
 cd Video-agent-harness
+```
+
+### 2. 配置 Provider Key
+
+macOS 或 Linux：
+
+```sh
 cp .env.example .env
 ```
 
-Windows PowerShell 请用 `Copy-Item .env.example .env` 代替 `cp`。随后打开 `.env` 填写 Key，不要提交该文件。
+Windows PowerShell：
 
-最小可用配置：
+```powershell
+Copy-Item .env.example .env
+```
+
+打开 `.env`，填写计划使用的能力所需的 Key，且不要提交该文件。对话加默认视频 Workflow 的常用最小配置是：
 
 ```dotenv
 OPENAI_API_KEY=your-openai-key
 WAVESPEED_API_KEY=your-wavespeed-key
 ```
 
-即使没有付费 Provider Key，也可以启动界面和本地 API；只有在调用对应的对话或媒体生成能力时才会失败。
+`OPENAI_API_KEY` 用于 DeepSeek Harness 的对话和规划模型。默认视频 Workflow 需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`；只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`。没有 Key 时界面和健康检查仍可启动，但调用对应模型或媒体能力时会失败。
 
-#### 2. 启动视频服务
+### 3. 安装并构建
 
-```sh
-docker compose --env-file .env -f compose.video.yml up --build -d
-docker compose -f compose.video.yml ps
-```
-
-该命令会启动 Postgres、执行数据库迁移，并启动 Video Runtime、Media Service、Sandbox Worker 和 Video Studio。等待 `video-runtime`、`media-service` 和 `sandbox-worker` 进入健康状态。
-
-验证 Runtime：
+在仓库根目录执行：
 
 ```sh
-curl http://127.0.0.1:8001/health
-```
-
-预期响应为 `{"status":"healthy"}`。
-
-#### 3. 构建并启动 DeepSeek Harness
-
-首次克隆后执行一次：
-
-```sh
-corepack enable
 pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-DeepSeek 进程必须从启动它的终端读取 OpenAI Key。macOS 或 Linux：
+根目录构建会同时生成本地启动器需要的 Video Studio 产物。
+
+### 4. 启动完整本地服务栈
 
 ```sh
-export OPENAI_API_KEY="your-openai-key"
-export VIDEO_AGENT_MODEL="gpt-5.6-terra"
-export VIDEO_RUNTIME_URL="http://127.0.0.1:8001"
-export VIDEO_RUNTIME_SERVICE_TOKEN="video-harness-runtime-local"
-pnpm dsh --profile web --patch packages/bundle/video-agent/cordis.patch.yml --no-open
+pnpm video:local -- --data-dir .video-agent-harness-data
 ```
 
-Windows PowerShell：
+保持终端运行。首次运行会安装本地运行时依赖，可能需要几分钟；后续启动会复用已被 Git 忽略的 `.video-agent-harness-data`。明确使用仓库内的数据目录，还能避免部分 Windows 环境中的跨盘重命名错误。
 
-启动前，在 `.env` 中填写 `OPENAI_API_KEY` 和需要的媒体 Provider Key。
+当终端输出 `Video Agent Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
 
-```powershell
-Copy-Item .env.example .env
-.\scripts\start-video-harness.ps1
+### 5. 验证服务栈
+
+在第二个终端中进入同一仓库根目录并执行：
+
+```sh
+pnpm video:doctor -- --data-dir .video-agent-harness-data
+curl http://127.0.0.1:8001/health
 ```
 
-Windows 启动脚本会读取仓库 `.env`；迁移工作区中未创建该文件时，也可以临时读取同级 `cuti-video-agent/.env` 的现有 Key。脚本会把已启用的 Windows 用户代理传给 Node，避免浏览器可以联网而模型请求持续超时。
+Doctor 应将每个组件显示为 `OK`，健康检查应返回 `{"status":"healthy"}`。端口 `3000` 是 Video Studio，`3080` 是 DeepSeek Harness，`8001` 是 Video Runtime，`8090` 是 Sandbox Worker，`18080` 是 Media Service。
 
-保持这个终端运行。DeepSeek Harness 默认监听 `http://127.0.0.1:3080`。
-
-#### 4. 打开产品
-
-访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。
-
-端口 `3000` 的 Video Studio 是主要视频生成和编辑界面；端口 `3080` 是通用 DeepSeek Harness 界面；端口 `8001` 是 Video Runtime API。
+在启动终端按 `Ctrl+C` 即可停止。npm 本地模式面向可信的单用户机器，子进程 Worker 不构成安全隔离边界；需要 PostgreSQL、多用户运行或执行不受信任的插件时，请使用 Docker Compose 部署方式。
 
 可以先用下面的低成本 Prompt 测试：
 
@@ -139,7 +107,7 @@ Windows 启动脚本会读取仓库 `.env`；迁移工作区中未创建该文�
 
 ## 开发模式
 
-如果需要使用 Vite 热更新，请保持 Docker 服务和 DeepSeek Harness 运行，然后在第三个终端执行：
+如果需要使用 Vite 热更新，请保持完整本地服务栈运行，然后在另一个终端执行：
 
 ```sh
 cd apps/video-studio
@@ -169,21 +137,13 @@ pnpm --filter @cuti-ai/video-studio run dev
 
 | 现象 | 检查项 |
 | --- | --- |
-| 页面能打开，但发送 Prompt 后没有响应 | 确认 DeepSeek Harness 仍在端口 `3080` 运行，并且启动它的终端设置了 `OPENAI_API_KEY`。 |
-| 出现 `401`、`NO_AUTH` 或模型认证错误 | `.env` 会交给 Docker，但不会自动加载到 DeepSeek 终端；需要在该终端导出 `OPENAI_API_KEY`。 |
+| 页面能打开，但发送 Prompt 后没有响应 | 确认 DeepSeek Harness 仍在端口 `3080` 运行，并且仓库 `.env` 中存在 `OPENAI_API_KEY`。 |
+| 出现 `401`、`NO_AUTH` 或模型认证错误 | 检查 `.env` 中的 `OPENAI_API_KEY`，然后重启本地服务栈以重新加载。 |
 | 图片或视频生成失败 | 配置所选 Workflow 需要的 Provider Key；默认 Seedance 路径需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`。 |
-| Build 一直排队或 Runtime 不可用 | 执行 `docker compose -f compose.video.yml ps`，并查看 `docker compose -f compose.video.yml logs video-runtime`。 |
+| Build 一直排队或 Runtime 不可用 | 执行 `pnpm video:doctor -- --data-dir .video-agent-harness-data`，并检查启动器终端。 |
 | 端口已被占用 | 释放或映射端口 `3000`、`3080`、`8001`、`8090` 或 `18080`，并保持 URL 和代理配置一致。 |
-| Windows 上 Sandbox Worker 不健康 | 确认 Docker Desktop 使用 Linux 容器，并允许访问 Docker Socket。 |
-| 使用代理时模型或 Provider 请求超时 | 在启动整个服务栈前设置 `HTTP_PROXY`、`HTTPS_PROXY`，并为 Node 设置 `NODE_USE_ENV_PROXY=1`；Compose 会把这些配置统一传给 Video Runtime、Media Service 和 DeepSeek Harness。 |
-
-停止 Docker 服务：
-
-```sh
-docker compose -f compose.video.yml down
-```
-
-只有在确定要删除本地 Postgres 数据和已生成媒体卷时，才增加 `-v`。
+| 首次安装出现 `EXDEV` 或 `cross-device` | 使用文档中的 `--data-dir .video-agent-harness-data`，且不要把数据目录指向另一个磁盘。 |
+| 使用代理时模型或 Provider 请求超时 | 启动服务栈前设置 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`。 |
 
 ## 测试
 

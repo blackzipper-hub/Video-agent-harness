@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ...models.tool_enums import ToolProvider, ToolType
-from ..redis.connection import get_redis_client
 from ...config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -53,6 +52,8 @@ async def clear_wavespeed_concurrent_limits(
         删除的 key 数量
     """
     if redis is None:
+        from ..redis.connection import get_redis_client
+
         redis = await get_redis_client(decode_responses=True)
     if env_prefix is None:
         env_prefix = _get_env_prefix_for_clear()

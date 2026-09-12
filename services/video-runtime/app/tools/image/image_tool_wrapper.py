@@ -9,8 +9,7 @@ Chain 返回 List[ToolInfo]:
   参考各 tool 模块的 get_xxx_tools() 模式。
 
 I2I 流程:
-  截断参考图 → 执行生成 → 角色一致性校验(ConsistencyLevel 分类) → 同模型重试一次 → 降级下一模型。
-  所有模型均失败时，从所有候选中选出一致性最高的结果返回（best-effort）。
+  截断参考图 → 执行生成 → 可重试错误同模型重试一次 → 降级下一模型。
 
 T2I 流程:
   执行生成 → 可重试错误同模型重试一次 → 降级下一模型。
@@ -22,12 +21,12 @@ Metrics:
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Annotated, Any, Dict, TYPE_CHECKING
+from typing import List, Optional, Annotated, Any, Dict, TYPE_CHECKING
 
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 
 from app.models.image_result import ImageGenerationResult
 from app.models.tool_enums import ToolType, ToolMode, DefaultValues, ToolName
@@ -52,12 +51,6 @@ from app.utils.error_classification import (
     FailureCategory,
 )
 from app.tools.image.ref_utils import truncate_reference_urls_for_model
-from app.schemas.video_llm import VideoConsistencyLevel
-from app.tools.image.character_consistency import (
-    check_character_consistency_llm,
-    ConsistencyLevel,
-    ConsistencyCheckResult,
-)
 from app.tools.image.seedream import (
     edit_image_with_wavespeed_seedream,
     generate_image_with_wavespeed_seedream_t2i,
@@ -83,9 +76,6 @@ class ImageToolMetrics:
     per_model_attempts: Dict[str, int] = field(default_factory=dict)
     success: bool = False
     final_model: Optional[str] = None
-    consistency_checks: int = 0
-    consistency_pass: int = 0
-    consistency_details: List[Dict[str, Any]] = field(default_factory=list)  # 每笔 face/accessories/clothing 多维度
     failure_reasons: List[str] = field(default_factory=list)
     best_effort_selected: bool = False
 
@@ -93,33 +83,10 @@ class ImageToolMetrics:
         self,
         model: str,
         success: bool,
-        consistency_level: Optional[str] = None,
         failure_reason: Optional[str] = None,
-        consistency_details_item: Optional[Dict[str, Any]] = None,
-        failed_attempt_detail: Optional[Dict[str, Any]] = None,
     ):
         self.total_attempts += 1
         self.per_model_attempts[model] = self.per_model_attempts.get(model, 0) + 1
-        if consistency_details_item is not None:
-            self.consistency_checks += 1
-            self.consistency_details.append(consistency_details_item)
-            if consistency_details_item.get("passed") is True:
-                self.consistency_pass += 1
-        if failed_attempt_detail is not None:
-            self.consistency_details.append(failed_attempt_detail)
-        elif consistency_level:
-            self.consistency_checks += 1
-            passed = consistency_level in (
-                ConsistencyLevel.IDENTICAL.value,
-                ConsistencyLevel.VERY_SIMILAR.value,
-            )
-            self.consistency_details.append({
-                "per_character": [],
-                "model": model,
-                "passed": passed,
-            })
-            if passed:
-                self.consistency_pass += 1
         if failure_reason:
             self.failure_reasons.append(f"{model}:{failure_reason}")
         if success:
@@ -127,18 +94,12 @@ class ImageToolMetrics:
             self.final_model = model
 
     def to_metadata(self) -> dict:
-        checks = self.consistency_checks
         return {
             "image_wrapper_metrics": {
                 "total_attempts": self.total_attempts,
                 "per_model_attempts": dict(self.per_model_attempts),
                 "success": self.success,
                 "final_model": self.final_model,
-                "consistency_checks": checks,
-                "consistency_pass_rate": (
-                    f"{self.consistency_pass}/{checks}" if checks else "N/A"
-                ),
-                "consistency_details": list(self.consistency_details),
                 "failure_reasons": list(self.failure_reasons),
                 "best_effort_selected": self.best_effort_selected,
             }
@@ -151,9 +112,6 @@ class ImageToolMetrics:
             "per_model_attempts": dict(self.per_model_attempts),
             "success": self.success,
             "final_model": self.final_model,
-            "consistency_checks": self.consistency_checks,
-            "consistency_pass": self.consistency_pass,
-            "consistency_details": list(self.consistency_details),
             "failure_reasons": list(self.failure_reasons),
             "best_effort_selected": self.best_effort_selected,
         }
@@ -181,20 +139,11 @@ class _AttemptRecord:
     model: str
     attempt_num: int  # 1=首次, 2=重试
     result: ImageGenerationResult
-    consistency: Optional[ConsistencyCheckResult] = None
-    failure_type: Optional[str] = None  # "api_error" | "consistency" | None(success)
+    failure_type: Optional[str] = None
 
     @property
     def has_image(self) -> bool:
         return bool(self.result.image_url)
-
-    @property
-    def consistency_score(self) -> int:
-        """用于排序：有一致性结果 → 用评分；有图但没校验 → 3；无图 → -1"""
-        if self.consistency:
-            return self.consistency.score
-        return 3 if self.has_image else -1
-
 
 # ==================== 工具辅助函数 ====================
 
@@ -202,7 +151,7 @@ class _AttemptRecord:
 def _is_retryable_error(result: ImageGenerationResult) -> bool:
     """判断 API 层面的瞬态错误是否可重试（限流、超时等）。
 
-    注意：角色一致性不通过不属于 API 错误，不在此处判断。
+    Provider 返回的限流或瞬时故障允许重试。
     """
     if result.success:
         return False
@@ -225,13 +174,13 @@ def _is_retryable_error(result: ImageGenerationResult) -> bool:
 
 
 def _pick_best_candidate(candidates: List[_AttemptRecord]) -> Optional[_AttemptRecord]:
-    """从候选中选出最佳结果：优先有图片 + 高一致性分"""
+    """Return the latest candidate that contains a generated image."""
     if not candidates:
         return None
     with_image = [c for c in candidates if c.has_image]
     if not with_image:
         return candidates[-1]  # 全部 API 失败，返回最后一个
-    return max(with_image, key=lambda c: c.consistency_score)
+    return with_image[-1]
 
 
 async def _maybe_add_switch_info(
@@ -429,29 +378,9 @@ async def _run_i2i_attempt(
     tool_info: "ToolInfo",
     urls: List[str],
     runtime: ToolRuntime[ImageGenerationContext],
-) -> Tuple[ImageGenerationResult, Optional[ConsistencyCheckResult]]:
-    """单次 I2I 尝试：执行 + 一致性校验。
-
-    Returns:
-        (result, consistency):
-          - consistency 为 None → 未做校验（无参考图、API 失败、无 image_url）
-          - consistency 有值 → 已校验，含等级分类
-    """
-    result = await _invoke_i2i_tool(prompt, tool_info, urls, runtime)
-    if not result.success or not urls or not result.image_url:
-        return (result, None)
-    from app.services.agent.video.agent_video_constants import ENABLE_IMAGE_WRAPPER_CONSISTENCY
-    if not ENABLE_IMAGE_WRAPPER_CONSISTENCY:
-        return (result, None)
-    skip_check = getattr(runtime.context, "skip_consistency_check", False) if runtime and runtime.context else False
-    if skip_check:
-        logger.info("⏭️ [I2I] skip_consistency_check=True，跳过角色一致性校验")
-        return (result, None)
-    reference_labels = getattr(runtime.context, "reference_image_labels", None) if runtime and runtime.context else None
-    consistency = await check_character_consistency_llm(
-        urls, result.image_url, prompt_used=prompt, reference_labels=reference_labels
-    )
-    return (result, consistency)
+) -> ImageGenerationResult:
+    """Run one I2I provider attempt."""
+    return await _invoke_i2i_tool(prompt, tool_info, urls, runtime)
 
 
 async def _run_i2i_loop(
@@ -460,11 +389,11 @@ async def _run_i2i_loop(
     runtime: ToolRuntime[ImageGenerationContext],
     chain: List["ToolInfo"],
 ) -> ImageGenerationResult:
-    """I2I fallback chain — 一致性分类 + best-effort 选择。
+    """I2I fallback chain with provider retries.
 
     每个模型最多 2 次尝试（首次 + 重试），但整次调用内实际图生图 API 总次数不超过
     IMAGE_WRAPPER_MAX_TOTAL_GENERATION_ATTEMPTS（与 video wrapper 总尝试上限语义一致）。
-    全部失败时，从所有生成成功的候选中选一致性最高的返回。
+    全部失败时，返回最后一个仍包含图片的候选。
     """
     requested_model = runtime.context.model or DefaultValues.IMAGE_MODEL
     _lang = getattr(runtime.context, "language", None) if runtime and runtime.context else None
@@ -475,7 +404,6 @@ async def _run_i2i_loop(
     metrics = ImageToolMetrics()
     candidates: List[_AttemptRecord] = []
     accumulated_tool_cost = 0.0
-    current_prompt = prompt
     total_generation_attempts = 0
 
     for info in chain:
@@ -498,18 +426,15 @@ async def _run_i2i_loop(
             else:
                 logger.info("🔄 [I2I] 同模型重试: %s", info.tool_type.value)
 
-            result, consistency = await _run_i2i_attempt(
-                current_prompt, info, urls, runtime
+            result = await _run_i2i_attempt(
+                prompt, info, urls, runtime
             )
             accumulated_tool_cost += float(getattr(result, "billing_cost", None) or 0.0)
 
             # ---- API 失败 ----
             if not result.success:
-                failed_detail = None
-                if result.image_url:
-                    failed_detail = {"model": info.tool_type.value, "passed": False, "image_url": result.image_url, "failure_reason": "api_error", "prompt_used": current_prompt}
                 metrics.record_attempt(
-                    info.tool_type.value, False, failure_reason="api_error", failed_attempt_detail=failed_detail
+                    info.tool_type.value, False, failure_reason="api_error"
                 )
                 candidates.append(
                     _AttemptRecord(
@@ -523,82 +448,15 @@ async def _run_i2i_loop(
                     continue  # 可重试 → 再来一次
                 break  # 不可重试 / 已重试 → 换模型
 
-            # ---- 成功但未做一致性校验（无参考图等）→ 直接返回 ----
-            if consistency is None:
-                metrics.record_attempt(
-                    info.tool_type.value, True,
-                    consistency_details_item={"model": info.tool_type.value, "passed": True, "image_url": result.image_url, "prompt_used": current_prompt},
-                )
-                metrics.flush_to_langsmith()
-                out = _inject_metrics(result, metrics, time.perf_counter() - start_time, accumulated_tool_cost)
-                logger.info("[image_wrapper] I2I 返回(无一致性校验): tool_duration_sec=%s, tool_cost=%s", out.tool_duration_sec, out.tool_cost)
-                return await _maybe_add_switch_info(out, info.tool_type, requested_model, lang=_lang)
-
-            details_item = {
-                "has_character": consistency.has_character,
-                "per_character": consistency.per_character or [],
-                "severe_abnormality": (
-                    consistency.severe_abnormality.value
-                    if getattr(consistency, "severe_abnormality", None)
-                    else VideoConsistencyLevel.N_A.value
-                ),
-                "severe_abnormality_reason": getattr(consistency, "severe_abnormality_reason", None),
-                "model": info.tool_type.value,
-                "passed": consistency.passed,
-                "image_url": result.image_url,
-                "prompt_used": current_prompt,
-                "reason": getattr(consistency, "reason", None),
-                "suggested_prompt": getattr(consistency, "suggested_prompt", None),
-            }
-            # ---- 总通过（一致性通过 且整图 severe 通过）----
-            if consistency.passed:
-                metrics.record_attempt(info.tool_type.value, True, consistency_details_item=details_item)
-                metrics.flush_to_langsmith()
-                logger.info(
-                    "✅ [I2I] 成功 (per_character_count=%s severe=%s): %s",
-                    len(details_item["per_character"]),
-                    details_item["severe_abnormality"],
-                    info.tool_type.value,
-                )
-                out = _inject_metrics(result, metrics, time.perf_counter() - start_time, accumulated_tool_cost)
-                logger.info("[image_wrapper] I2I 返回(一致性通过): tool_duration_sec=%s, tool_cost=%s", out.tool_duration_sec, out.tool_cost)
-                return await _maybe_add_switch_info(out, info.tool_type, requested_model, lang=_lang)
-
-            # ---- 一致性未通过：若有 suggested_prompt 且首次尝试，用 suggested_prompt 同模型重试（与 video wrapper 一致）----
-            suggested_prompt = getattr(consistency, "suggested_prompt", None)
-            if suggested_prompt and str(suggested_prompt).strip() and attempt_num == 1:
-                current_prompt = suggested_prompt
-                metrics.record_attempt(
-                    info.tool_type.value,
-                    False,
-                    consistency_details_item=details_item,
-                    failure_reason="consistency:未通过",
-                )
-                logger.info("🔄 [I2I] 一致性未通过，用 suggested_prompt 同模型重试")
-                continue
-            # ---- 记录候选，无 suggested_prompt 或已重试过则换模型 ----
-            metrics.record_attempt(
-                info.tool_type.value,
-                False,
-                consistency_details_item=details_item,
-                failure_reason="consistency:未通过",
+            metrics.record_attempt(info.tool_type.value, True)
+            metrics.flush_to_langsmith()
+            out = _inject_metrics(
+                result, metrics, time.perf_counter() - start_time,
+                accumulated_tool_cost,
             )
-            candidates.append(
-                _AttemptRecord(
-                    model=info.tool_type.value,
-                    attempt_num=attempt_num,
-                    result=result,
-                    consistency=consistency,
-                    failure_type="consistency",
-                )
+            return await _maybe_add_switch_info(
+                out, info.tool_type, requested_model, lang=_lang,
             )
-            logger.info(
-                "⚠️ [I2I] 一致性未通过: %s",
-                info.tool_type.value,
-            )
-            if attempt_num == 1:
-                continue  # 同模型再试一次（无 suggested_prompt 时用原 prompt 重试）
-            break  # 重试后仍不通过 → 换模型
 
         if total_generation_attempts >= IMAGE_WRAPPER_MAX_TOTAL_GENERATION_ATTEMPTS:
             break
@@ -610,18 +468,13 @@ async def _run_i2i_loop(
         metrics.success = True
         metrics.final_model = best.model
         metrics.flush_to_langsmith()
-        reason_str = (best.consistency.reason or "N/A")[:60] if best.consistency else "N/A"
-        logger.warning(
-            "⚠️ [I2I] 所有模型一致性均未达标，选用最佳候选 (model=%s, reason=%s)",
-            best.model,
-            reason_str,
-        )
+        logger.warning("⚠️ [I2I] provider fallback selected candidate model=%s", best.model)
         data = best.result.model_dump()
         data.update(
             requested_model=requested_model.value,
             user_facing_message=await get_i18n_message_async(
-                "image_model_switched.best_effort_consistency",
-                default="Character consistency may vary; the closest result was used.",
+                "image_model_switched.best_effort",
+                default="The last usable provider result was selected.",
                 lang=_lang,
             ),
         )
@@ -721,21 +574,15 @@ async def _run_t2i_loop(
             result = await _run_t2i_one(prompt, info, runtime)
             accumulated_tool_cost += float(getattr(result, "billing_cost", None) or 0.0)
             if result.success:
-                metrics.record_attempt(
-                    info.tool_type.value, True,
-                    consistency_details_item={"model": info.tool_type.value, "passed": True, "image_url": result.image_url, "prompt_used": prompt},
-                )
+                metrics.record_attempt(info.tool_type.value, True)
                 metrics.flush_to_langsmith()
                 logger.info("✅ [T2I] 成功: %s", info.tool_type.value)
                 out = _inject_metrics(result, metrics, time.perf_counter() - start_time, accumulated_tool_cost)
                 logger.info("[image_wrapper] T2I 返回(成功): tool_duration_sec=%s, tool_cost=%s", out.tool_duration_sec, out.tool_cost)
                 return await _maybe_add_switch_info(out, info.tool_type, requested_model, lang=_lang)
 
-            failed_detail = None
-            if result.image_url:
-                failed_detail = {"model": info.tool_type.value, "passed": False, "image_url": result.image_url, "failure_reason": "api_error", "prompt_used": prompt}
             metrics.record_attempt(
-                info.tool_type.value, False, failure_reason="api_error", failed_attempt_detail=failed_detail
+                info.tool_type.value, False, failure_reason="api_error"
             )
             last_error_result = result
 
@@ -779,7 +626,7 @@ class ImageWrapperT2IInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)",
+        description="Provider runtime context (internal use only)",
     )
 
 
@@ -815,7 +662,7 @@ class ImageWrapperI2IInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)",
+        description="Provider runtime context (internal use only)",
     )
 
 
@@ -830,8 +677,8 @@ def _make_i2i_tool(chain_i2i: List["ToolInfo"]):
         runtime: ToolRuntime[ImageGenerationContext],
     ) -> tuple[str, ImageGenerationResult]:
         """Professional image generation tool with automatic fallback - I2I image-to-image.
-        Chain is chosen at tool creation from user_option; each step: truncate refs -> execute -> consistency check (category-based) -> retry once if below threshold.
-        When all models fail, the best candidate (highest consistency) is returned.
+        Chain is chosen at tool creation from user_option; each step truncates references, executes the provider, and retries transient failures once.
+        When all models fail, the last usable provider candidate is returned.
         """
         result = await _run_i2i_loop(prompt, reference_image_urls, runtime, chain_i2i)
         return (result.model_dump_json(), result)

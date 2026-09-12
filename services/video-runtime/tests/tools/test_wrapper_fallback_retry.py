@@ -276,33 +276,6 @@ def _fmt_calls(counters, labels=None):
     return ", ".join(parts)
 
 
-# ==================== Consistency mock 辅助 ====================
-
-
-def _patch_cc_pass():
-    """Patch 一致性检查为通过。"""
-    from app.tools.image.character_consistency import ConsistencyCheckResult
-
-    result = ConsistencyCheckResult(has_character=True, reason="mock", passed_override=True)
-
-    async def _mock(*a, **kw):
-        return result
-
-    return patch("app.tools.image.image_tool_wrapper.check_character_consistency_llm", side_effect=_mock)
-
-
-def _patch_cc_fail():
-    """Patch 一致性检查为不通过。"""
-    from app.tools.image.character_consistency import ConsistencyCheckResult
-
-    result = ConsistencyCheckResult(has_character=True, reason="mock fail", passed_override=False)
-
-    async def _mock(*a, **kw):
-        return result
-
-    return patch("app.tools.image.image_tool_wrapper.check_character_consistency_llm", side_effect=_mock)
-
-
 REFS = ["https://example.com/ref.webp"]
 
 
@@ -320,8 +293,7 @@ async def test_i2i_01_retryable_then_success() -> FallbackTestResult:
 
     runtime = _make_image_runtime(REFS)
     start = time.perf_counter()
-    with _patch_cc_pass():
-        result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
+    result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
     dur = time.perf_counter() - start
 
     ok = result.success and c1["n"] == 2 and c2["n"] == 0 and c3["n"] == 0
@@ -348,8 +320,7 @@ async def test_i2i_02_permanent_fb1() -> FallbackTestResult:
 
     runtime = _make_image_runtime(REFS)
     start = time.perf_counter()
-    with _patch_cc_pass():
-        result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
+    result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
     dur = time.perf_counter() - start
 
     ok = result.success and c1["n"] == 1 and c2["n"] == 1 and c3["n"] == 0
@@ -376,8 +347,7 @@ async def test_i2i_03_two_fail_fb2() -> FallbackTestResult:
 
     runtime = _make_image_runtime(REFS)
     start = time.perf_counter()
-    with _patch_cc_pass():
-        result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
+    result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
     dur = time.perf_counter() - start
 
     ok = result.success and c1["n"] == 1 and c2["n"] == 1 and c3["n"] == 1
@@ -404,8 +374,7 @@ async def test_i2i_04_retryable_exhaust_fb2() -> FallbackTestResult:
 
     runtime = _make_image_runtime(REFS)
     start = time.perf_counter()
-    with _patch_cc_pass():
-        result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
+    result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
     dur = time.perf_counter() - start
 
     ok = (
@@ -423,42 +392,6 @@ async def test_i2i_04_retryable_exhaust_fb2() -> FallbackTestResult:
         expected_calls="pro:2, flash:1, seedream:0",
         actual_calls=_fmt_calls(counters),
         model_used=result.model, total_attempts=sum(c["n"] for c in counters), duration_sec=round(dur, 3),
-    )
-
-
-async def test_i2i_05_all_consistency_fail() -> FallbackTestResult:
-    """I2I: 一致性均不通过 → best-effort；总生成次数受上限 3 约束。calls: pro:2 + flash:1 = 3"""
-    from app.tools.image.image_tool_wrapper import _run_i2i_loop
-
-    fn1, c1 = _always_ok("pro")
-    fn2, c2 = _always_ok("flash")
-    fn3, c3 = _always_ok("seedream")
-    chain, counters = _build_image_chain([(fn1, c1), (fn2, c2), (fn3, c3)])
-
-    runtime = _make_image_runtime(REFS)
-    start = time.perf_counter()
-    with _patch_cc_fail():
-        result = await _run_i2i_loop("test prompt", REFS, runtime, chain)
-    dur = time.perf_counter() - start
-
-    total = sum(c["n"] for c in counters)
-    ok = (
-        result.success
-        and result.image_url is not None
-        and total == 3
-        and c1["n"] == 2
-        and c2["n"] == 1
-        and c3["n"] == 0
-    )
-    return FallbackTestResult(
-        test_id="i2i_05_all_consistency_fail",
-        scenario="Consistency fail → best-effort after global cap 3 (pro:2, flash:1).",
-        mode="i2i", chain_models="pro → flash → seedream", success=ok,
-        expected_behavior="pro:2, flash:1, seedream:0 = 3 total, best-effort returns image",
-        actual_behavior=f"total={total}, success={result.success}, has_image={result.image_url is not None}, msg={result.user_facing_message}",
-        expected_calls="pro:2, flash:1, seedream:0",
-        actual_calls=_fmt_calls(counters),
-        model_used=result.model, total_attempts=total, duration_sec=round(dur, 3),
     )
 
 
@@ -714,14 +647,14 @@ async def test_i2v_14_two_fail_fb2() -> FallbackTestResult:
     result = await _run_video_loop("test prompt", "https://example.com/start.webp", 5, runtime, chain)
     dur = time.perf_counter() - start
 
-    ok = result.success and c1["n"] == 1 and c2["n"] == 1 and c3["n"] == 1
+    ok = not result.success and c1["n"] == 1 and c2["n"] == 1 and c3["n"] == 0
     return FallbackTestResult(
         test_id="i2v_14_two_fail_fb2",
-        scenario="I2V V1 fail → W26 fail → Sora success (full 3-step).",
+        scenario="I2V V1 fail → W26 fail → global cap stops before Sora.",
         mode="i2v", chain_models="v1 → w26 → sora", success=ok,
-        expected_behavior="v1:1, w26:1, sora:1, success",
+        expected_behavior="v1:1, w26:1, sora:0, success=False",
         actual_behavior=f"success={result.success}, model={result.model}",
-        expected_calls="v1:1, w26:1, sora:1",
+        expected_calls="v1:1, w26:1, sora:0",
         actual_calls=_fmt_calls(counters, VIDEO_LABELS),
         model_used=result.model, total_attempts=sum(c["n"] for c in counters), duration_sec=round(dur, 3),
     )
@@ -741,14 +674,14 @@ async def test_i2v_15_retryable_exhaust_fb2() -> FallbackTestResult:
     result = await _run_video_loop("test prompt", "https://example.com/start.webp", 5, runtime, chain)
     dur = time.perf_counter() - start
 
-    ok = result.success and c1["n"] == 2 and c2["n"] == 2 and c3["n"] == 1
+    ok = not result.success and c1["n"] == 2 and c2["n"] == 0 and c3["n"] == 0
     return FallbackTestResult(
         test_id="i2v_15_retryable_exhaust_fb2",
-        scenario="I2V V1 2x → W26 2x → Sora OK (5 calls).",
+        scenario="I2V V1 2x reaches the global cap.",
         mode="i2v", chain_models="v1 → w26 → sora", success=ok,
-        expected_behavior="v1:2, w26:2, sora:1 = 5, success",
+        expected_behavior="v1:2, w26:0, sora:0 = 2, success=False",
         actual_behavior=f"success={result.success}, model={result.model}",
-        expected_calls="v1:2, w26:2, sora:1",
+        expected_calls="v1:2, w26:0, sora:0",
         actual_calls=_fmt_calls(counters, VIDEO_LABELS),
         model_used=result.model, total_attempts=sum(c["n"] for c in counters), duration_sec=round(dur, 3),
     )
@@ -769,14 +702,14 @@ async def test_i2v_16_all_fail() -> FallbackTestResult:
     dur = time.perf_counter() - start
 
     total = sum(c["n"] for c in counters)
-    ok = not result.success and total == 6
+    ok = not result.success and total == 2
     return FallbackTestResult(
         test_id="i2v_16_all_fail",
-        scenario="I2V 3 models × 2 retryable = 6 calls, all fail → error.",
+        scenario="I2V retryable failures stop at the two-attempt global cap.",
         mode="i2v", chain_models="v1 → w26 → sora", success=ok,
-        expected_behavior="v1:2, w26:2, sora:2 = 6, success=False",
+        expected_behavior="v1:2, w26:0, sora:0 = 2, success=False",
         actual_behavior=f"total={total}, success={result.success}",
-        expected_calls="v1:2, w26:2, sora:2",
+        expected_calls="v1:2, w26:0, sora:0",
         actual_calls=_fmt_calls(counters, VIDEO_LABELS),
         total_attempts=total, duration_sec=round(dur, 3),
     )
@@ -786,12 +719,11 @@ async def test_i2v_16_all_fail() -> FallbackTestResult:
 
 
 ALL_TEST_CASES = [
-    # I2I (6 cases)
+    # I2I (5 cases)
     test_i2i_01_retryable_then_success,
     test_i2i_02_permanent_fb1,
     test_i2i_03_two_fail_fb2,
     test_i2i_04_retryable_exhaust_fb2,
-    test_i2i_05_all_consistency_fail,
     test_i2i_06_all_api_fail,
     # T2I (5 cases)
     test_t2i_07_retryable_then_success,
@@ -942,5 +874,5 @@ async def test_wrapper_fallback_retry():
         status = "PASS" if r.success else "FAIL"
         print(f"  [{status}] {r.test_id}: calls=[{r.actual_calls}] → {r.actual_behavior}")
 
-    assert len(results) == 16
+    assert len(results) == 15
     assert failed == 0, f"{failed} fallback/retry test(s) failed!"

@@ -1,12 +1,6 @@
 """
 Video Agent 流程开关常量
 """
-# Image Wrapper 角色一致性校验（check_character_consistency_llm）
-ENABLE_IMAGE_WRAPPER_CONSISTENCY = True
-
-# Video Wrapper 视频一致性校验（check_video_consistency_llm；同时覆盖 Lipsync Wrapper）
-ENABLE_VIDEO_WRAPPER_CONSISTENCY = True
-
 # Image wrapper：单次工具调用内，实际文生图/图生图 API 调用次数上限（含同模型重试与跨模型降级）。
 IMAGE_WRAPPER_MAX_TOTAL_GENERATION_ATTEMPTS = 3
 

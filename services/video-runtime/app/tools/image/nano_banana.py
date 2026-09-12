@@ -11,9 +11,7 @@ from typing import List, Optional, Dict, Any, cast, Literal, Annotated, TYPE_CHE
 from typing_extensions import TypedDict
 from pydantic import SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
+from app.tools.runtime import tool
 from langsmith import get_current_run_tree, traceable
 from pydantic import BaseModel, Field
 import random
@@ -35,7 +33,7 @@ if TYPE_CHECKING:
 
 
 from ..context_schemas import ImageGenerationContext
-from langchain.tools import ToolRuntime
+from app.tools.runtime import ToolRuntime
 from ...models.tool_enums import ToolType, DefaultValues, ToolName, AspectRatio, Resolution, TARGET_PIXELS
 from ...models.user_options import ImageGenerationTool
 
@@ -370,7 +368,7 @@ class NanoBananaT2IInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 @tool(ToolName.NANO_BANANA_T2I, args_schema=NanoBananaT2IInput)
@@ -414,7 +412,7 @@ IMPORTANT GUIDELINES:
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 @tool(ToolName.NANO_BANANA_I2I, args_schema=NanoBananaI2IInput)

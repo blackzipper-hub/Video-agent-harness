@@ -33,7 +33,7 @@ def configure_logging():
         if isinstance(logger, logging.Logger):
             if name.startswith('app'):
                 logger.setLevel(logging.INFO)
-            elif name in ('urllib3', 'httpx', 'openai', 'langchain', 'httpx'):
+            elif name in ('urllib3', 'httpx', 'openai', 'httpx'):
                 logger.setLevel(logging.WARNING)
 
 

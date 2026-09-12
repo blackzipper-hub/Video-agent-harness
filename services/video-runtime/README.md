@@ -61,7 +61,7 @@ Scene-reference isolation is checked both at the provider boundary and against r
 
 ## Compatibility API
 
-Studio talks to `app.video_runtime.standalone:app`. The `/chat-v1/service` mount is a DeepSeek BFF, not the retired LangGraph planner.
+Studio talks to `app.video_runtime.standalone:app`. The `/chat-v1/service` mount is the DeepSeek BFF and the only planning loop.
 
 If a pasted Create-Space URL names a DeepSeek Session whose Project binding is absent from the restored Runtime store, the BFF creates a fresh Session and returns its new `thread_id`; it never attaches a new Project to an unbound historical Session.
 

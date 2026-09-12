@@ -3,7 +3,7 @@ MMAudio V2 音效生成工具（WaveSpeed AI 模型）
 """
 import logging
 from typing import List, TYPE_CHECKING
-from langchain_core.tools import tool
+from app.tools.runtime import tool
 from langsmith import traceable
 
 if TYPE_CHECKING:

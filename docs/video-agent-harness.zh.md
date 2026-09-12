@@ -56,7 +56,7 @@ API 根路径是 `/api/video`。它提供项目创建与查看、已安装插件
 
 ## 运行时选择
 
-`VIDEO_AGENT_BACKEND` 只接受 `deepseek`。产品启动会挂载 DeepSeek 兼容 BFF、加载已配置 Video Plugin 和 Skill Workflow，并向 `VideoBuildRuntime` 提交结构化 Workflow 或 RebuildPlan；不会把导入的 DeepAgents／LangGraph Coordinator 作为第二个 Planner 启动。`VIDEO_INCREMENTAL_ENGINE_ENABLED` 仍作为规范化项目存储的兼容部署开关且默认开启；新路径不能关闭插件分发。
+`VIDEO_AGENT_BACKEND` 只接受 `deepseek`。产品启动会挂载 DeepSeek 兼容 BFF、加载已配置 Video Plugin 和 Skill Workflow，并向 `VideoBuildRuntime` 提交结构化 Workflow 或 RebuildPlan。DeepSeek Harness 是唯一的规划循环；Provider 工具不会启动第二个 Planner。`VIDEO_INCREMENTAL_ENGINE_ENABLED` 仍作为规范化项目存储的兼容部署开关且默认开启；新路径不能关闭插件分发。
 
 导入的 Cuti 媒体服务继续提供 Provider 和媒体实现代码，但其中依赖 Skill 的提示词也通过同一个进程级 Catalog 解析，不再直接读取固定 stage 目录。
 

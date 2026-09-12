@@ -17,15 +17,8 @@ dependencies = [
     "httpx>=0.24.1",
     "python-dotenv>=1.0.0",
     
-    # === LangChain / LangGraph / LangSmith ===
-    # Research + consistency stages still use create_deep_agent / FailoverChatOpenAI.
-    "langchain (>=1.3.11,<2.0.0)",
-    "langchain-core (>=1.4.0,<2.0.0)",
-    "langchain-openai>=0.1.0",
-    "langchain-google-genai (>=4.2.5,<5.0.0)",
-    "langgraph (>=1.2.5,<1.3.0)",
+    # === Observability ===
     "langsmith (>=0.8.11,<0.11.0)",
-    "deepagents (>=0.6.12,<0.7.0)",
     
     # === AI / ML ===
     "openai>=1.1.0",

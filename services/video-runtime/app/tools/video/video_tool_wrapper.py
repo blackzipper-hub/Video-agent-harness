@@ -1,10 +1,6 @@
 """
 视频生成工具 Wrapper — 统一入口。
 
-视频一致性：成功生成后调用 check_video_consistency_llm（Gemini），
-不通过时若有 suggested_prompt 则同模型用其重试一次，否则换下一模型；
-Lipsync 复用本 _run_video_loop，一致性与 metrics 一并生效。
-
 支持所有视频生成模型，Chain 在 create_video_wrapper_tools(user_option) 时选定：
   主模型 = 用户选择（seedance v1.0 / v1.5 / kling v3 / wan 2.5 / wan 2.6 / sora / sora-pro）
   fallback 固定为 seedance v1.0 pro fast → wan 2.6 flash（去重后）
@@ -33,12 +29,10 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Annotated, Any, Dict, FrozenSet, TYPE_CHECKING
 
-from app.schemas.video_llm import VideoConsistencyLevel
-
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 
 from app.models.image_result import VideoGenerationResult
 from app.models.tool_enums import ToolType, ToolMode, ToolName
@@ -286,16 +280,13 @@ def _get_ref_t2v_video_chain(tool: Optional[VideoGenerationTool]) -> List["ToolI
 
 @dataclass
 class VideoToolMetrics:
-    """Wrapper 执行统计，写入 LangSmith run metadata；与 Image 对齐，含一致性维度。"""
+    """Wrapper 执行统计，写入 LangSmith run metadata。"""
 
     total_attempts: int = 0
     per_model_attempts: Dict[str, int] = field(default_factory=dict)
     success: bool = False
     final_model: Optional[str] = None
     failure_reasons: List[str] = field(default_factory=list)
-    consistency_checks: int = 0
-    consistency_pass: int = 0
-    consistency_details: List[Dict[str, Any]] = field(default_factory=list)
     best_effort_selected: bool = False
 
     def record_attempt(
@@ -303,20 +294,11 @@ class VideoToolMetrics:
         model: str,
         success: bool,
         failure_reason: Optional[str] = None,
-        consistency_detail: Optional[Dict[str, Any]] = None,
-        failed_attempt_detail: Optional[Dict[str, Any]] = None,
     ):
         self.total_attempts += 1
         self.per_model_attempts[model] = self.per_model_attempts.get(model, 0) + 1
         if failure_reason:
             self.failure_reasons.append(f"{model}:{failure_reason}")
-        if consistency_detail is not None:
-            self.consistency_checks += 1
-            if consistency_detail.get("passed"):
-                self.consistency_pass += 1
-            self.consistency_details.append(consistency_detail)
-        if failed_attempt_detail is not None:
-            self.consistency_details.append(failed_attempt_detail)
         if success:
             self.success = True
             self.final_model = model
@@ -329,9 +311,6 @@ class VideoToolMetrics:
                 "success": self.success,
                 "final_model": self.final_model,
                 "failure_reasons": list(self.failure_reasons),
-                "consistency_checks": self.consistency_checks,
-                "consistency_pass": self.consistency_pass,
-                "consistency_details": list(self.consistency_details),
                 "best_effort_selected": self.best_effort_selected,
             }
         }
@@ -344,9 +323,6 @@ class VideoToolMetrics:
             "success": self.success,
             "final_model": self.final_model,
             "failure_reasons": list(self.failure_reasons),
-            "consistency_checks": self.consistency_checks,
-            "consistency_pass": self.consistency_pass,
-            "consistency_details": list(self.consistency_details),
             "best_effort_selected": self.best_effort_selected,
         }
 
@@ -448,11 +424,11 @@ async def _invoke_t2v_video_tool(
     return await tool_info.tool.ainvoke(common_args)
 
 
-def _consistency_anchor_url(
+def _generation_anchor_url(
     runtime: Optional[ToolRuntime[VideoGenerationContext]],
     start_image_url: str,
 ) -> str:
-    """一致性校验锚点：reference-to-video 用首张 reference，否则用首帧。"""
+    """Reference-to-video fallback uses the first reference as its start frame."""
     if runtime and runtime.context:
         refs = runtime.context.reference_images or []
         if refs and refs[0]:
@@ -499,15 +475,13 @@ async def _run_video_loop(
     runtime: ToolRuntime[VideoGenerationContext],
     chain: List["ToolInfo"],
 ) -> VideoGenerationResult:
-    """视频生成 fallback chain — 每个模型最多 2 次尝试；成功后再做一致性检查，不通过则 suggested_prompt 重试或换模型。"""
-    from app.tools.video.video_consistency import check_video_consistency_llm
+    """视频生成 fallback chain — 每个模型最多 2 次尝试。"""
     from app.services.agent.video.agent_video_constants import (
-        ENABLE_VIDEO_WRAPPER_CONSISTENCY,
         VIDEO_WRAPPER_MAX_TOTAL_GENERATION_ATTEMPTS,
     )
 
     MAX_TOTAL_ATTEMPTS = VIDEO_WRAPPER_MAX_TOTAL_GENERATION_ATTEMPTS
-    anchor_url = _consistency_anchor_url(runtime, start_image_url)
+    anchor_url = _generation_anchor_url(runtime, start_image_url)
 
     requested_model = chain[0].tool_type
     _lang = getattr(runtime.context, "language", None) if runtime and runtime.context else None
@@ -515,7 +489,6 @@ async def _run_video_loop(
     last_error_result: Optional[VideoGenerationResult] = None
     best_effort_result: Optional[VideoGenerationResult] = None
     loop_start = time.perf_counter()
-    current_prompt = prompt
     accumulated_tool_cost = 0.0
     total_attempts = 0
 
@@ -534,91 +507,27 @@ async def _run_video_loop(
 
             attempt_start = time.perf_counter()
             result = (
-                await _invoke_t2v_video_tool(current_prompt, duration, info, runtime)
+                await _invoke_t2v_video_tool(prompt, duration, info, runtime)
                 if info.mode == ToolMode.T2V
                 else await _invoke_video_tool(
-                    current_prompt, anchor_url or start_image_url, duration, info, runtime
+                    prompt, anchor_url or start_image_url, duration, info, runtime
                 )
             )
             attempt_duration = time.perf_counter() - attempt_start
             accumulated_tool_cost += float(getattr(result, "billing_cost", None) or 0.0)
 
             if result.success and result.video_url:
-                skip_check = getattr(runtime.context, "skip_consistency_check", False) if runtime and runtime.context else False
-                if not ENABLE_VIDEO_WRAPPER_CONSISTENCY or skip_check:
-                    if skip_check:
-                        logger.info("⏭️ [Video] skip_consistency_check=True，跳过视频一致性校验")
-                    metrics.record_attempt(
-                        info.tool_type.value, True,
-                        consistency_detail={"model": info.tool_type.value, "passed": True, "video_url": result.video_url, "i2v_prompt": current_prompt},
-                    )
-                    metrics.flush_to_langsmith()
-                    out = await _maybe_add_switch_info(result, info.tool_type, requested_model, lang=_lang)
-                    return _inject_video_metrics(out, metrics, time.perf_counter() - loop_start, accumulated_tool_cost)
-                character_ref_urls = getattr(runtime.context, "character_ref_image_urls", None) if runtime and runtime.context else None
-                character_ref_labels = getattr(runtime.context, "character_ref_labels", None) if runtime and runtime.context else None
-                consistency = await check_video_consistency_llm(
-                    anchor_url or start_image_url, result.video_url, current_prompt,
-                    character_ref_image_urls=character_ref_urls,
-                    character_ref_labels=character_ref_labels,
+                metrics.record_attempt(info.tool_type.value, True)
+                metrics.flush_to_langsmith()
+                out = await _maybe_add_switch_info(
+                    result, info.tool_type, requested_model, lang=_lang,
                 )
-                ffc = consistency.first_frame_consistency or VideoConsistencyLevel.FAIL
-                first_frame_violation = not ffc.is_pass()
-                per_ff = getattr(consistency, "per_character_first_frame", None) or []
-                detail = {
-                    "model": info.tool_type.value,
-                    "passed": consistency.passed,
-                    "video_url": result.video_url,
-                    "i2v_prompt": current_prompt,
-                    "first_frame_consistency": ffc.value,
-                    "per_character_first_frame": [
-                        {
-                            "name": getattr(pc, "name", None),
-                            "face_consistency": getattr(pc, "face_consistency", VideoConsistencyLevel.N_A).value,
-                            "accessories_consistency": getattr(pc, "accessories_consistency", VideoConsistencyLevel.N_A).value,
-                            "clothing_consistency": getattr(pc, "clothing_consistency", VideoConsistencyLevel.N_A).value,
-                            "body_consistency": getattr(pc, "body_consistency", VideoConsistencyLevel.N_A).value,
-                            "hair_consistency": getattr(pc, "hair_consistency", VideoConsistencyLevel.N_A).value,
-                            "framing_consistency": getattr(pc, "framing_consistency", VideoConsistencyLevel.N_A).value,
-                            "no_new_primary_subjects": getattr(pc, "no_new_primary_subjects", VideoConsistencyLevel.N_A).value,
-                            "face_consistency_reason": getattr(pc, "face_consistency_reason", "") or "",
-                            "accessories_consistency_reason": getattr(pc, "accessories_consistency_reason", "") or "",
-                            "clothing_consistency_reason": getattr(pc, "clothing_consistency_reason", "") or "",
-                            "body_consistency_reason": getattr(pc, "body_consistency_reason", "") or "",
-                            "hair_consistency_reason": getattr(pc, "hair_consistency_reason", "") or "",
-                            "framing_consistency_reason": getattr(pc, "framing_consistency_reason", "") or "",
-                            "no_new_primary_subjects_reason": getattr(pc, "no_new_primary_subjects_reason", "") or "",
-                        }
-                        for pc in per_ff
-                    ],
-                    "camera_movement": (consistency.camera_movement or VideoConsistencyLevel.N_A).value,
-                    "style_consistency": (consistency.style_consistency or VideoConsistencyLevel.N_A).value,
-                    "severe_abnormality": (consistency.severe_abnormality or VideoConsistencyLevel.FAIL).value,
-                    "camera_movement_reason": consistency.camera_movement_reason,
-                    "style_consistency_reason": consistency.style_consistency_reason,
-                    "severe_abnormality_reason": consistency.severe_abnormality_reason,
-                    "reason_overall": consistency.reason_overall,
-                    "suggested_prompt": consistency.suggested_prompt,
-                    "first_frame_violation": first_frame_violation,
-                }
-                metrics.record_attempt(info.tool_type.value, consistency.passed, consistency_detail=detail)
-
-                if consistency.passed:
-                    metrics.flush_to_langsmith()
-                    out = await _maybe_add_switch_info(result, info.tool_type, requested_model, lang=_lang)
-                    return _inject_video_metrics(out, metrics, time.perf_counter() - loop_start, accumulated_tool_cost)
-
-                if consistency.suggested_prompt and attempt_num == 1:
-                    current_prompt = consistency.suggested_prompt
-                    logger.info("🔄 [Video] 一致性未通过，用 suggested_prompt 同模型重试")
-                    continue
-                best_effort_result = result
-                break
+                return _inject_video_metrics(
+                    out, metrics, time.perf_counter() - loop_start,
+                    accumulated_tool_cost,
+                )
             elif result.success:
-                metrics.record_attempt(
-                    info.tool_type.value, True,
-                    consistency_detail={"model": info.tool_type.value, "passed": True, "video_url": result.video_url, "i2v_prompt": current_prompt},
-                )
+                metrics.record_attempt(info.tool_type.value, True)
                 metrics.flush_to_langsmith()
                 out = await _maybe_add_switch_info(result, info.tool_type, requested_model, lang=_lang)
                 return _inject_video_metrics(out, metrics, time.perf_counter() - loop_start, accumulated_tool_cost)
@@ -627,10 +536,7 @@ async def _run_video_loop(
             if result.raw_error_msg or result.error_msg or result.message:
                 raw = result.raw_error_msg or result.error_msg or result.message or ""
                 error_reason = raw[:80]
-            failed_detail = None
-            if result.video_url:
-                failed_detail = {"model": info.tool_type.value, "passed": False, "video_url": result.video_url, "failure_reason": error_reason, "i2v_prompt": current_prompt}
-            metrics.record_attempt(info.tool_type.value, False, failure_reason=error_reason, failed_attempt_detail=failed_detail)
+            metrics.record_attempt(info.tool_type.value, False, failure_reason=error_reason)
             last_error_result = result if getattr(result, "model", None) else result.model_copy(
                 update={"model": info.tool_type.value}
             )
@@ -678,7 +584,7 @@ class VideoWrapperI2VInput(BaseModel):
     Wrapper schema 为所有底层 tool schema 的父集（superset）:
       - i2v_prompt / start_image_url / duration: 所有 I2V tool 共有
       - end_image_url: 部分 tool 支持（如 Seedance），写入 runtime.context 供底层读取
-      - runtime: LangGraph 内部注入
+      - runtime: provider runtime 注入
     """
 
     i2v_prompt: str = Field(
@@ -704,7 +610,7 @@ class VideoWrapperI2VInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)",
+        description="Provider runtime context (internal use only)",
     )
 
 
@@ -754,7 +660,7 @@ class VideoWrapperRefT2VInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)",
+        description="Provider runtime context (internal use only)",
     )
 
 
@@ -772,7 +678,7 @@ def _make_ref_t2v_tool(chain: List["ToolInfo"]):
         f"""Seedance 2 reference-to-video with automatic fallback.
         Chain: {chain_desc}. reference_images are read from runtime.context (keyframes + character refs).
         """
-        anchor = _consistency_anchor_url(runtime, "")
+        anchor = _generation_anchor_url(runtime, "")
         result = await _run_video_loop(
             i2v_prompt, anchor, duration, runtime, chain
         )

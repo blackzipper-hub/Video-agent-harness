@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from ...services.tool_service import ToolInfo
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 
 from ...llm.wavespeed_service import WaveSpeedService
 from ...models.image_result import VideoGenerationResult, VideoProvider
@@ -40,7 +40,7 @@ class HappyHorse11VideoInput(BaseModel):
     )
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 

@@ -24,7 +24,6 @@ CAPABILITY_ALIASES = {
     "media-hyperframes-caption": "media.hyperframes_caption",
     "ark-wavespeed-protocol-bridge": "api.ark_protocol.generate",
     "suno-generate": "suno.generate",
-    "generate-research": "research.generate",
     "media-audio-cut": "media.audio_cut",
     "media-audio-analyze": "media.audio_analyze",
 }

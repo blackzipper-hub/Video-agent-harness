@@ -19,9 +19,9 @@ Adapted from the OpenMontage Research Director. You research the subject so the 
 prompts that follow are grounded in real references, real moods, and real audience
 expectations — before any creative decision is made or any money is spent.
 
-This methodology backs the **`research.generate`** capability, so any workflow can
-schedule it as a stage and get a persisted `research` artifact. Read this Skill when
-you want the method; schedule `research.generate` when you want the artifact.
+This methodology runs inside the active Harness loop. Read this Skill, perform the
+searches directly, and keep the findings in the current planning context; do not
+schedule a separate research capability or agent task.
 
 **You do not make the creative decision and you do not generate anything.** You gather
 raw material and hand back directions for the active workflow to choose from.
@@ -43,9 +43,8 @@ addition to this skill; do not pretend you have it.
 
 Cite only URLs that came back in a search result. A URL written from memory is a
 guess, and a guessed link that resolves to the wrong page is worse than no link.
-When running as `research.generate`, every URL you cite is checked against the list
-of pages search actually returned during this run. Anything else is rejected by name
-and you have to replace it. Writing a plausible URL from memory costs you a retry, so
+Every URL you cite must come from the pages search actually returned during this run.
+Writing a plausible URL from memory costs you a retry, so
 copy the one in front of you — and when you have a finding but no link, keep the
 finding and leave the URL empty rather than inventing one to fill the field.
 
@@ -223,17 +222,15 @@ Compile all URLs used. Minimum 5 sources. Each entry carries:
 `research_summary` is one paragraph: the single most important insight from this
 research and why it matters for the video.
 
-Running as `research.generate`, hand off by calling `write_research` with `topic`,
-`research_summary`, `landscape`, `reference_context`, `directions`, and `sources`.
+Hand the active Harness loop `topic`, `research_summary`, `landscape`,
+`reference_context`, `directions`, and `sources` in the current planning context.
 Pass every one you filled — a field you omit is a batch of searching thrown away,
-because nothing downstream re-derives it. That tool checks only what a machine can
-know: the fields are present, `type` is in the list above, landscape has at
-least 3 existing works and 1 gap, at least 5 sources are listed, and every
-cited URL is one search really returned.
+because nothing downstream re-derives it. Keep `type` in the list above, include at
+least 3 existing works and 1 gap, list at least 5 sources, and use only URLs returned
+by search.
 Every Quality bar column in this file is yours to hold — nothing downstream will
 catch a vague `motion_commitment` or a finding that restates the brief. A
-`VALIDATION_ERROR` reply names what is structurally wrong; fix it and call again in
-the same turn. Otherwise report the directions and the sources, and stop. The
+Report the directions and the sources, and stop. The
 active workflow's prompt writing consumes this. Do not schedule generation tasks
 and do not pick the winner yourself unless the user asks you to.
 

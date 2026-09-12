@@ -491,7 +491,6 @@ def test_mv_skill_files_and_workflow_contract():
     assert "media.extract_frame" in (spec.allowed_capabilities or ())
     assert "api.ark_protocol.generate" in (spec.allowed_capabilities or ())
     for cap in (
-        "research.generate",
         "media.audio_analyze",
         "media.audio_cut",
         "media.mix_audio",
@@ -500,14 +499,14 @@ def test_mv_skill_files_and_workflow_contract():
         "api.provider.generate",
     ):
         assert cap in spec.pipeline
-    assert spec.pipeline[0] == "research.generate"
+    assert spec.pipeline[0] == "suno.generate"
     params = inject_workflow_parameters({}, spec)
     assert params["workflow_mode"] == "mv"
     assert "content_category" not in params
     skill_text = Path(__file__).resolve().parents[1] / "skills/external/mv/SKILL.md"
     description = skill_text.read_text(encoding="utf-8").split("---", 2)[1]
     assert "content_category" not in skill_text.read_text(encoding="utf-8")
-    assert "research.generate" in description
+    assert "research" + ".generate" not in description
     assert "media.audio_cut" in description
     assert "media.hyperframes_caption" in description
     assert spec.skill_dependencies == ()

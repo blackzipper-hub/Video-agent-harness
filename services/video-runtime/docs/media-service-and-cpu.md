@@ -344,9 +344,9 @@ VideoAgent 可以 polling 或 webhook 回调。
 
 ---
 
-## 5. 迁移清单
+## 5. 集成清单
 
-Dest LangGraph 的 `video_segments_service` / `video_assembly_service` 以及 `video_utils` 里的本地 FFmpeg 拼接 helper 已删除。Video Runtime 通过 `app.utils.media_service_client` 调用 Media Service；`video_utils.py` 只保留 provider 出片后仍需要的薄封装（`finalize_pipeline_video_upload`、`trim_video_to_duration`、`strip_audio_from_video`、`get_audio_duration_from_url`、`normalize_video_to_target_sync`）。
+Video Runtime 通过 `app.utils.media_service_client` 调用 Media Service；`video_utils.py` 只保留 Provider 出片后需要的薄封装（`finalize_pipeline_video_upload`、`trim_video_to_duration`、`strip_audio_from_video`、`get_audio_duration_from_url`、`normalize_video_to_target_sync`）。
 
 ### 5.4 s3_utils.py
 

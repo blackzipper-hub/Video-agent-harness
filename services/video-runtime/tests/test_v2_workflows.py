@@ -71,7 +71,6 @@ def test_inject_workflow_parameters_stamps_activated_workflow():
 
 def test_atomic_capabilities_require_a_workflow():
     assert capability_requires_workflow("atomic.video.generate") is True
-    assert capability_requires_workflow("research.generate") is False
     assert capability_requires_workflow("media.transcribe") is False
     assert capability_requires_workflow("actions.suggest") is False
 

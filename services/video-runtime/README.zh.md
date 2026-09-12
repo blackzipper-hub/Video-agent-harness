@@ -61,7 +61,7 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 
 ## 兼容 API
 
-Studio 对接 `app.video_runtime.standalone:app`。`/chat-v1/service` 挂载的是 DeepSeek BFF，不是已下线的 LangGraph Planner。
+Studio 对接 `app.video_runtime.standalone:app`。`/chat-v1/service` 挂载 DeepSeek BFF，它是唯一的规划循环。
 
 如果粘贴的 Create Space URL 指向一个仍存在于 DeepSeek、但在恢复后的 Runtime 中已没有 Project 绑定的 Session，BFF 会创建全新 Session 并返回新的 `thread_id`，不会把新 Project 接到未绑定的历史 Session 上。
 

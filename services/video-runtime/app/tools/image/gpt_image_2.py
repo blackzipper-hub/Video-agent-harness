@@ -8,8 +8,8 @@ if TYPE_CHECKING:
     from ....models.tool_enums import ToolType, ToolProvider
 from pydantic import BaseModel, Field, SkipValidation
 from pydantic.json_schema import SkipJsonSchema
-from langchain_core.tools import tool
-from langchain.tools import ToolRuntime
+from app.tools.runtime import tool
+from app.tools.runtime import ToolRuntime
 from langsmith import traceable
 
 from ...llm.wavespeed_service import WaveSpeedService
@@ -28,7 +28,7 @@ class GptImage2T2IInput(BaseModel):
     prompt: str = Field(description="Detailed image description prompt.")
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 
@@ -113,7 +113,7 @@ class GptImage2EditInput(BaseModel):
     images: List[str] = Field(description="List of input image URLs for editing.")
     runtime: Annotated[Any, SkipValidation, SkipJsonSchema()] = Field(
         default=None,
-        description="ToolRuntime injected by LangGraph (internal use only)"
+        description="Provider runtime context (internal use only)"
     )
 
 

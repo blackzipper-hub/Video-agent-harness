@@ -1,9 +1,10 @@
 """Cooperative cancellation for long provider polls.
 
-DeepSeek / Runtime cancel sets a Redis flag for the current run. Heavy nodes
-(research, consistency, provider polling) check that flag at loop boundaries and
-raise asyncio.CancelledError so work stops at the next poll interval instead of
-after the whole remote batch.
+Legacy task execution can set a Redis flag for the current run. Provider polling
+checks that flag at loop boundaries and raises asyncio.CancelledError so work
+stops at the next poll interval instead of after the whole remote batch. Local
+Video Runtime does not require Redis; the optional integration is loaded only
+when a legacy run id is present.
 
 - run_id is stored in a contextvar so nested tool loops can read it
 - a short in-process TTL cache avoids hammering Redis
@@ -18,8 +19,6 @@ from contextvars import ContextVar
 from typing import Dict, Optional, Tuple
 
 from ....models.task_status import TaskStatus
-from ...redis.connection import get_redis_stream_service
-
 logger = logging.getLogger(__name__)
 
 _current_run_id_cv: ContextVar[Optional[str]] = ContextVar(
@@ -53,6 +52,8 @@ async def is_run_cancelled(run_id: Optional[str] = None) -> bool:
             return cancelled
 
     try:
+        from ...redis.connection import get_redis_stream_service
+
         redis_service = await get_redis_stream_service()
         status = await redis_service.get_task_status(rid)
     except Exception as e:

@@ -13,7 +13,7 @@ name: mv
 description: >-
   Workflow: MV / beat-synchronized songs / a character singing this song.
   Reference research -> music analysis and window/segment cutting -> design images -> segment generation -> concatenation -> original-song replacement -> captions on the final video.
-  Capability order: research.generate, suno.generate, media.audio_analyze, media.audio_cut,
+  Capability order: suno.generate, media.audio_analyze, media.audio_cut,
   atomic.image.generate, api.provider.generate, media.concat, media.mix_audio,
   media.hyperframes_caption.
   Triggers: MV, songs, beat synchronization, a character singing this song, beat sync, music video, $mv.
@@ -35,7 +35,6 @@ metadata:
           instruction: Plan shots and captions from the real duration, beats, lyrics, and cut window.
     entrypoints: [text, image, audio, video]
     pipeline:
-      - research.generate
       - suno.generate
       - media.audio_analyze
       - media.audio_cut
@@ -48,7 +47,6 @@ metadata:
     requires_keyframe: false
     allowed_capabilities:
       - actions.suggest
-      - research.generate
       - suno.generate
       - atomic.image.generate
       - api.provider.generate
@@ -86,11 +84,11 @@ If the user supplies a source, use it. Otherwise, the director chooses once, and
 
 ## Capabilities and Tools
 
-- **Inspect sources**: examine the user's text and media attached to this request. Record what the user wants and what the source contains in `ProjectIntent.brief`. Use that brief for research, design images, and footage. Take the explicitly written subject for `research.generate.user_input` from the brief.
+- **Inspect sources**: examine the user's text and media attached to this request. Record what the user wants and what the source contains in `ProjectIntent.brief`. Use that brief for research, design images, and footage.
 - **Creative ideation**: explore directions from the brief or song and develop the most memorable one.
 - **Copy expansion**: expand vague needs into complete Chinese prompts incorporating camera movement, light, rhythm, and style.
 - **web_search**: search current popular prompt writing and incorporate useful phrasing.
-- **Reference research**: only after source inspection, use `research.generate` for external references (method: `video_skill_load("video-research")`). Take `user_input` from the brief. Choose the direction with the best quality and effect among the three. Skip if the user explicitly declines research.
+- **Reference research**: only after source inspection, let the Harness use `web_search` directly for external references (method: `video_skill_load("video-research")`). Choose the direction with the best quality and effect among the three. Skip if the user explicitly declines research.
 - **Vocabulary selection**: use camera, style, directing, and illustration vocabulary from [reference.md](../../../skills/external/mv/reference.md); do not invent terms.
 - **Image diagnosis**: check resolution (300-6000px), aspect ratio (0.4-2.5), and composition; flag camera-movement risks proactively.
 - **Compatibility check**: assess image, prompt, camera movement, and this music segment's emotion/vocals together; revise locally if they clash. If references were researched, also check alignment with the chosen direction.
@@ -170,7 +168,7 @@ Choose creative work and research independently after receiving assets; **derive
 
 ## Search Suggestions
 
-Search from the brief, the user's words, and the song. Skip when the user explicitly declines. See `video_skill_load("video-research")` for methodology. Take `research.generate.user_input` from the brief.
+Search from the brief, the user's words, and the song. Skip when the user explicitly declines. See `video_skill_load("video-research")` for methodology. Search inside the current Harness loop; do not create another task.
 
 Use `web_search` directly when you only need one or two prompt phrases:
 
@@ -185,7 +183,7 @@ Use `web_search` directly when you only need one or two prompt phrases:
 
 ## Production Process
 
-1. **Inspect sources before deciding whether to research.** Record observations in the brief, then optionally call `research.generate`. Choose the best of three directions and use it in subsequent design images and every segment's prompt.
+1. **Inspect sources before deciding whether to research.** Record observations in the brief, then optionally search directly in the current Harness loop. Choose the best of three directions and use it in subsequent design images and every segment's prompt.
 2. **Get the song first.** If the user provided audio, listen to it directly.
 
    Otherwise, generate a song through `suno.generate`. First `video_skill_load("suno-song")` and follow its lyrics and Style Box process. Decide vocals, lyrics, and description versus custom lyrics yourself. Follow the cast commitments for the singer, reflected at the start of `tags` and in `vocal_gender`. Consult this capability for fields. If research exists, derive musical style and emotion from the selected direction's `mood_direction`.

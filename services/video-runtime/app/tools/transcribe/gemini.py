@@ -21,7 +21,6 @@ from app.utils import media_service_client as msc
 from app.models.video_state import AudioTranscription, AudioSegment
 from app.models.user_options import UserOption
 from app.models.tool_enums import AudioSegmentGranularity, DefaultValues
-from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
@@ -857,17 +856,10 @@ async def transcribe_audio_with_gemini(
                 encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
                 audio_content = {"data": encoded_audio, "mime_type": audio_mime_type}
 
-            from langchain_core.messages import SystemMessage, HumanMessage
-            from app.orchestration.skills.prompt_context import (
-                facts_human_message,
-                skill_system_message,
-            )
-            from app.services.agent.utils.multimodal_post_process import process as multimodal_process
-            from prompts.prompt_config import PROMPTS_CONFIG, PromptName
-            from app.services.agent.utils.llm_resilience import (
-                StructuredResilienceKind,
-                ainvoke_structured_resilient,
-            )
+            from google import genai
+            from google.genai import types
+            from app.models.tool_enums import ToolProvider, ToolType
+            from app.services.account.account_router import get_account_router
 
             _apply_lipsync = should_apply_lipsync_constraint(
                 user_option,
@@ -876,10 +868,6 @@ async def transcribe_audio_with_gemini(
             )
             _granularity = _resolve_granularity(granularity)
 
-            system = skill_system_message(
-                "audio-transcription-director",
-                lead="Follow audio-transcription-director.",
-            )
             facts = {
                 "audio_duration_sec": round(float(actual_duration), 2),
                 "user_input": (user_input or "").strip(),
@@ -891,13 +879,40 @@ async def transcribe_audio_with_gemini(
                 ),
                 "granularity": _granularity.value,
             }
-            human = facts_human_message(facts) + "\n__AUD_audio_content__"
+            prompt = (
+                "Transcribe and analyze the attached audio. Return JSON matching the "
+                "provided schema exactly. Use MM:SS.mmm timestamps, keep every segment "
+                "within the measured audio duration, identify song sections, vocals, "
+                "tempo, emotion, and word timestamps when audible. Runtime facts:\n"
+                + json.dumps(facts, ensure_ascii=False)
+            )
+            if "file_uri" in audio_content:
+                audio_part = types.Part.from_uri(
+                    file_uri=audio_content["file_uri"],
+                    mime_type=audio_content["mime_type"],
+                )
+            else:
+                audio_part = types.Part.from_bytes(
+                    data=audio_bytes,
+                    mime_type=audio_content["mime_type"],
+                )
 
-            template_data = {
-                "audio_content": audio_content,
-            }
-            messages = [SystemMessage(content=system), HumanMessage(content=human)]
-            messages = await multimodal_process(messages, template_data)
+            async def _transcribe_request(api_key: str):
+                client = genai.Client(
+                    api_key=api_key,
+                    http_options=types.HttpOptions(timeout=300_000),
+                )
+                return await client.aio.models.generate_content(
+                    model=ToolType.GEMINI_2_5_FLASH.value,
+                    contents=types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=prompt), audio_part],
+                    ),
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=GeminiTranscriptionResult,
+                    ),
+                )
             
             # 重试逻辑：最多重试3次，收集所有结果后选择最佳的
             max_retries = 3
@@ -907,12 +922,15 @@ async def transcribe_audio_with_gemini(
             
             while retry_count < max_retries:
                 logger.info(f"🎵 调用 Gemini 模型进行音频转录... (尝试 {retry_count + 1}/{max_retries})")
-                raw_result = await ainvoke_structured_resilient(
-                    prompt_entry=PROMPTS_CONFIG[PromptName.VIDEO_AUDIO_TRANSCRIPTION],
-                    kind=StructuredResilienceKind.STRUCTURED_CHAT_MESSAGES,
-                    structured_chat_messages=messages,
-                    include_raw=False,
+                router = await get_account_router()
+                response = await router.route_tool_request(
+                    provider=ToolProvider.GOOGLE,
+                    tool_type=ToolType.GEMINI_2_5_FLASH,
+                    request_func=_transcribe_request,
                 )
+                raw_result = getattr(response, "parsed", None)
+                if raw_result is None and getattr(response, "text", None):
+                    raw_result = json.loads(response.text)
                 if raw_result is None:
                     logger.error(f"🎵 Gemini 转录失败：无法解析结果 (尝试 {retry_count + 1})")
                     retry_count += 1

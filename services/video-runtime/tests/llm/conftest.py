@@ -1,5 +1,5 @@
 """
-LLM 集成测试共用：加载 .env 后强制关闭 LangSmith / LangChain tracing，避免真实用例写入 trace。
+LLM 集成测试共用：加载 .env 后强制关闭 LangSmith tracing，避免真实用例写入 trace。
 """
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ def load_dev_env_disable_langsmith_tracing() -> None:
 
     load_dotenv(_PROJECT_ROOT / ".env.development")
     load_dotenv(_PROJECT_ROOT / ".env.local", override=True)
-    os.environ["LANGCHAIN_TRACING_V2"] = "false"
     os.environ["LANGSMITH_TRACING"] = "false"
 
 

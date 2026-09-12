@@ -150,7 +150,7 @@ async def inline_local_image_url_for_llm(image_url: str) -> str:
     """
     将本地存储的图片 URL 转为 data URI，避免 LLM SDK 同步回拉 http://localhost:8000/files/...
 
-    本地 STORAGE_BACKEND=local 时，Gemini/LangChain 会用 urllib3 同步下载 message 里的 image_url；
+    本地 STORAGE_BACKEND=local 时，远端模型 SDK 无法直接读取本地 image_url；
     若该 URL 指向本进程正在占用的 uvicorn，会堵死事件循环（自调用死锁）。读磁盘内联可绕开 HTTP。
     非本地 URL / 已是 data: / 读盘失败时原样返回。
     """
@@ -411,4 +411,3 @@ async def prepare_video_for_llm(
                 os.unlink(temp_file_path)
             except:
                 pass
-
