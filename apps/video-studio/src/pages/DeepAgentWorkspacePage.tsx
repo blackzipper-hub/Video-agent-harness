@@ -87,7 +87,7 @@ export default function DeepAgentWorkspacePage() {
     autoSelect: workspaceBase !== 'create' && !shouldStartFromHome && !routeThreadId,
     routeThreadId: routeThreadId || null,
   })
-  const { state } = workspace
+  const { state, loadFullTrace } = workspace
   const sendWorkspaceMessage = workspace.sendMessage
   const initialRequestHandled = useRef(false)
   const [message, setMessage] = useState('')
@@ -136,8 +136,11 @@ export default function DeepAgentWorkspacePage() {
     void deepAgentV2Client.getTokenUsage(state.selectedRunId, controller.signal)
       .then(setTokenUsage)
       .catch(() => undefined)
+    if (state.snapshot?.has_more_events) {
+      void loadFullTrace()
+    }
     return () =>{  controller.abort() }
-  }, [traceOpen, state.selectedRunId, state.traceEvents.length])
+  }, [traceOpen, state.selectedRunId, state.snapshot?.has_more_events, state.traceEvents.length, loadFullTrace])
 
   const status = state.snapshot?.run.status
   const isWaitingInput = status === 'waiting_input'

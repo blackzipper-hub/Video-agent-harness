@@ -509,6 +509,18 @@ export function useDeepAgentWorkspace({
     [hydrateRun, loadRuns, state.selectedRunId],
   )
 
+  const loadFullTrace = useCallback(async () => {
+    const runId = selectedRunIdRef.current
+    if (!runId) return
+    try {
+      const events = await deepAgentV2Client.getEventLog(runId)
+      if (selectedRunIdRef.current !== runId) return
+      dispatch({ type: 'TRACE_EVENTS', runId, events })
+    } catch {
+      // Trace is optional. Keep the tailed snapshot events on screen.
+    }
+  }, [])
+
   const activeThreadId = (
     resolveSessionThreadId(state.selectedRunId)
     || pendingThreadId
@@ -531,5 +543,6 @@ export function useDeepAgentWorkspace({
     selectArtifact,
     extractFrame,
     refresh,
+    loadFullTrace,
   }
 }

@@ -284,7 +284,36 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         listed = self.client.get("/chat-v1/service/v2/runs").json()["data"][0]
         self.assertEqual(listed["last_response"], snapshot["run"]["last_response"])
         self.assertTrue(snapshot["events"])
+        self.assertFalse(snapshot["has_more_events"])
         self.assertEqual(snapshot["messages"][-1]["content"], "Project opened")
+
+    def test_snapshot_keeps_messages_but_tails_trace_events(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "Make a trailer", "idempotency_key": "tail-events"},
+        ).json()["data"]
+        session_id = created["thread_id"]
+        extras = [
+            {
+                "type": "tool/call",
+                "seq": 10 + index,
+                "time": 2000 + index,
+                "data": {"callId": f"c{index}", "name": "search", "arguments": "{}"},
+            }
+            for index in range(120)
+        ]
+        self.deepseek.events[session_id].extend(extras)
+        snapshot = self.client.get(f"/chat-v1/service/v2/runs/{created['id']}").json()["data"]
+        event_log = self.client.get(
+            f"/chat-v1/service/v2/runs/{created['id']}/event-log",
+        ).json()["data"]
+        self.assertTrue(snapshot["has_more_events"])
+        self.assertEqual(len(snapshot["events"]), 80)
+        self.assertGreater(len(event_log), 80)
+        self.assertEqual(snapshot["last_event_sequence"], extras[-1]["seq"] + 1)
+        self.assertEqual(snapshot["messages"][-1]["content"], "Project opened")
+        self.assertTrue(any(message["role"] == "user" for message in snapshot["messages"]))
+        self.assertEqual(snapshot["events"][-1]["payload"]["call_id"], "c119")
 
     def test_orphaned_create_route_gets_a_fresh_deepseek_session(self) -> None:
         replacement = FakeDeepSeekClient()

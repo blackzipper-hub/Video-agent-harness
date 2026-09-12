@@ -379,6 +379,8 @@ _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
 _LIST_RUNS_LIMIT = 50
 _LIST_PREVIEW_MAX = 500
+# Chat bubbles stay complete. Trace/progress only needs the newest events on open.
+_SNAPSHOT_EVENT_LIMIT = 80
 _UNSET = object()
 _SKILL_SELECTION_SEPARATOR = "\n\nServer-resolved video Skill selection:\n"
 _UI_DEFAULTS_SEPARATOR = (
@@ -1031,6 +1033,11 @@ async def _snapshot(
                 ],
             })
     latest_build_status = builds[0].status if builds else None
+    mapped_events = [
+        mapped for item in events
+        if (mapped := _compat_event(project.id, item)) is not None
+    ]
+    has_more_events = len(mapped_events) > _SNAPSHOT_EVENT_LIMIT
     return {
         "run": await _run_with_context(
             runtime, project, session_id, events,
@@ -1051,10 +1058,8 @@ async def _snapshot(
             "updated_at": project.updated_at.isoformat(),
         } for item in artifacts if version.selections.get(item.artifact_id) == item.id],
         "messages": messages,
-        "events": [
-            mapped for item in events
-            if (mapped := _compat_event(project.id, item)) is not None
-        ],
+        "events": mapped_events[-_SNAPSHOT_EVENT_LIMIT:],
+        "has_more_events": has_more_events,
         "last_event_sequence": max((item.get("seq", -1) + 1 for item in events), default=0),
     }
 

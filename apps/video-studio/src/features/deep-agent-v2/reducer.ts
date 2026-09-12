@@ -52,6 +52,7 @@ export type DeepAgentAction =
   | { type: 'OPTIMISTIC_MESSAGE'; message: DeepAgentMessage }
   | { type: 'REMOVE_MESSAGE'; messageId: string }
   | { type: 'EVENT'; event: DeepAgentEvent }
+  | { type: 'TRACE_EVENTS'; runId: string; events: DeepAgentEvent[] }
   | { type: 'STREAMING'; streaming: boolean }
   | { type: 'SENDING'; sending: boolean }
   | { type: 'NOTICE'; notice: DeepAgentNotice | null }
@@ -442,6 +443,15 @@ export function deepAgentReducer(
         seenEventIds: [...state.seenEventIds, action.event.id].slice(-1000),
       }
     }
+    case 'TRACE_EVENTS':
+      if (action.runId !== state.selectedRunId) return state
+      return {
+        ...state,
+        traceEvents: mergeTraceEvents([
+          ...state.traceEvents.filter(event => event.run_id === action.runId),
+          ...action.events,
+        ]),
+      }
     case 'STREAMING':
       return { ...state, isStreaming: action.streaming }
     case 'SENDING':

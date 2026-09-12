@@ -170,6 +170,7 @@ export interface DeepAgentSnapshot {
   selections: DeepAgentSelection[]
   messages: DeepAgentMessage[]
   events?: DeepAgentEvent[]
+  has_more_events?: boolean
   last_event_sequence?: number
 }
 
