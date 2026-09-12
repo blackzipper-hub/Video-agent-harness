@@ -44,6 +44,13 @@ git clone --branch deepseek-harness-open --single-branch https://github.com/blac
 cd Video-agent-harness
 ```
 
+The HTTPS command works anonymously after the repository visibility is set to **Public**. Before public release, an invited collaborator with a configured GitHub SSH key can use:
+
+```sh
+git clone --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
+cd Video-agent-harness
+```
+
 ### 2. Configure provider keys
 
 macOS or Linux:

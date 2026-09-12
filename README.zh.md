@@ -44,6 +44,13 @@ git clone --branch deepseek-harness-open --single-branch https://github.com/blac
 cd Video-agent-harness
 ```
 
+仓库可见性设为 **Public** 后，任何人都能匿名执行上述 HTTPS 命令。正式公开前，已获邀请且配置了 GitHub SSH Key 的协作者可以使用：
+
+```sh
+git clone --branch deepseek-harness-open --single-branch git@github.com:blackzipper-hub/Video-agent-harness.git
+cd Video-agent-harness
+```
+
 ### 2. 配置 Provider Key
 
 macOS 或 Linux：
