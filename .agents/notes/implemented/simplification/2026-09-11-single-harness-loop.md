@@ -14,7 +14,7 @@ The DeepSeek Harness is the only agent loop. Reference research runs as direct `
 
 Video Runtime uses its own small async-tool wrapper for provider metadata and explicit runtime context. Atomic text generation calls the official OpenAI SDK, and audio transcription calls the official Google GenAI SDK with a Pydantic response schema. The Runtime dependency manifest and production imports exclude the retired agent-framework packages.
 
-The source launcher builds Video Studio as part of the root build, installs the standalone LangSmith observability client in its managed Python dependency directory, and loads legacy Redis cancellation and rate-limit adapters only when those optional paths are used. Local single-user startup therefore does not require a Redis package or server.
+The source launcher builds Video Studio as part of the root build, installs the standalone LangSmith observability client in its managed Python dependency directory, and loads legacy Redis cancellation and rate-limit adapters only when those optional paths are used. The repository dotenv template excludes process-launch proxy settings that DeepSeek Harness intentionally accepts only from the shell. Local single-user startup therefore does not require a Redis package or server.
 
 ## Alternatives considered
 

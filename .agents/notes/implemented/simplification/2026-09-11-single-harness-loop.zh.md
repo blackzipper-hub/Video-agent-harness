@@ -14,7 +14,7 @@ DeepSeek Harness 是唯一的 Agent 循环。参考调研由当前 Harness 上�
 
 Video Runtime 使用小型本地异步工具封装保存 Provider 元数据并显式传递运行上下文。Atomic 文本生成直接调用官方 OpenAI SDK，音频转录通过官方 Google GenAI SDK 和 Pydantic 响应 Schema 执行。Runtime 依赖清单与生产代码导入均排除已停用的 Agent 框架包。
 
-源码启动器会在根构建中构建 Video Studio，在其托管的 Python 依赖目录中安装独立的 LangSmith 可观测性客户端，并且只在实际使用旧版 Redis 取消与限流适配器时才加载它们。因此，本地单用户启动不要求安装 Redis 包或运行 Redis 服务。
+源码启动器会在根构建中构建 Video Studio，在其托管的 Python 依赖目录中安装独立的 LangSmith 可观测性客户端，并且只在实际使用旧版 Redis 取消与限流适配器时才加载它们。仓库的 dotenv 模板不会再包含 DeepSeek Harness 明确要求只能由启动 Shell 传入的进程级代理设置。因此，本地单用户启动不要求安装 Redis 包或运行 Redis 服务。
 
 ## 考虑过的替代方案
 

@@ -152,7 +152,7 @@ pnpm --filter @cuti-ai/video-studio run dev
 | Build 一直排队或 Runtime 不可用 | 执行 `pnpm video:doctor -- --data-dir .video-agent-harness-data`，并检查启动器终端。 |
 | 端口已被占用 | 释放或映射端口 `3000`、`3080`、`8001`、`8090` 或 `18080`，并保持 URL 和代理配置一致。 |
 | 首次安装出现 `EXDEV` 或 `cross-device` | 使用文档中的 `--data-dir .video-agent-harness-data`，且不要把数据目录指向另一个磁盘。 |
-| 使用代理时模型或 Provider 请求超时 | 启动服务栈前设置 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`。 |
+| 使用代理时模型、Provider 或首次依赖下载超时 | 在启动 Shell 中导出 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`，不要写入 `.env`，然后重启服务栈。本地启动器也会自动检测已启用的 Windows 用户代理。 |
 
 ## 测试
 

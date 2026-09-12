@@ -152,7 +152,7 @@ Open [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create).
 | Build remains queued or the Runtime is unavailable | Run `pnpm video:doctor -- --data-dir .video-agent-harness-data` and inspect the launcher terminal. |
 | Port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, or `18080`. Keep URLs and proxy settings consistent. |
 | `EXDEV` or `cross-device` appears during first-run installation | Use the documented `--data-dir .video-agent-harness-data` command and do not point the data directory at another drive. |
-| Model or provider calls time out behind a proxy | Set `HTTP_PROXY`, `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` before starting the stack. |
+| Model, provider, or first-run dependency download times out behind a proxy | Export `HTTP_PROXY`, `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` in the launching shell, not in `.env`, then restart the stack. The launcher detects an enabled Windows user proxy automatically. |
 
 ## Tests
 
