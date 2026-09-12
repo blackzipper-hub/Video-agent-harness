@@ -26,6 +26,9 @@ Provider / Workflow / Validator / Media plugins
 
 规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后， Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
 
+<a id="run"></a>
+<a id="run-from-source"></a>
+
 ## 从源码克隆并运行（推荐）
 
 这是开源分支的发布验收路径。一个命令会同时启动 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL、Redis 或系统 Python。
@@ -171,4 +174,4 @@ python -m unittest discover -s services/video-runtime/tests/video_runtime -v
 
 ## 许可证
 
-[MIT](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录在[源码来源说明](docs/source-provenance.zh.md)中；第三方依赖及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[MIT](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录在[源码来源说明](docs/source-provenance.zh.md)中；第三方依赖及许可证见 [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md)。

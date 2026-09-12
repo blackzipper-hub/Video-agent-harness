@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 Self-host with the root compose file. That is the supported product path:
 
 ```sh
-cp .env.example .env
+cp config/.env.example .env
 docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 

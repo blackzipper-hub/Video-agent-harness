@@ -207,14 +207,14 @@ English prompt：
 
 ```bash
 cd apps/video-studio
-cp .env.example .env.local
+cp ../../config/.env.example .env.local
 ```
 
 Windows PowerShell：
 
 ```powershell
 Set-Location apps/video-studio
-Copy-Item .env.example .env.local
+Copy-Item ../../config/.env.example .env.local
 ```
 
 在 `apps/video-studio/.env.local` 中填写：

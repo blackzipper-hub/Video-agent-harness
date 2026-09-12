@@ -26,6 +26,9 @@ The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@
 
 Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
 
+<a id="run"></a>
+<a id="run-from-source"></a>
+
 ## Clone and run from source (recommended)
 
 This is the release acceptance path for the open-source branch. One command starts Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, Redis, and a system Python installation are not required.
@@ -171,4 +174,4 @@ This project is in developer preview and can introduce compatibility-breaking ch
 
 ## License
 
-[MIT](LICENSE). DeepSeek and imported Cuti provenance is documented in [source provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). DeepSeek and imported Cuti provenance is documented in [source provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md).

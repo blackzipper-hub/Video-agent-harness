@@ -19,16 +19,14 @@ Windows local captions require Node.js, FFmpeg and the HyperFrames runtime. Run 
 The supported product path is the root compose file. Media Service listens on `18080`.
 
 ```bash
-# From the repository root
-cp .env.example .env
-docker compose --env-file .env -f compose.video.yml up --build -d
+cp config/.env.example .env
+docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 
-# Service-only (this directory)
+cd services/media-service
 pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload --port 8080
 
-# Run tests
 pip install pytest pytest-asyncio httpx
 pytest tests/ -v
 ```
@@ -69,9 +67,8 @@ pytest tests/ -v
 This track is local compose only. Cluster Helm, ECR, and EKS stay on the private branch.
 
 ```bash
-# From the repository root
-cp .env.example .env
-docker compose --env-file .env -f compose.video.yml up --build -d
+cp config/.env.example .env
+docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 
 Identity is `local-user`. Object storage defaults to the local disk (`STORAGE_BACKEND=local`). See the [root deploy README](../../deploy/README.md).

@@ -5,7 +5,7 @@
 自托管请用仓库根目录的 compose，这是支持的产品路径：
 
 ```sh
-cp .env.example .env
+cp config/.env.example .env
 docker compose --env-file .env -f deploy/compose.video.yml up --build -d
 ```
 

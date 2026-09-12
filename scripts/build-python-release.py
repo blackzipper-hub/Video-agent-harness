@@ -173,7 +173,7 @@ def stage_license_files(destination: Path, *, include_notices: bool) -> None:
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE")
     license_files = '["LICENSE"]'
     if include_notices:
-        shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", destination / "THIRD_PARTY_NOTICES.md")
+        shutil.copy2(ROOT / "guides" / "THIRD_PARTY_NOTICES.md", destination / "THIRD_PARTY_NOTICES.md")
         license_files = '["LICENSE", "THIRD_PARTY_NOTICES.md"]'
     pyproject = destination / "pyproject.toml"
     text, count = re.subn(

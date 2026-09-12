@@ -205,14 +205,14 @@ Keep the Docker services and DeepSeek Harness running, then create the frontend 
 
 ```bash
 cd apps/video-studio
-cp .env.example .env.local
+cp ../../config/.env.example .env.local
 ```
 
 On Windows PowerShell:
 
 ```powershell
 Set-Location apps/video-studio
-Copy-Item .env.example .env.local
+Copy-Item ../../config/.env.example .env.local
 ```
 
 Add the following values to `apps/video-studio/.env.local`:
