@@ -26,19 +26,19 @@ The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@
 
 Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
 
-<a id="run"></a>
-<a id="run-from-source"></a>
+<a id="run"></a><a id="run-from-source"></a>
 
 ## Clone and run from source (recommended)
 
-This is the release acceptance path for the open-source branch. One command starts Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, Redis, and a system Python installation are not required.
+This is the release acceptance path for the open-source branch. The setup command prepares dependencies, and the start command runs Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, and Redis are not required.
 
 ### Prerequisites
 
 - Git.
 - Node.js `22.19+` or `24+`.
 - pnpm `11.x`. Run `pnpm --version`; if pnpm is missing, run `corepack enable`.
-- Internet access on the first run so the launcher can download its checksum-verified portable Python runtime, Python packages, and separately licensed FFmpeg/FFprobe tools.
+- Python `3.11`.
+- Internet access during environment setup so the setup command can install Python packages and separately licensed FFmpeg/FFprobe tools.
 
 ### 1. Clone the open-source branch
 
@@ -90,19 +90,53 @@ pnpm run build
 
 The root build also produces the Video Studio bundle required by the local launcher.
 
-### 4. Start the complete local stack
+### 4. Prepare the local environment
+
+Create and activate a Python 3.11 virtual environment. On macOS or Linux:
+
+```sh
+python3.11 -m venv .venv
+source .venv/bin/activate
+pnpm video:setup -- --data-dir .video-agent-harness-data
+```
+
+On Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pnpm video:setup -- --data-dir .video-agent-harness-data
+```
+
+The setup command installs the pinned Python service dependencies into the active environment and installs FFmpeg/FFprobe under `.video-agent-harness-data`. It does not start any service. Run it again after the Python requirements change or when using a new data directory.
+
+To let setup download a checksum-verified portable Python instead of using an existing Python environment, pass `--portable-python`. This is an explicit alternative, not the default:
+
+```sh
+pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
+```
+
+### 5. Start the complete local stack
+
+Keep the Python environment activated, then run:
 
 ```sh
 pnpm video:local -- --data-dir .video-agent-harness-data
 ```
 
-Keep this terminal open. The first run can take several minutes while local runtime dependencies are installed. Later runs reuse `.video-agent-harness-data`, which is ignored by Git. The explicit repository-local data directory also avoids cross-volume rename errors on some Windows installations.
+The start command only checks the prepared environment and starts services; it does not download Python or install dependencies. Keep this terminal open. The repository-local data directory is ignored by Git and avoids cross-volume rename errors on some Windows installations.
+
+When using the optional portable environment, pass the same option to start:
+
+```sh
+pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
+```
 
 When the terminal prints `Video Agent Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
 
-### 5. Verify the running stack
+### 6. Verify the running stack
 
-In a second terminal, from the same repository root:
+In a second terminal, activate the same Python environment and run from the repository root:
 
 ```sh
 pnpm video:doctor -- --data-dir .video-agent-harness-data
@@ -110,6 +144,8 @@ curl http://127.0.0.1:8001/health
 ```
 
 Doctor should report every component as `OK`; the health response should be `{"status":"healthy"}`. Port `3000` is Video Studio, `3080` is DeepSeek Harness, `8001` is Video Runtime, `8090` is Sandbox Worker, and `18080` is Media Service.
+
+Portable-environment users also pass `--portable-python` to `video:doctor`.
 
 Stop the stack with `Ctrl+C` in its terminal. Local npm mode is intended for a trusted single-user machine: its subprocess worker is not a security isolation boundary. Use Docker Compose deployment for PostgreSQL, multi-user operation, or untrusted executable plugins.
 

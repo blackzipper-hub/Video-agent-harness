@@ -18,6 +18,10 @@ function hasOutputFormat(args: readonly string[]): boolean {
     || arg.startsWith('--format='))
 }
 
+function hasConfig(args: readonly string[]): boolean {
+  return args.some(arg => arg === '-c' || arg.startsWith('-c=') || arg === '--config' || arg.startsWith('--config='))
+}
+
 /** Complete Oxlint child-process arguments and environment. */
 export interface OxlintInvocation {
   readonly args: readonly string[]
@@ -31,7 +35,7 @@ export interface OxlintInvocation {
  * @returns the complete CLI arguments and child environment.
  */
 export function resolveOxlintInvocation(args: readonly string[], env: NodeJS.ProcessEnv): OxlintInvocation {
-  const resolvedArgs = [...args]
+  const resolvedArgs = hasConfig(args) ? [...args] : ['--config', '.oxlintrc.json', ...args]
   if (env.CI === 'true' && !hasOutputFormat(args)) resolvedArgs.push('--format=unix')
   const raw = env.DSH_OXLINT_THREADS
   if (raw === undefined || raw === '') return { args: resolvedArgs, env: { ...env } }

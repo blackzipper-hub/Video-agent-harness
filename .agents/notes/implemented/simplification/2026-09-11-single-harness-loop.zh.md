@@ -14,7 +14,7 @@ DeepSeek Harness 是唯一的 Agent 循环。参考调研由当前 Harness 上�
 
 Video Runtime 使用小型本地异步工具封装保存 Provider 元数据并显式传递运行上下文。Atomic 文本生成直接调用官方 OpenAI SDK，音频转录通过官方 Google GenAI SDK 和 Pydantic 响应 Schema 执行。Runtime 依赖清单与生产代码导入均排除已停用的 Agent 框架包。
 
-源码启动器会在根构建中构建 Video Studio，在其托管的 Python 依赖目录中安装独立的 LangSmith 可观测性客户端，并且只在实际使用旧版 Redis 取消与限流适配器时才加载它们。仓库的 dotenv 模板不会再包含 DeepSeek Harness 明确要求只能由启动 Shell 传入的进程级代理设置。因此，本地单用户启动不要求安装 Redis 包或运行 Redis 服务。
+源码启动器会在根构建中构建 Video Studio。显式环境准备命令会随 Python 服务 requirements 安装独立的 LangSmith 可观测性客户端，启动过程只校验准备好的环境。旧版 Redis 取消与限流适配器只在实际使用对应可选路径时加载。仓库的 dotenv 模板不会包含 DeepSeek Harness 明确要求只能由启动 Shell 传入的进程级代理设置。因此，本地单用户启动不要求安装 Redis 包或运行 Redis 服务。
 
 ## 考虑过的替代方案
 
@@ -28,7 +28,7 @@ Video Runtime 使用小型本地异步工具封装保存 Provider 元数据并�
 
 每次运行只有一个规划与上下文压缩责任方。包含 `research.generate` 的已有 Plan 必须依据当前 Capability Catalog 重新规划。图片与视频生成保留有界的 Provider 重试和降级，但不再额外调用模型判断一致性或重写 Prompt。已移除的结构化输出恢复工具不能用于新 Provider 代码；新的叶级集成使用官方 Provider SDK 或确定性逻辑。
 
-源码用户可以先执行文档中的根构建，再执行 `pnpm video:local`；托管启动器会安装自身所需的 Python 与媒体依赖，不依赖仓库中未声明的本地环境。
+源码用户先执行文档中的根构建，再用 `pnpm video:setup` 准备声明的 Python 3.11 环境，最后执行 `pnpm video:local`。启动过程不会安装依赖。
 
 ## 验证
 

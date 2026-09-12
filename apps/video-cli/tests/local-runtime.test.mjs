@@ -1,23 +1,43 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   createStudioGateway,
   loadDotEnv,
   loadLocalCredentialEnvironment,
   parseArguments,
+  runLocalWeb,
 } from '../src/local-runtime.mjs'
 
-test('parses portable local web options', () => {
+test('parses local web options with configured Python as the default', () => {
   assert.deepEqual(parseArguments([
-    'web', '--no-open', '--use-system-python', '--runtime-port', '8101',
+    'web', '--no-open', '--runtime-port', '8101',
   ]), {
-    command: 'web', noOpen: true, useSystemPython: true, sourceRoot: undefined,
+    command: 'web', noOpen: true, portablePython: false, sourceRoot: undefined,
     dataDir: undefined, studioPort: 3000, harnessPort: 3080, runtimePort: 8101,
     mediaPort: 18080, sandboxPort: 8090,
   })
+})
+
+test('portable Python is an explicit setup option', () => {
+  assert.equal(parseArguments(['setup', '--portable-python']).portablePython, true)
+})
+
+test('start rejects an unprepared portable environment without downloading it', async () => {
+  const dataDirectory = mkdtempSync(join(tmpdir(), 'video-agent-unprepared-'))
+  const options = parseArguments([
+    'web', '--portable-python', '--source-root', fileURLToPath(new URL('../../..', import.meta.url)),
+    '--data-dir', dataDirectory,
+  ])
+
+  await assert.rejects(
+    runLocalWeb(options, fileURLToPath(new URL('..', import.meta.url))),
+    /portable Python is not prepared; run the setup command/,
+  )
+  assert.deepEqual(readdirSync(dataDirectory), [])
 })
 
 test('rejects invalid ports', () => {

@@ -141,6 +141,7 @@
     "release:publish": "tsx scripts/release/publish.ts",
     "dsh": "node --import tsx/esm apps/cli/src/bin.ts",
     "video:local": "node apps/video-cli/bin/video-agent-harness.mjs web --source-root .",
+    "video:setup": "node apps/video-cli/bin/video-agent-harness.mjs setup --source-root .",
     "video:doctor": "node apps/video-cli/bin/video-agent-harness.mjs doctor --source-root .",
     "demo:code-mode": "node scripts/demo-code-mode.mjs",
     "demo:cordis": "node scripts/demo-cordis.mjs",

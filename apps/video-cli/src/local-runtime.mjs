@@ -23,7 +23,7 @@ const PYTHON_ASSETS = {
 
 export function parseArguments(argv) {
   const result = {
-    command: 'web', noOpen: false, useSystemPython: false, sourceRoot: undefined,
+    command: 'web', noOpen: false, portablePython: false, sourceRoot: undefined,
     dataDir: undefined, studioPort: 3000, harnessPort: 3080, runtimePort: 8001,
     mediaPort: 18080, sandboxPort: 8090,
   }
@@ -33,7 +33,7 @@ export function parseArguments(argv) {
     const key = values.shift()
     if (key === '--') continue
     if (key === '--no-open') result.noOpen = true
-    else if (key === '--use-system-python') result.useSystemPython = true
+    else if (key === '--portable-python') result.portablePython = true
     else if (key === '--source-root') result.sourceRoot = resolve(requiredValue(key, values))
     else if (key === '--data-dir') result.dataDir = resolve(requiredValue(key, values))
     else if (key === '--studio-port') result.studioPort = portValue(key, values)
@@ -43,7 +43,7 @@ export function parseArguments(argv) {
     else if (key === '--sandbox-port') result.sandboxPort = portValue(key, values)
     else throw new Error(`unknown option: ${key}`)
   }
-  if (!['web', 'doctor'].includes(result.command)) throw new Error(`unknown command: ${result.command}`)
+  if (!['web', 'setup', 'doctor'].includes(result.command)) throw new Error(`unknown command: ${result.command}`)
   return result
 }
 
@@ -143,26 +143,41 @@ function commandWorks(command, args, environment = process.env) {
   return result.status === 0
 }
 
-function findSystemPython() {
-  const candidates = process.env.VIDEO_AGENT_PYTHON
-    ? [process.env.VIDEO_AGENT_PYTHON]
-    : platform() === 'win32' ? ['py', 'python'] : ['python3', 'python']
+function findSystemPython(environment = process.env) {
+  const virtualPython = environment.VIRTUAL_ENV
+    ? platform() === 'win32'
+      ? join(environment.VIRTUAL_ENV, 'Scripts', 'python.exe')
+      : join(environment.VIRTUAL_ENV, 'bin', 'python')
+    : undefined
+  const candidates = environment.VIDEO_AGENT_PYTHON
+    ? [environment.VIDEO_AGENT_PYTHON]
+    : platform() === 'win32' ? [virtualPython, 'python', 'py'] : [virtualPython, 'python3', 'python']
   for (const candidate of candidates) {
+    if (!candidate) continue
     const args = basename(candidate).toLowerCase() === 'py' ? ['-3.11', '-c', 'import sys; assert sys.version_info[:2] == (3, 11)'] : ['-c', 'import sys; assert sys.version_info[:2] == (3, 11)']
-    if (commandWorks(candidate, args)) return { command: candidate, prefix: basename(candidate).toLowerCase() === 'py' ? ['-3.11'] : [] }
+    if (commandWorks(candidate, args, environment)) return { command: candidate, prefix: basename(candidate).toLowerCase() === 'py' ? ['-3.11'] : [] }
   }
   return undefined
 }
 
-export async function ensurePython(dataDirectory, useSystemPython) {
-  if (useSystemPython || process.env.VIDEO_AGENT_PYTHON) {
-    const system = findSystemPython()
-    if (!system) throw new Error('Python 3.11 was requested but could not be found')
-    return system
-  }
+function requireSystemPython() {
+  const system = findSystemPython()
+  if (!system) throw new Error('Python 3.11 was not found; create and activate a Python 3.11 environment before running setup or start')
+  return system
+}
+
+function preparedPortablePython(dataDirectory) {
   const installRoot = join(dataDirectory, `python-${PYTHON_VERSION}`)
   const executable = pythonExecutable(installRoot)
-  if (existsSync(executable)) return { command: executable, prefix: [] }
+  return existsSync(executable) ? { command: executable, prefix: [] } : undefined
+}
+
+export async function preparePython(dataDirectory, portablePython) {
+  if (!portablePython) return requireSystemPython()
+  const prepared = preparedPortablePython(dataDirectory)
+  if (prepared) return prepared
+  const installRoot = join(dataDirectory, `python-${PYTHON_VERSION}`)
+  const executable = pythonExecutable(installRoot)
   const selected = PYTHON_ASSETS[`${platform()}-${arch()}`]
   if (!selected) throw new Error(`portable Python is unavailable for ${platform()}-${arch()}`)
   mkdirSync(installRoot, { recursive: true })
@@ -179,31 +194,40 @@ export async function ensurePython(dataDirectory, useSystemPython) {
   return { command: executable, prefix: [] }
 }
 
+function requirePreparedPython(dataDirectory, portablePython) {
+  if (!portablePython) return requireSystemPython()
+  const prepared = preparedPortablePython(dataDirectory)
+  if (!prepared) throw new Error('portable Python is not prepared; run the setup command with --portable-python and the same --data-dir')
+  return prepared
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: 'inherit', windowsHide: true, ...options })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`${command} exited with ${result.status ?? result.signal}`)
 }
 
-export function ensurePythonDependencies(python, layout, dataDirectory) {
-  const dependencyRoot = join(dataDirectory, 'python-packages')
+function pythonDependencyState(python, layout, dataDirectory) {
   const requirementHash = createHash('sha256').update(readFileSync(layout.requirements)).digest('hex')
-  const marker = join(dependencyRoot, '.requirements-sha256')
-  const inherited = layout.source && existsSync(join(layout.root, '.runtime-deps', 'windows-py311'))
-    ? join(layout.root, '.runtime-deps', 'windows-py311') : ''
-  const pythonPath = [dependencyRoot, inherited].filter(Boolean).join(delimiter)
-  const probeEnv = { ...process.env, PYTHONPATH: pythonPath }
-  if (existsSync(marker) && readFileSync(marker, 'utf8') === requirementHash
-    && commandWorks(python.command, [...python.prefix, '-c', 'import fastapi,uvicorn,httpx,docker,numpy'], probeEnv)) {
-    return pythonPath
-  }
-  if (inherited && commandWorks(python.command, [...python.prefix, '-c', 'import fastapi,uvicorn,httpx,docker,numpy'], probeEnv)) return pythonPath
-  mkdirSync(dependencyRoot, { recursive: true })
-  console.log('video-agent-harness: installing local Python service dependencies')
-  run(python.command, [...python.prefix, '-m', 'ensurepip', '--upgrade'], { env: probeEnv })
-  run(python.command, [...python.prefix, '-m', 'pip', 'install', '--disable-pip-version-check', '--target', dependencyRoot, '-r', layout.requirements], { env: probeEnv })
+  const marker = join(dataDirectory, '.python-requirements-sha256')
+  const ready = existsSync(marker) && readFileSync(marker, 'utf8') === requirementHash
+    && commandWorks(python.command, [...python.prefix, '-c', 'import fastapi,uvicorn,httpx,docker,numpy'])
+  return { marker, requirementHash, ready }
+}
+
+export function preparePythonDependencies(python, layout, dataDirectory) {
+  const { marker, requirementHash, ready } = pythonDependencyState(python, layout, dataDirectory)
+  if (ready) return
+  console.log('video-agent-harness: installing Python service dependencies into the configured environment')
+  run(python.command, [...python.prefix, '-m', 'ensurepip', '--upgrade'])
+  run(python.command, [...python.prefix, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', layout.requirements])
   writeFileSync(marker, requirementHash)
-  return pythonPath
+}
+
+function requirePreparedPythonDependencies(python, layout, dataDirectory) {
+  if (!pythonDependencyState(python, layout, dataDirectory).ready) {
+    throw new Error('Python service dependencies are missing or stale; run the setup command with the same --data-dir before starting')
+  }
 }
 
 function mediaToolPaths(dataDirectory) {
@@ -235,6 +259,14 @@ export function ensureMediaTools(dataDirectory, environment = process.env) {
     tools = mediaToolPaths(dataDirectory)
   }
   if (!tools.ffmpeg || !tools.ffprobe) throw new Error('local FFmpeg installation did not provide both executables')
+  return [...new Set([dirname(tools.ffmpeg), dirname(tools.ffprobe), environment.PATH || ''])].filter(Boolean).join(delimiter)
+}
+
+function requirePreparedMediaTools(dataDirectory, environment = process.env) {
+  const tools = mediaToolPaths(dataDirectory)
+  if (!tools.ffmpeg || !tools.ffprobe || !existsSync(tools.ffmpeg) || !existsSync(tools.ffprobe)) {
+    throw new Error('FFmpeg and FFprobe are not prepared; run the setup command with the same --data-dir before starting')
+  }
   return [...new Set([dirname(tools.ffmpeg), dirname(tools.ffprobe), environment.PATH || ''])].filter(Boolean).join(delimiter)
 }
 
@@ -346,9 +378,9 @@ export async function runLocalWeb(options, packageRoot) {
   mkdirSync(dataDirectory, { recursive: true })
   loadLocalCredentialEnvironment(layout)
   importWindowsProxy(process.env)
-  const python = await ensurePython(dataDirectory, options.useSystemPython)
-  const dependencyPath = ensurePythonDependencies(python, layout, dataDirectory)
-  const mediaPath = ensureMediaTools(dataDirectory)
+  const python = requirePreparedPython(dataDirectory, options.portablePython)
+  requirePreparedPythonDependencies(python, layout, dataDirectory)
+  const mediaPath = requirePreparedMediaTools(dataDirectory)
   const secret = randomBytes(32).toString('hex')
   const mediaDirectory = join(dataDirectory, 'media')
   mkdirSync(mediaDirectory, { recursive: true })
@@ -375,7 +407,7 @@ export async function runLocalWeb(options, packageRoot) {
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   const service = (name, root, module, port, extra) => {
-    const environment = { ...common, ...extra, PYTHONPATH: [dependencyPath, root].filter(Boolean).join(delimiter) }
+    const environment = { ...common, ...extra, PYTHONPATH: root }
     const managed = spawnManaged(name, python.command, pythonArgs(module, port), { cwd: root, env: environment })
     processes.push(managed)
     return managed
@@ -443,14 +475,29 @@ export async function runLocalWeb(options, packageRoot) {
   }).finally(stop)
 }
 
+export async function setupLocalEnvironment(options, packageRoot) {
+  const layout = resolveLayout(options, packageRoot)
+  const dataDirectory = options.dataDir || defaultDataDirectory()
+  mkdirSync(dataDirectory, { recursive: true })
+  importWindowsProxy(process.env)
+  const python = await preparePython(dataDirectory, options.portablePython)
+  preparePythonDependencies(python, layout, dataDirectory)
+  ensureMediaTools(dataDirectory)
+  console.log(`video-agent-harness: local environment is ready in ${dataDirectory}`)
+}
+
 export async function doctor(options, packageRoot) {
   const layout = resolveLayout(options, packageRoot)
   const dataDirectory = options.dataDir || defaultDataDirectory()
   const system = findSystemPython()
+  const portable = preparedPortablePython(dataDirectory)
+  const selected = options.portablePython ? portable : system
+  const dependenciesReady = selected ? pythonDependencyState(selected, layout, dataDirectory).ready : false
   const rows = [
     ['Node.js', process.version, true],
-    ['Portable Python', pythonExecutable(join(dataDirectory, `python-${PYTHON_VERSION}`)), existsSync(pythonExecutable(join(dataDirectory, `python-${PYTHON_VERSION}`)))],
+    ['Portable Python', pythonExecutable(join(dataDirectory, `python-${PYTHON_VERSION}`)), Boolean(portable)],
     ['System Python 3.11', system?.command || 'not found', Boolean(system)],
+    ['Python service dependencies', layout.requirements, dependenciesReady],
     ['Local FFmpeg/FFprobe', join(dataDirectory, 'media-tools'), Boolean(mediaToolPaths(dataDirectory).ffmpeg && mediaToolPaths(dataDirectory).ffprobe)],
     ['Video Runtime', layout.videoRuntime, existsSync(layout.videoRuntime)],
     ['Media Service', layout.mediaService, existsSync(layout.mediaService)],
@@ -458,7 +505,5 @@ export async function doctor(options, packageRoot) {
     ['Video Studio', layout.studio, existsSync(join(layout.studio, 'index.html'))],
   ]
   for (const [name, value, ok] of rows) console.log(`${ok ? 'OK' : '--'}  ${name}: ${value}`)
-  const servicesReady = rows.slice(3).every(row => row[2])
-  const pythonReady = options.useSystemPython ? Boolean(system) : true
-  return servicesReady && pythonReady
+  return rows.slice(4).every(row => row[2]) && Boolean(selected) && dependenciesReady
 }

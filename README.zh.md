@@ -26,19 +26,19 @@ Provider / Workflow / Validator / Media plugins
 
 规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后， Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
 
-<a id="run"></a>
-<a id="run-from-source"></a>
+<a id="run"></a><a id="run-from-source"></a>
 
 ## 从源码克隆并运行（推荐）
 
-这是开源分支的发布验收路径。一个命令会同时启动 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL、Redis 或系统 Python。
+这是开源分支的发布验收路径。环境准备命令负责安装依赖，启动命令负责运行 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL 或 Redis。
 
 ### 前置条件
 
 - Git。
 - Node.js `22.19+` 或 `24+`。
 - pnpm `11.x`。先运行 `pnpm --version`；如果尚未安装 pnpm，执行 `corepack enable`。
-- 首次运行需要联网，以便启动器下载经过校验和验证的便携 Python、Python 依赖，以及采用各自许可证的 FFmpeg/FFprobe 工具。
+- Python `3.11`。
+- 环境准备阶段需要联网，以便安装 Python 依赖以及采用各自许可证的 FFmpeg/FFprobe 工具。
 
 ### 1. 克隆开源分支
 
@@ -90,19 +90,53 @@ pnpm run build
 
 根目录构建会同时生成本地启动器需要的 Video Studio 产物。
 
-### 4. 启动完整本地服务栈
+### 4. 准备本地环境
+
+创建并激活 Python 3.11 虚拟环境。macOS 或 Linux：
+
+```sh
+python3.11 -m venv .venv
+source .venv/bin/activate
+pnpm video:setup -- --data-dir .video-agent-harness-data
+```
+
+Windows PowerShell：
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pnpm video:setup -- --data-dir .video-agent-harness-data
+```
+
+环境准备命令会把固定版本的 Python 服务依赖安装进当前环境，并把 FFmpeg/FFprobe 安装到 `.video-agent-harness-data`；它不会启动任何服务。Python requirements 变化或改用新的数据目录后，需要重新运行该命令。
+
+如果希望由环境准备命令下载经过校验和验证的便携 Python，可以显式传入 `--portable-python`。这是一条可选路径，不是默认行为：
+
+```sh
+pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
+```
+
+### 5. 启动完整本地服务栈
+
+保持 Python 环境处于激活状态，然后运行：
 
 ```sh
 pnpm video:local -- --data-dir .video-agent-harness-data
 ```
 
-保持终端运行。首次运行会安装本地运行时依赖，可能需要几分钟；后续启动会复用已被 Git 忽略的 `.video-agent-harness-data`。明确使用仓库内的数据目录，还能避免部分 Windows 环境中的跨盘重命名错误。
+启动命令只检查准备好的环境并启动服务，不会下载 Python 或安装依赖。保持终端运行。仓库内的数据目录已被 Git 忽略，还能避免部分 Windows 环境中的跨盘重命名错误。
+
+使用可选便携环境时，启动命令需要传入相同选项：
+
+```sh
+pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
+```
 
 当终端输出 `Video Agent Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
 
-### 5. 验证服务栈
+### 6. 验证服务栈
 
-在第二个终端中进入同一仓库根目录并执行：
+在第二个终端中激活同一个 Python 环境，然后进入仓库根目录执行：
 
 ```sh
 pnpm video:doctor -- --data-dir .video-agent-harness-data
@@ -110,6 +144,8 @@ curl http://127.0.0.1:8001/health
 ```
 
 Doctor 应将每个组件显示为 `OK`，健康检查应返回 `{"status":"healthy"}`。端口 `3000` 是 Video Studio，`3080` 是 DeepSeek Harness，`8001` 是 Video Runtime，`8090` 是 Sandbox Worker，`18080` 是 Media Service。
+
+使用便携环境时，`video:doctor` 也需要传入 `--portable-python`。
 
 在启动终端按 `Ctrl+C` 即可停止。npm 本地模式面向可信的单用户机器，子进程 Worker 不构成安全隔离边界；需要 PostgreSQL、多用户运行或执行不受信任的插件时，请使用 Docker Compose 部署方式。
 

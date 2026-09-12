@@ -2,18 +2,20 @@
 
 English | [中文](README.zh.md)
 
-Portable local launcher for Video Agent Harness. It starts DeepSeek Harness, the Python Video Runtime, Media Service, local Sandbox Worker, and Video Studio without Docker. Project state and generated media live under one user data directory.
+Local launcher for Video Agent Harness. It starts DeepSeek Harness, the Python Video Runtime, Media Service, local Sandbox Worker, and Video Studio without Docker. Project state and generated media live under one user data directory.
 
 ```sh
+npx @cuti-ai/video-agent-harness setup
 npx @cuti-ai/video-agent-harness web
 ```
 
-The first run downloads a pinned, checksum-verified Python 3.11 distribution and installs the Python service dependencies. It also installs separately licensed FFmpeg and FFprobe tools in the user-data directory instead of redistributing those binaries in this package. Later starts reuse the local installation.
+The default path requires an existing Python 3.11 environment. `setup` installs the pinned Python service dependencies into that environment and installs separately licensed FFmpeg and FFprobe tools in the user-data directory. `web` only verifies the prepared environment and starts services; it does not download Python or install dependencies.
 
-Use `--use-system-python` to use an existing Python 3.11 interpreter. This mode is intended for repository development:
+Portable Python remains available as an explicit alternative. Prepare it once and pass the same option when starting:
 
 ```sh
-pnpm video:local -- --use-system-python
+npx @cuti-ai/video-agent-harness setup --portable-python
+npx @cuti-ai/video-agent-harness web --portable-python
 ```
 
 Run diagnostics without starting services:
@@ -22,6 +24,8 @@ Run diagnostics without starting services:
 npx @cuti-ai/video-agent-harness doctor
 ```
 
+Pass `--portable-python` to diagnostics when that environment was selected during setup.
+
 ## Known Limitations and Deferred Work
 
-Local Sandbox execution runs as an ordinary child process and is not a security boundary. Use the Docker deployment when executing untrusted third-party plugins. The portable npm release supports Windows x64/arm64, macOS x64/arm64, and glibc Linux x64/arm64; other platforms require `--use-system-python`.
+Local Sandbox execution runs as an ordinary child process and is not a security boundary. Use the Docker deployment when executing untrusted third-party plugins. Optional portable Python supports Windows x64/arm64, macOS x64/arm64, and glibc Linux x64/arm64; other platforms require a configured Python 3.11 environment.
