@@ -1037,7 +1037,9 @@ export function DeepAgentArtifacts({
                     <CardTitle className="text-base">{runtimeWorkspace.project.title}</CardTitle>
                     <Badge variant="outline">
                       {interpolate(t('da.workspace.versionCount'), {
-                        n: runtimeWorkspace.projectVersions.length,
+                        n: runtimeWorkspace.projectVersionCount
+                          ?? runtimeWorkspace.projectVersions?.length
+                          ?? 0,
                       })}
                     </Badge>
                   </div>

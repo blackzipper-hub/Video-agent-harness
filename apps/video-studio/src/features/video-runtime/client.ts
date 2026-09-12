@@ -23,17 +23,18 @@ export interface RuntimeWorkspace {
   currentProjectVersion: Record<string, unknown> & { id: string; selections: Record<string, string> }
   videoSpec: Record<string, unknown> | null
   artifacts: RuntimeArtifact[]
-  artifactGroups: Record<string, RuntimeArtifact[]>
-  artifactEdges: RuntimeEdge[]
+  artifactGroups?: Record<string, RuntimeArtifact[]>
+  artifactEdges?: RuntimeEdge[]
   builds: Array<BuildSnapshot & { steps: RuntimeBuildStep[]; validations: RuntimeValidation[]; checkpoints: RuntimeCheckpoint[] }>
-  projectVersions: Array<Record<string, unknown>>
+  projectVersionCount?: number
+  projectVersions?: Array<Record<string, unknown>>
   videoSpecRevision: RuntimeSpecRevision | null
-  videoSpecRevisions: RuntimeSpecRevision[]
+  videoSpecRevisions?: RuntimeSpecRevision[]
   currentBuildPhase: string | null
   activeCheckpoint: RuntimeCheckpoint | null
   resolvedSections: string[]
   unresolvedSections: string[]
-  planRevisions: Array<Record<string, unknown>>
+  planRevisions?: Array<Record<string, unknown>>
 }
 
 export interface RuntimeSpecRevision {

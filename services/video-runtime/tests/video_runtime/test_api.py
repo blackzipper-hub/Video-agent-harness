@@ -304,3 +304,34 @@ class VideoRuntimeApiTest(unittest.TestCase):
             headers=self.headers,
         ).json()["data"]
         self.assertEqual(tailed, [])
+
+    def test_workspace_returns_current_view_without_history_bodies(self) -> None:
+        project = self.client.post(
+            "/api/video/projects",
+            headers=self.headers,
+            json={"title": "Slim", "sessionId": "session-1"},
+        ).json()["data"]
+        project_id = project["projectId"]
+        asyncio.run(self.runtime.add_artifact(MediaArtifactVersion(
+            project_id=project_id,
+            type="project_intent",
+            title="Intent",
+            metadata={"content": {"brief": "x" * 200, "title": "Slim"}, "build_id": "b1"},
+        )))
+        workspace = self.client.get(
+            f"/api/video/projects/{project_id}/workspace",
+            headers=self.headers,
+        )
+        self.assertEqual(workspace.status_code, 200)
+        data = workspace.json()["data"]
+        self.assertEqual(data["artifactGroups"], {})
+        self.assertEqual(data["artifactEdges"], [])
+        self.assertEqual(data["videoSpecRevisions"], [])
+        self.assertEqual(data["planRevisions"], [])
+        self.assertEqual(data["projectVersions"], [])
+        self.assertGreaterEqual(data["projectVersionCount"], 1)
+        self.assertLessEqual(len(data["builds"]), 1)
+        intent = next(item for item in data["artifacts"] if item["type"] == "project_intent")
+        self.assertNotIn("content", intent.get("metadata") or {})
+        self.assertEqual(intent["metadata"]["build_id"], "b1")
+        self.assertTrue(intent["isSelected"])

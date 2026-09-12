@@ -279,92 +279,121 @@ def _logical_artifact_id(project_id: str, artifact) -> str:
     }.get(step, step)
 
 
+_HEAVY_ARTIFACT_METADATA_TYPES = {"project_intent", "video_spec"}
+
+
 def _artifact_payload(project_id: str, artifact, selected_ids: set[str]) -> dict:
     value = artifact.model_dump(mode="json")
+    if artifact.type in _HEAVY_ARTIFACT_METADATA_TYPES:
+        metadata = dict(value.get("metadata") or {})
+        metadata.pop("content", None)
+        value["metadata"] = metadata
     value["logicalId"] = _logical_artifact_id(project_id, artifact)
     value["isSelected"] = artifact.id in selected_ids
     return value
 
 
+def _workspace_step_payload(item) -> dict:
+    return {
+        "id": item.id,
+        "build_id": item.build_id,
+        "plan_step_id": item.plan_step_id,
+        "action": item.action,
+        "capability": item.capability,
+        "status": item.status,
+        "attempt": item.attempt,
+        "result_artifact_version_id": item.result_artifact_version_id,
+        "error": item.error,
+        "resolved_skills": [
+            {
+                "skill_id": skill["skill_id"] if isinstance(skill, dict) else skill.skill_id,
+                "version": skill.get("version") if isinstance(skill, dict) else skill.version,
+                "content_hash": (
+                    skill.get("content_hash") if isinstance(skill, dict) else skill.content_hash
+                ),
+                "source": skill.get("source") if isinstance(skill, dict) else skill.source,
+            }
+            for skill in (item.resolved_skills or [])
+        ],
+    }
+
+
+def _workspace_checkpoint_payload(item) -> dict:
+    payload = item.model_dump(mode="json")
+    summaries = payload.get("artifact_summaries") or []
+    payload["artifact_summaries"] = [{} for _ in summaries]
+    return payload
+
+
 async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id: str) -> dict:
     project = await _owned_project(build_runtime, project_id, user_id)
-    current_version, artifacts, versions, builds, spec_revisions, edges = await asyncio.gather(
+    current_version, artifacts, versions, builds = await asyncio.gather(
         build_runtime.repo.get_project_version(project.current_version_id),
-        build_runtime.repo.list_artifact_versions(project_id),
+        build_runtime.repo.current_artifacts(project_id),
         build_runtime.repo.list_project_versions(project_id),
         build_runtime.repo.list_builds(project_id),
-        build_runtime.repo.list_video_spec_revisions(project_id),
-        build_runtime.repo.current_dependencies(project_id),
     )
     selected_ids = set(current_version.selections.values())
-    selected_builds = builds[:10]
-    build_ids = [item.id for item in selected_builds]
-    plan_ids = [item.plan_id for item in selected_builds if item.plan_id]
-    steps_by_build, validations_by_build, checkpoints_by_build, revisions_by_plan = await asyncio.gather(
-        build_runtime.repo.list_build_steps_for_builds(project_id, build_ids),
-        build_runtime.repo.list_validation_results_for_builds(project_id, build_ids),
-        build_runtime.repo.list_build_checkpoints_for_builds(project_id, build_ids),
-        build_runtime.repo.list_plan_revisions_for_plans(plan_ids),
-    )
-    build_payloads = []
-    active_checkpoint = None
-    plan_revision_history: list[dict] = []
-    for build in selected_builds:
-        steps = steps_by_build.get(build.id, [])
-        validations = validations_by_build.get(build.id, [])
-        checkpoints = checkpoints_by_build.get(build.id, [])
-        if active_checkpoint is None:
-            active_checkpoint = next(
-                (item for item in reversed(checkpoints) if item.status in {"pending", "planning"}),
-                None,
-            )
-        plan_revisions = revisions_by_plan.get(build.plan_id, [])
-        plan_revision_history.extend(
-            item.model_dump(mode="json") for item in plan_revisions
+    latest_build = builds[0] if builds else None
+    steps: list = []
+    validations: list = []
+    checkpoints: list = []
+    if latest_build is not None:
+        steps, validations, checkpoints = await asyncio.gather(
+            build_runtime.repo.list_build_steps(project_id, latest_build.id),
+            build_runtime.repo.list_validation_results(project_id, latest_build.id),
+            build_runtime.repo.list_build_checkpoints(project_id, latest_build.id),
         )
-        build_payloads.append({
-            **_build_payload(build),
-            "steps": [item.model_dump(mode="json") for item in steps],
-            "validations": [item.model_dump(mode="json") for item in validations],
-            "checkpoints": [item.model_dump(mode="json") for item in checkpoints],
-        })
+    active_checkpoint = next(
+        (item for item in reversed(checkpoints) if item.status in {"pending", "planning"}),
+        None,
+    )
     spec = None
-    for artifact in reversed(artifacts):
-        if artifact.id not in selected_ids or artifact.type != "video_spec":
-            continue
-        content = artifact.metadata.get("content")
-        if isinstance(content, dict):
-            spec = content
-            break
-    grouped: dict[str, list[dict]] = {}
-    for artifact in artifacts:
-        payload = _artifact_payload(project_id, artifact, selected_ids)
-        grouped.setdefault(payload["logicalId"], []).append(payload)
-    current_spec_revision = spec_revisions[-1] if spec_revisions else None
-    committed_spec_revision = next((item for item in spec_revisions if item.id == current_version.video_spec_revision_id), None)
-    if committed_spec_revision is not None:
-        spec = committed_spec_revision.content
+    current_spec_revision = None
+    if current_version.video_spec_revision_id:
+        try:
+            current_spec_revision = await build_runtime.repo.get_video_spec_revision(
+                current_version.video_spec_revision_id,
+            )
+            spec = current_spec_revision.content
+        except LookupError:
+            current_spec_revision = None
+    if spec is None:
+        for artifact in reversed(artifacts):
+            if artifact.type != "video_spec":
+                continue
+            content = artifact.metadata.get("content")
+            if isinstance(content, dict):
+                spec = content
+                break
+    build_payloads = []
+    if latest_build is not None:
+        build_payloads.append({
+            **_build_payload(latest_build),
+            "steps": [_workspace_step_payload(item) for item in steps],
+            "validations": [item.model_dump(mode="json") for item in validations],
+            "checkpoints": [_workspace_checkpoint_payload(item) for item in checkpoints],
+        })
     return {
         "project": project.model_dump(mode="json"),
         "currentProjectVersion": current_version.model_dump(mode="json"),
         "videoSpec": spec,
         "artifacts": [_artifact_payload(project_id, item, selected_ids) for item in artifacts],
-        "artifactGroups": grouped,
-        "artifactEdges": [item.model_dump(mode="json") for item in edges],
+        "artifactGroups": {},
+        "artifactEdges": [],
         "builds": build_payloads,
-        "projectVersions": [item.model_dump(mode="json") for item in reversed(versions)],
+        "projectVersionCount": len(versions),
+        "projectVersions": [],
         "videoSpecRevision": (
             current_spec_revision.model_dump(mode="json")
             if current_spec_revision is not None else None
         ),
-        "videoSpecRevisions": [
-            item.model_dump(mode="json") for item in reversed(spec_revisions)
-        ],
+        "videoSpecRevisions": [],
         "currentBuildPhase": (
             active_checkpoint.next_phase if active_checkpoint is not None else None
         ),
         "activeCheckpoint": (
-            active_checkpoint.model_dump(mode="json")
+            _workspace_checkpoint_payload(active_checkpoint)
             if active_checkpoint is not None else None
         ),
         "resolvedSections": (
@@ -383,11 +412,7 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
                 if current_spec_revision is not None else []
             )
         ),
-        "planRevisions": sorted(
-            plan_revision_history,
-            key=lambda item: item["created_at"],
-            reverse=True,
-        ),
+        "planRevisions": [],
     }
 
 
