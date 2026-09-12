@@ -2163,13 +2163,13 @@ class WaveSpeedService:
                     data = result.get("data", {})
                     status = data.get("status", "unknown")
                     
-                    logger.info(f"🎬 Seedance视频生成任务状态: {status} (请求ID: {request_id})")
+                    logger.info(f"🎬 视频生成任务状态: {status} (请求ID: {request_id})")
                     
                     if status == "completed":
                         outputs = data.get("outputs", [])
                         if outputs and len(outputs) > 0:
                             video_url = outputs[0]
-                            logger.info(f"🎬 Seedance视频生成成功: {request_id}")
+                            logger.info(f"🎬 视频生成成功: {request_id}")
                             from ..utils.s3_utils import s3_utils
                             import uuid
                             generation_id = f"seedance_{request_id}_{uuid.uuid4().hex[:8]}"
@@ -2180,7 +2180,7 @@ class WaveSpeedService:
                                 target_height=target_height,
                                 strip_audio=strip_audio,
                             )
-                            logger.info(f"✅ Seedance视频已上传到S3: {local_video_url}")
+                            logger.info(f"✅ 视频已上传到S3: {local_video_url}")
                             actual_duration = await _validate_generated_video_duration(
                                 local_video_url,
                                 float(duration),
@@ -2192,7 +2192,7 @@ class WaveSpeedService:
                                 duration=actual_duration or float(duration),
                                 resolution=resolution,
                                 seed=seed,
-                                message=f"✅ WaveSpeed Seedance视频生成成功"
+                                message=f"✅ WaveSpeed 视频生成成功"
                             )
                         else:
                             logger.error(f"🎬 任务完成但无输出结果: {data}")
@@ -2200,8 +2200,8 @@ class WaveSpeedService:
                     
                     elif status == "failed":
                         error_msg = data.get("error", "未知错误")
-                        logger.error(f"🎬 Seedance视频生成任务失败: {error_msg}")
-                        raise WaveSpeedFinalException(f"Seedance视频生成任务失败: {error_msg}")
+                        logger.error(f"🎬 视频生成任务失败: {error_msg}")
+                        raise WaveSpeedFinalException(f"视频生成任务失败: {error_msg}")
                     
                     elif status in ["pending", "processing", "running"]:
                         logger.info(f"🎬 任务处理中: {status}")

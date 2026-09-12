@@ -16,17 +16,18 @@ from .models import AgentRun, ArtifactVersion, Task
 
 
 _IMAGE_ARTIFACT_TYPES = {
-    "image", "source_image", "keyframe", "character", "character_reference",
+    "image", "source_image", "keyframe", "poster", "character", "character_reference",
     "character_setting_reference", "scene_reference", "scene_setting_reference",
     "product_reference", "product_setting", "product_setting_reference",
     "continuity_frame",
 }
 _AUDIO_ARTIFACT_TYPES = {
     "audio", "source_audio", "music", "audio_bgm", "audio_narration",
-    "audio_segment",
+    "audio_segment", "audio_cut",
 }
 _VIDEO_ARTIFACT_TYPES = {
     "video", "source_video", "video_clip", "video_segment", "final_video",
+    "video_assembled", "video_mixed",
 }
 
 
