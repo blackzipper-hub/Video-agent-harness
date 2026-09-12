@@ -329,7 +329,7 @@ async def _workspace(build_runtime: VideoBuildRuntime, project_id: str, user_id:
     project = await _owned_project(build_runtime, project_id, user_id)
     current_version, artifacts, versions, builds = await asyncio.gather(
         build_runtime.repo.get_project_version(project.current_version_id),
-        build_runtime.repo.current_artifacts(project_id),
+        build_runtime.repo.list_artifact_versions(project_id),
         build_runtime.repo.list_project_versions(project_id),
         build_runtime.repo.list_builds(project_id),
     )

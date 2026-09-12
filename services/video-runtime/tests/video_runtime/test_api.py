@@ -318,6 +318,13 @@ class VideoRuntimeApiTest(unittest.TestCase):
             title="Intent",
             metadata={"content": {"brief": "x" * 200, "title": "Slim"}, "build_id": "b1"},
         )))
+        orphan = MediaArtifactVersion(
+            project_id=project_id,
+            type="image",
+            title="Rain night still",
+            uri="https://cdn.test/frame.webp",
+        )
+        self.runtime.repo.artifacts[project_id][orphan.id] = orphan
         workspace = self.client.get(
             f"/api/video/projects/{project_id}/workspace",
             headers=self.headers,
@@ -335,3 +342,4 @@ class VideoRuntimeApiTest(unittest.TestCase):
         self.assertNotIn("content", intent.get("metadata") or {})
         self.assertEqual(intent["metadata"]["build_id"], "b1")
         self.assertTrue(intent["isSelected"])
+        self.assertTrue(any(item["id"] == orphan.id and item["uri"] == orphan.uri for item in data["artifacts"]))
