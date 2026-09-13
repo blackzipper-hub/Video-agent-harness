@@ -455,7 +455,8 @@ def test_mv_skill_files_and_workflow_contract():
     # Cast locks what is visible once; sung voice follows that lock.
     assert "## 班子" in text
     assert "身份" in text
-    assert "reference_from_steps" in text
+    assert "https" in text
+    assert "产物 id" in text
     assert "depends_on" in text
     assert "唱的人" in text
     assert "vocal_gender" in text

@@ -54,6 +54,34 @@ def _merge_urls(explicit: Any, selected: list[str]) -> list[str]:
     return merged
 
 
+def _is_mv_workflow(parameters: dict[str, Any] | None) -> bool:
+    """MV sends exact http(s) media URLs; Runtime must not invent locators."""
+    payload = parameters or {}
+    return any(
+        str(payload.get(key) or "").strip().casefold() == "mv"
+        for key in ("workflow_mode", "activated_workflow")
+    )
+
+
+def _is_http_media_url(value: str) -> bool:
+    locator = value.strip()
+    return locator.startswith("http://") or locator.startswith("https://")
+
+
+def _explicit_http_media_urls(values: Any, *, field: str) -> list[str]:
+    raw_values = values if isinstance(values, list) else []
+    urls: list[str] = []
+    for value in raw_values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        locator = value.strip()
+        if not _is_http_media_url(locator):
+            raise ValueError(f"MV {field} must be http(s) URLs, not artifact ids or step names")
+        if locator not in urls:
+            urls.append(locator)
+    return urls
+
+
 def _resolve_artifact_media_values(
     values: Any,
     selected: list[ArtifactVersion],
@@ -370,63 +398,73 @@ async def execute_atomic(
         profile.pop("workflow_parameters", None)
         profile["prompt"] = prompt
         profile["idempotency_key"] = idempotency_key
-        selected_images = _selected_urls(selected, _IMAGE_ARTIFACT_TYPES)
-        start_image = _resolve_artifact_media_value(
-            _first_url(
-                profile,
-                "start_image_url",
-                "start_image",
-                "first_frame_url",
-                "first_frame",
-                "continuity_frame_url",
-            ),
-            selected,
-            _IMAGE_ARTIFACT_TYPES,
-        ) or _selected_continuity_frame(selected)
-        end_image = _resolve_artifact_media_value(
-            _first_url(
-                profile,
-                "end_image_url",
-                "end_image",
-                "last_image_url",
-                "last_image",
-            ),
-            selected,
-            _IMAGE_ARTIFACT_TYPES,
-        )
-        if start_image:
-            # An explicit continuity frame has stronger semantics than a
-            # reference image.  The provider bridge uses it to select I2V.
-            profile["start_image_url"] = start_image
-            profile["generation_mode"] = "i2v"
-        if end_image:
-            profile["end_image_url"] = end_image
-        excluded_frames = {url for url in (start_image, end_image) if url}
-        profile["images"] = [
-            url for url in _merge_urls(
-                _resolve_artifact_media_values(
-                    profile.get("images"), selected,
-                    _IMAGE_ARTIFACT_TYPES,
+        if _is_mv_workflow(profile):
+            # MV only forwards the agent's explicit http(s) lists. Dest
+            # continuity aliases and selected-artifact stuffing stay off.
+            profile["images"] = _explicit_http_media_urls(profile.get("images"), field="images")
+            profile["videos"] = _explicit_http_media_urls(profile.get("videos"), field="videos")
+            explicit_audios = profile.get("audios") or profile.get("audio_urls") or []
+            if profile.get("audio_url"):
+                explicit_audios = [*explicit_audios, profile["audio_url"]]
+            profile["audios"] = _explicit_http_media_urls(explicit_audios, field="audios")
+        else:
+            selected_images = _selected_urls(selected, _IMAGE_ARTIFACT_TYPES)
+            start_image = _resolve_artifact_media_value(
+                _first_url(
+                    profile,
+                    "start_image_url",
+                    "start_image",
+                    "first_frame_url",
+                    "first_frame",
+                    "continuity_frame_url",
                 ),
-                selected_images,
+                selected,
+                _IMAGE_ARTIFACT_TYPES,
+            ) or _selected_continuity_frame(selected)
+            end_image = _resolve_artifact_media_value(
+                _first_url(
+                    profile,
+                    "end_image_url",
+                    "end_image",
+                    "last_image_url",
+                    "last_image",
+                ),
+                selected,
+                _IMAGE_ARTIFACT_TYPES,
             )
-            if url not in excluded_frames
-        ]
-        profile["videos"] = _merge_urls(
-            _resolve_artifact_media_values(
-                profile.get("videos"), selected, _VIDEO_ARTIFACT_TYPES,
-            ),
-            _selected_urls(selected, _VIDEO_ARTIFACT_TYPES),
-        )
-        explicit_audios = profile.get("audios") or profile.get("audio_urls") or []
-        if profile.get("audio_url"):
-            explicit_audios = [*explicit_audios, profile["audio_url"]]
-        profile["audios"] = _merge_urls(
-            _resolve_artifact_media_values(
-                explicit_audios, selected, _AUDIO_ARTIFACT_TYPES,
-            ),
-            _selected_urls(selected, _AUDIO_ARTIFACT_TYPES),
-        )
+            if start_image:
+                # An explicit continuity frame has stronger semantics than a
+                # reference image.  The provider bridge uses it to select I2V.
+                profile["start_image_url"] = start_image
+                profile["generation_mode"] = "i2v"
+            if end_image:
+                profile["end_image_url"] = end_image
+            excluded_frames = {url for url in (start_image, end_image) if url}
+            profile["images"] = [
+                url for url in _merge_urls(
+                    _resolve_artifact_media_values(
+                        profile.get("images"), selected,
+                        _IMAGE_ARTIFACT_TYPES,
+                    ),
+                    selected_images,
+                )
+                if url not in excluded_frames
+            ]
+            profile["videos"] = _merge_urls(
+                _resolve_artifact_media_values(
+                    profile.get("videos"), selected, _VIDEO_ARTIFACT_TYPES,
+                ),
+                _selected_urls(selected, _VIDEO_ARTIFACT_TYPES),
+            )
+            explicit_audios = profile.get("audios") or profile.get("audio_urls") or []
+            if profile.get("audio_url"):
+                explicit_audios = [*explicit_audios, profile["audio_url"]]
+            profile["audios"] = _merge_urls(
+                _resolve_artifact_media_values(
+                    explicit_audios, selected, _AUDIO_ARTIFACT_TYPES,
+                ),
+                _selected_urls(selected, _AUDIO_ARTIFACT_TYPES),
+            )
         profile = normalize_video_frame_inputs(profile)
         result = await generate_video(profile, on_remote_submitted=on_remote_submitted)
         uri = result.get("video_url") or result.get("uri")

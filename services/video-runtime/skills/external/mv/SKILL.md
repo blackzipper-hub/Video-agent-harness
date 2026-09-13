@@ -183,10 +183,10 @@ metadata:
    然后 `media.audio_analyze` 听结构、段落、歌词时间。听完先看真实长度（`audio_duration_sec`）：跟你要的差不多（几秒之内），整曲本身就是窗，从 0 切下去就行，不用再挑；差得远，才自己挑窗——成片总长跟用户走；班子里唱的人，窗里要有他。切点跟情绪、揭示、音乐转折、画面对比走；一个眼神、一句话、一个动作正在起作用，就让它演完，不要只顾信息密度。挑窗时起点从分析里抄，或者把 audiomap 钉上、`start_sec`/`duration` 都不传，让它用 `smart_clip.recommended`。
 
    `media.audio_cut` 切整窗，并把你定好的各段（`segments`：每段 `start_sec` + 整数秒 `duration`，不超过生成上限）一起切成参考轨。整窗已经不超过生成上限时，可以不传 `segments`。
-3. **设定图按需。** 给每份源标角色：`identity` / `setting` / `object` / `style` / 这次不用。片子要锁什么，才用 `atomic.image.generate` 出什么。prompt 用 brief + 用户文本。要把源送进模型时，写进 `reference_from_steps` 或 `images`；`depends_on` 只排队。选中方向给气质。
+3. **设定图按需。** 给每份源标角色：`identity` / `setting` / `object` / `style` / 这次不用。片子要锁什么，才用 `atomic.image.generate` 出什么。prompt 用 brief + 用户文本。要把源送进模型时，把上一产物的 `https` 地址写进 `images`；`depends_on` 只排队，不带像素。选中方向给气质。
 4. **分段出画**，单段 4–15 整数秒，`duration` 用该段秒数。prompt 从 [reference.md](reference.md) 取词；运镜和光把这条参考融进去——词库对上它的技法，不照抄调研原文。这一段的词画关系和表演模式按〈词和画〉定，对口型的段才抄词做口型。
-   - 默认 H3：`video_skill_load("h3")`，`model: minimax-h3`，`images` 带这一镜的设定图和仍要锁的源，外加该段音频
-   - 也可即梦：`model: doubao-seedance-2-0`，只传 images，**不传** audios
+   - 默认 H3：`video_skill_load("h3")`，`model: minimax-h3`。`images` / `audios` 只写这一镜要用的 `https` URL（设定图 URI + 该段 cut 的 `audio_url`），不要写产物 id
+   - 也可即梦：`model: doubao-seedance-2-0`，只传 images 的 `https` URL，**不传** audios
 5. **下一段是下一镜。** 多段是分镜，不是一条长镜头硬接。每段自己开镜、自己收镜；`images` 带这镜用得上的身份/场/物。prompt 当下一个镜头写。真想一条运镜接着走，再抽尾帧当下一镜的图、短叠化——跟参考音频时 H3 锁不住开场，别指望像素接上。
 6. **拼起来。** `media.concat` 有序 `video_urls`。分镜硬切 `transition_duration: 0`；连续镜头才 `0.125`。
 7. **叠回原曲。** `media.mix_audio` `mode: replace`，音频用 cut 的 master。
@@ -204,4 +204,6 @@ metadata:
 - 把 concat 预览当成片，或对单段生成片转写字幕
 - 搜索主语还没写成字
 - 要把源送进模型时，只写在 `depends_on` 里（它只排队，不带像素）
+- 把产物 id / UID 写进 `images` / `audios`
+- 写 `reference_from_steps`、`audio_reference_from_step`、`start_image_from_step`
 - 把「歌必须 karaoke / 必须标题 / 禁止逐字」写成这条工作流的法
