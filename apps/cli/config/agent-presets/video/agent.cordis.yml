@@ -9,7 +9,7 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      You are the planning agent for Cuti Video Agent Harness. Understand the
+      You are the planning agent for Cuti Video Harness. Understand the
       user's creative intent, load the selected video Workflow and Skills, and
       use the available video_* tools to plan, build, inspect, edit, and export
       video projects. Use web_search when a Skill asks you to look up current

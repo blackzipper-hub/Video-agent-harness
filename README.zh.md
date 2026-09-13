@@ -1,10 +1,10 @@
-# Video Agent Harness
+# Cuti Video Harness
 
 [English](README.md) | 中文
 
-Video Agent Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源、项目型视频 Agent Harness。DeepSeek 负责对话、Agent Loop 和高层工具选择；Cuti Video Runtime 负责持久化项目、Skill、Artifact 依赖、增量构建、时间线、校验和导出。
+Cuti Video Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源、项目型视频 Agent Harness。Cuti Harness 负责对话、Agent Loop 和高层工具选择；Cuti Video Runtime 负责持久化项目、Skill、Artifact 依赖、增量构建、时间线、校验和导出。
 
-主要产品界面是 Video Studio。它的 `/create/:threadId` 工作区左侧展示 DeepSeek 对话，右侧展示已经生成的剧本、图片、视频片段、音频、构建进度和最终视频。
+主要产品界面是 Video Studio。它的 `/create/:threadId` 工作区左侧展示 Cuti Harness 对话，右侧展示已经生成的剧本、图片、视频片段、音频、构建进度和最终视频。
 
 ## 架构
 
@@ -16,13 +16,13 @@ Video Runtime + compatibility BFF (:8001)
   |-- projects, Skills, artifacts, builds, versions
   |-- media service and sandbox worker
   v
-DeepSeek Harness (:3080)
+Cuti Harness (:3080)
   |-- LLM conversation and video_* tool selection
   v
 Provider / Workflow / Validator / Media plugins
 ```
 
-本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Video Agent Harness 架构说明](docs/video-agent-harness.zh.md)。
+本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Cuti Video Harness 架构说明](docs/video-agent-harness.zh.md)。
 
 规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后， Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
 
@@ -30,7 +30,7 @@ Provider / Workflow / Validator / Media plugins
 
 ## 从源码克隆并运行（推荐）
 
-这是开源分支的发布验收路径。环境准备命令负责安装依赖，启动命令负责运行 Video Studio、DeepSeek Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL 或 Redis。
+这是开源分支的发布验收路径。环境准备命令负责安装依赖，启动命令负责运行 Video Studio、Cuti Harness、Video Runtime、Media Service 和 Sandbox Worker；无需 Docker、PostgreSQL 或 Redis。
 
 ### 前置条件
 
@@ -77,7 +77,7 @@ OPENAI_API_KEY=your-openai-key
 WAVESPEED_API_KEY=your-wavespeed-key
 ```
 
-`OPENAI_API_KEY` 用于 DeepSeek Harness 的对话和规划模型。默认视频 Workflow 需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`；只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`。没有 Key 时界面和健康检查仍可启动，但调用对应模型或媒体能力时会失败。
+`OPENAI_API_KEY` 用于 Cuti Harness 的对话和规划模型。默认视频 Workflow 需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`；只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`。没有 Key 时界面和健康检查仍可启动，但调用对应模型或媒体能力时会失败。
 
 ### 3. 安装并构建
 
@@ -132,7 +132,7 @@ pnpm video:local -- --data-dir .video-agent-harness-data
 pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-当终端输出 `Video Agent Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
+当终端输出 `Cuti Video Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
 
 ### 6. 验证服务栈
 
@@ -143,7 +143,7 @@ pnpm video:doctor -- --data-dir .video-agent-harness-data
 curl http://127.0.0.1:8001/health
 ```
 
-Doctor 应将每个组件显示为 `OK`，健康检查应返回 `{"status":"healthy"}`。端口 `3000` 是 Video Studio，`3080` 是 DeepSeek Harness，`8001` 是 Video Runtime，`8090` 是 Sandbox Worker，`18080` 是 Media Service。
+Doctor 应将每个组件显示为 `OK`，健康检查应返回 `{"status":"healthy"}`。端口 `3000` 是 Video Studio，`3080` 是 Cuti Harness，`8001` 是 Video Runtime，`8090` 是 Sandbox Worker，`18080` 是 Media Service。
 
 使用便携环境时，`video:doctor` 也需要传入 `--portable-python`。
 
@@ -187,7 +187,7 @@ pnpm --filter @cuti-ai/video-studio run dev
 
 | 现象 | 检查项 |
 | --- | --- |
-| 页面能打开，但发送 Prompt 后没有响应 | 确认 DeepSeek Harness 仍在端口 `3080` 运行，并且仓库 `.env` 中存在 `OPENAI_API_KEY`。 |
+| 页面能打开，但发送 Prompt 后没有响应 | 确认 Cuti Harness 仍在端口 `3080` 运行，并且仓库 `.env` 中存在 `OPENAI_API_KEY`。 |
 | 出现 `401`、`NO_AUTH` 或模型认证错误 | 检查 `.env` 中的 `OPENAI_API_KEY`，然后重启本地服务栈以重新加载。 |
 | 图片或视频生成失败 | 配置所选 Workflow 需要的 Provider Key；默认 Seedance 路径需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`。 |
 | Build 一直排队或 Runtime 不可用 | 执行 `pnpm video:doctor -- --data-dir .video-agent-harness-data`，并检查启动器终端。 |

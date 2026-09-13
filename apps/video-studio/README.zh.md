@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Video Studio 是 Cuti Video Agent Harness 的视频原生前端。迁移期间，导入的 Cuti 聊天、产物浏览器、播放器、时间线、SSE 处理和旧 API 客户端继续可用。
+Video Studio 是 Cuti Video Harness 的视频原生前端。迁移期间，导入的 Cuti 聊天、产物浏览器、播放器、时间线、SSE 处理和旧 API 客户端继续可用。
 
 `/create/:threadId` 是主工作区：左侧保留 DeepSeek 对话，右侧投影 Runtime 工作区，展示角色、镜头、产物版本与 Build 进度，并提供音乐替换、逐镜头 Lipsync、时间线顺序／时长／旁白编辑、费用确认和 MP4 导出。迁移期间，`/video` 路由只保留为高级诊断入口。
 

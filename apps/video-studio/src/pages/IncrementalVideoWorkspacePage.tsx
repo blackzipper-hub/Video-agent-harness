@@ -36,7 +36,7 @@ export default function IncrementalVideoWorkspacePage() {
   const { language, t } = useLanguage()
   const copy = language === 'zh' ? {
     createTitle: '创建长期视频项目', projectName: '项目名称', create: '创建', loading: '加载中…', currentVersion: '当前版本',
-    agentChat: 'Agent 对话', refresh: '刷新', fullVideo: '从零制作完整视频', automatic: 'DeepSeek 正在生成 VideoSpec，并将自动完成计划与构建，无需再次提交。',
+    agentChat: 'Agent 对话', refresh: '刷新', fullVideo: '从零制作完整视频', automatic: 'Cuti Agent 正在生成 VideoSpec，并将自动完成计划与构建，无需再次提交。',
     manual: '填写或修改 VideoSpec；系统将自动生成角色图、3 个连续镜头、旁白、BGM、字幕和最终 MP4。', shots: '镜头', estimated: '预计', planFirst: '先校验并生成计划',
     makePlan: '生成计划', makeVideo: '全自动制作', previewTitle: '修改影响预览', changePlaceholder: '例如：把第 3 镜头角色服装改成红色，其他镜头保持不变',
     selectChanged: '选择发生变化的产物', analyze: '分析影响', reuse: '保留', validate: '验证', rebuild: '重建', none: '无', estimatedCost: '预计成本', confirmRebuild: '确认局部重建',
@@ -44,7 +44,7 @@ export default function IncrementalVideoWorkspacePage() {
     current: '当前', restore: '恢复', createFailed: '创建失败', previewFailed: '影响分析失败', specFailed: 'VideoSpec 校验失败', buildFailed: '构建启动失败', requestFailed: '请求失败',
   } : {
     createTitle: 'Create a persistent video project', projectName: 'Project name', create: 'Create', loading: 'Loading…', currentVersion: 'Current version',
-    agentChat: 'Agent chat', refresh: 'Refresh', fullVideo: 'Create a complete video from scratch', automatic: 'DeepSeek is generating the VideoSpec and will plan and build it automatically.',
+    agentChat: 'Agent chat', refresh: 'Refresh', fullVideo: 'Create a complete video from scratch', automatic: 'Cuti Agent is generating the VideoSpec and will plan and build it automatically.',
     manual: 'Edit the VideoSpec; the system will generate a character reference, three continuous shots, narration, BGM, subtitles, and the final MP4.', shots: 'shots', estimated: 'Estimated', planFirst: 'Validate and create a plan first',
     makePlan: 'Create plan', makeVideo: 'Build automatically', previewTitle: 'Change impact preview', changePlaceholder: "Example: change the character's outfit in shot 3 to red and keep the other shots unchanged",
     selectChanged: 'Select the changed artifacts', analyze: 'Analyze impact', reuse: 'Reuse', validate: 'Validate', rebuild: 'Rebuild', none: 'None', estimatedCost: 'Estimated cost', confirmRebuild: 'Confirm partial rebuild',
@@ -159,7 +159,7 @@ export default function IncrementalVideoWorkspacePage() {
 
   if (!projectId) return <main className="grid min-h-screen place-items-center bg-zinc-950 text-zinc-100">
     <form onSubmit={asyncEvent(create)} className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-8">
-      <p className="text-xs uppercase tracking-[0.25em] text-violet-300">Video Agent Harness</p>
+      <p className="text-xs uppercase tracking-[0.25em] text-violet-300">Cuti Video Harness</p>
       <h1 className="mt-2 text-2xl font-semibold">{copy.createTitle}</h1>
       <input className="mt-6 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3" value={title} onChange={(e) =>{  setTitle(e.target.value) }} placeholder={copy.projectName} />
       <Button className="mt-4" disabled={busy}>{busy && <Loader2 className="animate-spin" />}{copy.create}</Button>

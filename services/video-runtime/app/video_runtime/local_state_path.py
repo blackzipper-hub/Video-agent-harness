@@ -20,7 +20,7 @@ def default_data_directory(
     home: str | Path | None = None,
     platform_name: str | None = None,
 ) -> Path:
-    """Return the Video Agent Harness per-user data directory.
+    """Return the Cuti Video Harness per-user data directory.
 
     The result intentionally matches ``@cuti-ai/video-agent-harness`` so direct
     Python startup and npm-managed startup share one durable project store.

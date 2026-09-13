@@ -1,16 +1,16 @@
-# Video Agent Harness
+# Cuti Video Harness
 
 **中文** | [English](PRODUCT_QUICKSTART.en.md)
 
 > 本文档为中文版。
 
-Video Agent Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 构建的通用视频 Agent Harness。
+Cuti Video Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 构建的通用视频 Agent Harness。
 
 它不仅能调用图片和视频生成工具，还能持续管理剧本、角色、场景、镜头、音频、字幕、时间线和最终成片。Agent 会根据真实生成结果动态调整制作计划，通过 Artifact 依赖关系保留可复用内容，并只重建受到影响的部分。
 
 ## 核心能力
 
-- DeepSeek 驱动的对话、Workflow 选择和动态 `PlanPatch`
+- Cuti Harness 驱动的对话、Workflow 选择和动态 `PlanPatch`
 - 可安装的 Workflow、Style、Provider 和辅助 Skill
 - 角色、场景和镜头参考的一致性管理
 - 可暂停、恢复、取消和失败重试的长任务
@@ -23,7 +23,7 @@ Video Agent Harness 是一个基于 [DeepSeek Harness](https://github.com/deepse
 ```text
 Video Studio
   ↓
-DeepSeek Harness
+Cuti Harness
   ↓
 Video Runtime
   ├─ Project / ProjectVersion
@@ -36,7 +36,7 @@ Video Runtime
 Workflow / Provider / Style / Media Plugins
 ```
 
-DeepSeek Harness 负责对话、意图理解、Workflow 选择、创作判断和工具调用。Video Runtime 负责项目状态、Artifact 依赖、任务执行、失败恢复、增量构建和版本提交。
+Cuti Harness 负责对话、意图理解、Workflow 选择、创作判断和工具调用。Video Runtime 负责项目状态、Artifact 依赖、任务执行、失败恢复、增量构建和版本提交。
 
 Workflow 负责约束可用能力和制作规则，但不会预先写死完整制作过程。每当真实素材生成完成或任务失败时，Agent 都可以通过新的 `PlanPatch` 追加任务、修改后续参数或取消尚未执行的任务。
 
@@ -136,7 +136,7 @@ curl http://127.0.0.1:8001/health
 {"status":"healthy"}
 ```
 
-### 4. 安装依赖并构建 DeepSeek Harness
+### 4. 安装依赖并构建 Cuti Harness
 
 ```bash
 corepack enable
@@ -144,7 +144,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-### 5. 启动 DeepSeek Harness
+### 5. 启动 Cuti Harness
 
 #### Windows PowerShell
 
@@ -167,7 +167,7 @@ pnpm dsh --profile web \
   --no-open
 ```
 
-DeepSeek Harness 默认运行在：
+Cuti Harness 默认运行在：
 
 [http://127.0.0.1:3080](http://127.0.0.1:3080)
 
@@ -201,7 +201,7 @@ English prompt：
 
 ## 开发模式
 
-如需使用 Vite 热更新运行 Video Studio，请保持 Docker 服务和 DeepSeek Harness 正常运行。
+如需使用 Vite 热更新运行 Video Studio，请保持 Docker 服务和 Cuti Harness 正常运行。
 
 进入前端目录并创建本地环境文件：
 
@@ -241,8 +241,8 @@ pnpm --filter @cuti-ai/video-studio run dev
 
 | 问题 | 检查方式 |
 | --- | --- |
-| 页面可以打开，但发送消息后没有响应 | 确认 DeepSeek Harness 正在 `3080` 端口运行，并且启动终端中已设置 `OPENAI_API_KEY`。 |
-| 出现 `401`、`NO_AUTH` 或模型认证错误 | 检查 `.env` 和 DeepSeek Harness 进程是否正确读取 OpenAI Key。 |
+| 页面可以打开，但发送消息后没有响应 | 确认 Cuti Harness 正在 `3080` 端口运行，并且启动终端中已设置 `OPENAI_API_KEY`。 |
+| 出现 `401`、`NO_AUTH` 或模型认证错误 | 检查 `.env` 和 Cuti Harness 进程是否正确读取 OpenAI Key。 |
 | 图片或视频生成失败 | 检查所选 Workflow 需要的 Provider Key；默认 Seedance 流程需要 WaveSpeed 或 Ark。 |
 | Build 长时间停留在 queued | 使用 `docker compose -f deploy/compose.video.yml ps` 检查 Runtime 和 Worker 状态。 |
 | 端口已被占用 | 检查并释放或重新映射 `3000`、`3080`、`8001`、`8090` 和 `18080`。 |
@@ -269,7 +269,7 @@ docker compose -f deploy/compose.video.yml down -v
 
 ## 项目状态
 
-Video Agent Harness 当前处于 Developer Preview 阶段，部分接口和数据结构仍可能发生兼容性调整。
+Cuti Video Harness 当前处于 Developer Preview 阶段，部分接口和数据结构仍可能发生兼容性调整。
 
 Provider 调用可能产生真实费用。首次使用时建议选择短视频、较少镜头和低成本模型进行验证。
 

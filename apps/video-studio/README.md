@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Video Studio is the video-native frontend for Cuti Video Agent Harness. The imported Cuti chat, artifact browser, player, timeline, SSE handling, and legacy API clients remain available during migration.
+Video Studio is the video-native frontend for Cuti Video Harness. The imported Cuti chat, artifact browser, player, timeline, SSE handling, and legacy API clients remain available during migration.
 
 `/create/:threadId` is the primary workspace. It keeps DeepSeek chat on the left and projects the Runtime workspace on the right, including characters, shots, artifact versions, build progress, music replacement, per-shot lipsync, timeline order/duration/narration editing, cost confirmation, and MP4 export. The `/video` route remains an advanced diagnostics surface during migration.
 

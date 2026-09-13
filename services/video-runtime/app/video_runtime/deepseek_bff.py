@@ -964,7 +964,7 @@ async def _create_route_session(
     """Create the route Session, replacing only an orphaned id collision.
 
     A local Runtime snapshot can be restored from an older backup while the
-    DeepSeek Session store still contains the URL's Session. That URL has no
+    Harness Session store still contains the URL's Session. That URL has no
     authoritative Project binding, so keeping its id would mix two project
     histories. Start a fresh Session and let the returned ``thread_id`` move
     Create Space to the new durable binding.
@@ -1191,7 +1191,7 @@ async def add_message(
         )
         if imported_input_files:
             project = await runtime.repo.get_project(project_id)
-        # A draft `/create` project may reuse an existing DeepSeek Session whose
+        # A draft `/create` project may reuse an existing Harness Session whose
         # earlier conversation was only an inspection or acceptance test.  A raw
         # follow-up can then inherit that stale instruction and stop before plan
         # and build.  Re-apply the product-flow contract only while the project is

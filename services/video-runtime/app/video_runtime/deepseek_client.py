@@ -13,7 +13,7 @@ class DeepSeekHarnessError(RuntimeError):
 
 
 class DeepSeekHarnessClient:
-    """Typed transport used by the legacy Cuti BFF to control DeepSeek Sessions."""
+    """Typed transport used by the legacy Cuti BFF to control Harness Sessions."""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class DeepSeekHarnessClient:
         return value
 
     async def list_sessions(self) -> list[dict[str, Any]]:
-        """Return the lightweight DeepSeek Session catalog.
+        """Return the lightweight Harness Session catalog.
 
         The compatibility BFF uses this before binding a caller-supplied
         ``/create/{threadId}`` route.  ``session.create`` is intentionally

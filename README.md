@@ -1,10 +1,10 @@
-# Video Agent Harness
+# Cuti Video Harness
 
 English | [中文](README.zh.md)
 
-Video Agent Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). DeepSeek owns the conversation, agent loop, and high-level tool selection. Cuti's Video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
+Cuti Video Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Cuti Harness owns the conversation, agent loop, and high-level tool selection. Cuti's Video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
 
-The primary product UI is Video Studio. Its `/create/:threadId` workspace keeps the DeepSeek chat on the left and generated scripts, images, clips, audio, build progress, and final video on the right.
+The primary product UI is Video Studio. Its `/create/:threadId` workspace keeps the Cuti Harness chat on the left and generated scripts, images, clips, audio, build progress, and final video on the right.
 
 ## Architecture
 
@@ -16,13 +16,13 @@ Video Runtime + compatibility BFF (:8001)
   |-- projects, Skills, artifacts, builds, versions
   |-- media service and sandbox worker
   v
-DeepSeek Harness (:3080)
+Cuti Harness (:3080)
   |-- LLM conversation and video_* tool selection
   v
 Provider / Workflow / Validator / Media plugins
 ```
 
-The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Video Agent Harness reference](docs/video-agent-harness.md) for the architecture in detail.
+The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Cuti Video Harness reference](docs/video-agent-harness.md) for the architecture in detail.
 
 Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
 
@@ -30,7 +30,7 @@ Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits th
 
 ## Clone and run from source (recommended)
 
-This is the release acceptance path for the open-source branch. The setup command prepares dependencies, and the start command runs Video Studio, DeepSeek Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, and Redis are not required.
+This is the release acceptance path for the open-source branch. The setup command prepares dependencies, and the start command runs Video Studio, Cuti Harness, Video Runtime, Media Service, and Sandbox Worker. Docker, PostgreSQL, and Redis are not required.
 
 ### Prerequisites
 
@@ -77,7 +77,7 @@ OPENAI_API_KEY=your-openai-key
 WAVESPEED_API_KEY=your-wavespeed-key
 ```
 
-`OPENAI_API_KEY` powers the DeepSeek Harness conversation and planning model. For the default video workflow, use `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by music-generating workflows. The UI and health endpoints can start without keys, but the corresponding model or media call will fail when invoked.
+`OPENAI_API_KEY` powers the Cuti Harness conversation and planning model. For the default video workflow, use `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by music-generating workflows. The UI and health endpoints can start without keys, but the corresponding model or media call will fail when invoked.
 
 ### 3. Install and build
 
@@ -132,7 +132,7 @@ When using the optional portable environment, pass the same option to start:
 pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-When the terminal prints `Video Agent Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
+When the terminal prints `Cuti Video Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
 
 ### 6. Verify the running stack
 
@@ -143,7 +143,7 @@ pnpm video:doctor -- --data-dir .video-agent-harness-data
 curl http://127.0.0.1:8001/health
 ```
 
-Doctor should report every component as `OK`; the health response should be `{"status":"healthy"}`. Port `3000` is Video Studio, `3080` is DeepSeek Harness, `8001` is Video Runtime, `8090` is Sandbox Worker, and `18080` is Media Service.
+Doctor should report every component as `OK`; the health response should be `{"status":"healthy"}`. Port `3000` is Video Studio, `3080` is Cuti Harness, `8001` is Video Runtime, `8090` is Sandbox Worker, and `18080` is Media Service.
 
 Portable-environment users also pass `--portable-python` to `video:doctor`.
 
@@ -187,7 +187,7 @@ Open [http://127.0.0.1:5173/#/zh/create](http://127.0.0.1:5173/#/zh/create).
 
 | Symptom | Check |
 | --- | --- |
-| The UI opens but sending a prompt has no response | Confirm DeepSeek Harness is still running on port `3080` and `OPENAI_API_KEY` is present in the repository `.env`. |
+| The UI opens but sending a prompt has no response | Confirm Cuti Harness is still running on port `3080` and `OPENAI_API_KEY` is present in the repository `.env`. |
 | `401`, `NO_AUTH`, or model authentication error | Check `OPENAI_API_KEY` in `.env`, then restart the local stack so the launcher reloads it. |
 | Video or image generation fails | Configure the provider key required by the selected workflow; the default Seedance path needs `WAVESPEED_API_KEY` or `ARK_API_KEY`. |
 | Build remains queued or the Runtime is unavailable | Run `pnpm video:doctor -- --data-dir .video-agent-harness-data` and inspect the launcher terminal. |
