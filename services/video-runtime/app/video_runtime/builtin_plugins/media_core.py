@@ -206,7 +206,7 @@ class MediaCorePlugin(BaseVideoPlugin):
             ),
             MediaCapabilityContract(
                 capability="media.hyperframes_caption",
-                description="Render sentence-synchronized HyperFrames captions from a timestamped transcript.",
+                description="Render HyperFrames captions from authored HTML.",
                 inputs=[
                     source("video", ["video"], "video_step"),
                     source("transcript", ["transcript"], "transcription_step", required=False),
@@ -550,8 +550,6 @@ class MediaCorePlugin(BaseVideoPlugin):
                     f"required media output is unavailable: {transcription_step}"
                 )
             if transcription is not None:
-                # Dialogue captions use the proven Cuti template, not arbitrary
-                # model HTML that can override timing and safe-area placement.
                 cues = list(transcription.metadata.get("segments") or [])
                 words = list(transcription.metadata.get("words") or [])
                 translations = parameters.get("translated_texts")
@@ -562,22 +560,13 @@ class MediaCorePlugin(BaseVideoPlugin):
                         raise ValueError("translated_texts must contain one nonempty translation per transcript segment; preserve transcript order")
                     cues = [{**cue, "text": text.strip()} for cue, text in zip(cues, translations, strict=True)]
                     words = []
-                authored_caption = ""
-                authored_host = ""
-            if not authored_caption and not authored_host and not words and not cues:
-                raise ValueError(
-                    "media.hyperframes_caption requires a timestamped transcript, words, or cues"
-                )
+            if not authored_caption and not authored_host:
+                raise ValueError("media.hyperframes_caption requires caption_html")
             result = await msc.hyperframes_caption(
                 video_url,
                 run_id=f"video-build-{payload['build']['id']}-{step['step_id']}",
                 words=words,
                 cues=cues,
-                style=str(parameters.get("style") or "caption-highlight"),
-                accent_color=str(parameters.get("accent_color") or "#ff1745"),
-                position=str(parameters.get("position") or "bottom-safe"),
-                playbook=parameters.get("playbook") if isinstance(parameters.get("playbook"), str) else None,
-                layers=parameters.get("layers") if isinstance(parameters.get("layers"), list) else None,
                 caption_html=authored_caption or None,
                 composition_html=authored_host or None,
             )

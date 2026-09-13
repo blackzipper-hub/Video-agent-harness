@@ -308,7 +308,7 @@ def _prepare_authored_html(
     duration: float,
     width: int,
     height: int,
-    accent: str,
+    accent: str | None,
     has_cjk: bool,
 ) -> str:
     """Normalize Agent-authored markup into a renderable HyperFrames composition.
@@ -384,7 +384,9 @@ def _prepare_authored_html(
         "@font-face{font-family:'Cuti CJK';src:url('assets/cuti-cjk.ttf') "
         "format('truetype');font-weight:100 900;font-style:normal;font-display:block}"
     )
-    extra = f"{cjk_face}:root{{--color-accent:{accent};}}"
+    extra = cjk_face
+    if accent:
+        extra += f":root{{--color-accent:{accent};}}"
     if has_cjk:
         extra += "html,body{font-family:'Cuti CJK',sans-serif}"
         html = re.sub(r'FONT_FAMILY = "[^"]+"', 'FONT_FAMILY = "Cuti CJK"', html)
@@ -517,22 +519,22 @@ async def render_captions(
     *,
     words: list[dict],
     cues: list[dict],
-    style: str = "caption-highlight",
-    accent_color: str,
-    position: str,
+    style: str | None = None,
+    accent_color: str | None = None,
+    position: str | None = None,
     playbook: str | None = None,
     layers: list[dict] | None = None,
     caption_html: str | None = None,
     composition_html: str | None = None,
 ) -> dict[str, Any]:
-    if style not in STYLE_NAMES:
-        raise ValueError(f"Unsupported HyperFrames caption style: {style}")
     authored_caption = (caption_html or "").strip()
     authored_host = (composition_html or "").strip()
+    if not authored_caption and not authored_host:
+        raise ValueError("HyperFrames captions require caption_html")
+    if style and style not in STYLE_NAMES:
+        raise ValueError(f"Unsupported HyperFrames caption style: {style}")
     normalized = _normalize_words(words, cues)
     groups = _sentence_groups(words, cues)
-    if not authored_caption and not authored_host and not groups:
-        raise ValueError("HyperFrames captions require timestamped words or cues")
     overlay_layers = [item for item in (layers or []) if isinstance(item, dict)]
     info = await get_video_info(video_path)
     width, height = int(info.get("width") or 1920), int(info.get("height") or 1080)

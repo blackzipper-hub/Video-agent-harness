@@ -432,7 +432,7 @@ def test_mv_skill_files_and_workflow_contract():
         "media.mix_audio",
         "media.concat",
         "hyperframes-captions",
-        "accent_color",
+        "caption_html",
         "media.hyperframes_caption",
         "subtitle-authoring",
         "subtitle.compose",
@@ -553,9 +553,10 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert not is_workflow_skill("hyperframes-captions")
     text = skill.instructions
     assert "media.hyperframes_caption" in text
-    assert "timestamps" in text
-    assert "Always\n   pass the selected `style` explicitly" in text
-    assert "不要只报一个 registry 组件名" not in text
+    assert "时间戳" in text
+    assert "caption_html" in text
+    assert "caption-pill-karaoke" not in text
+    assert "registry" not in text.lower()
     for name in (
         "hyperframes-core",
         "hyperframes-cli",
@@ -573,30 +574,39 @@ def test_hyperframes_captions_skill_is_instruction_helper():
     assert "references/captions/authoring.md" in catalog.list_resources("hyperframes-media")
 
 
-def test_hyperframes_caption_schema_defaults_to_transcript_template():
+def test_hyperframes_caption_schema_requires_authored_html():
+    from jsonschema.exceptions import ValidationError
     from jsonschema.validators import validator_for
 
     registry = build_registry(include_platform=True)
     schema = registry.get("media.hyperframes_caption").parameters_schema
-    assert "style" in schema["properties"]
+    assert "style" not in schema["properties"]
+    assert "accent_color" not in schema["properties"]
+    assert "position" not in schema["properties"]
     assert "caption_html" in schema["properties"]
     assert "composition_html" in schema["properties"]
     assert "video_step" in schema["properties"]
     assert "video_url" in schema["properties"]
-    assert "anyOf" not in schema
-    validator_for(schema)(schema).validate({
-        "video_url": "https://cdn.example/v.mp4",
-        "transcription_step": "transcript",
-        "style": "caption-editorial-emphasis",
-    })
-    validator_for(schema)(schema).validate({
+    validator = validator_for(schema)(schema)
+    validator.validate({
         "video_url": "https://cdn.example/v.mp4",
         "caption_html": "<!doctype html><html></html>",
     })
-    validator_for(schema)(schema).validate({
+    validator.validate({
         "video_step": "mixed-video",
         "composition_html": "<!doctype html><html></html>",
     })
+    with pytest.raises(ValidationError):
+        validator.validate({
+            "video_url": "https://cdn.example/v.mp4",
+            "transcription_step": "transcript",
+        })
+    with pytest.raises(ValidationError):
+        validator.validate({
+            "video_url": "https://cdn.example/v.mp4",
+            "caption_html": "<!doctype html><html></html>",
+            "style": "caption-pill-karaoke",
+        })
 
 
 def test_concat_and_mix_schemas_accept_dest_urls_or_step_ids():

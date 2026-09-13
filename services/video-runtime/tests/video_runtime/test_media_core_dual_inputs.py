@@ -241,19 +241,21 @@ class DestAndStepSchemaTest(unittest.TestCase):
             "mode": "replace",
         })
 
-    def test_hyperframes_captions_skill_teaches_cuti_template_flow(self):
+    def test_hyperframes_captions_skill_teaches_authored_html_flow(self):
         root = Path(__file__).resolve().parents[2] / "skills" / "builtin"
         catalog = SkillCatalog([root])
         catalog.discover()
         skill = catalog.load("hyperframes-captions")
         self.assertIsNone(skill.contract)
-        self.assertIn("timestamps", skill.instructions)
+        self.assertIn("时间戳", skill.instructions)
         self.assertIn("media.hyperframes_caption", skill.instructions)
-        self.assertNotIn("不要只报一个 registry 组件名", skill.instructions)
+        self.assertIn("caption_html", skill.instructions)
+        self.assertNotIn("registry", skill.instructions.lower())
+        self.assertNotIn("caption-pill-karaoke", skill.instructions)
 
 
 class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
-    async def test_translations_keep_transcript_timing_and_template_placement(self):
+    async def test_translations_keep_transcript_timing_and_authored_html(self):
         transcript = MediaArtifactVersion(project_id="project-1", artifact_id="transcription", type="transcript", metadata={
             "segments": [{"start": 3.2, "end": 4.8, "text": "Hello"}],
             "words": [{"start": 3.2, "end": 4.8, "word": "Hello"}],
@@ -261,12 +263,12 @@ class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
         caption = AsyncMock(return_value={"result_url": "https://cdn.example/out.mp4"})
         with patch("app.utils.media_service_client.hyperframes_caption", caption):
             await self._run({"video_url": "https://cdn.example/v.mp4", "translated_texts": ["你好"],
-                             "caption_html": "<div>invented</div>", "position": "bottom-safe"},
+                             "caption_html": "<div>invented</div>"},
                             {"transcription": transcript})
         self.assertEqual(caption.await_args.kwargs["cues"], [{"start": 3.2, "end": 4.8, "text": "你好"}])
         self.assertEqual(caption.await_args.kwargs["words"], [])
-        self.assertIsNone(caption.await_args.kwargs["caption_html"])
-        self.assertEqual(caption.await_args.kwargs["position"], "bottom-safe")
+        self.assertEqual(caption.await_args.kwargs["caption_html"], "<div>invented</div>")
+        self.assertNotIn("style", caption.await_args.kwargs)
 
     async def _run(self, parameters: dict, completed: dict | None = None):
         plugin = MediaCorePlugin()
@@ -298,11 +300,28 @@ class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["caption_html"], "<!doctype html><html></html>")
         self.assertEqual(payload["words"], [])
         self.assertEqual(payload["cues"], [])
-        self.assertEqual(caption.await_args.kwargs["style"], "caption-highlight")
+        self.assertNotIn("style", payload)
         self.assertEqual(result.uri, "https://cdn.example/captioned.mp4")
 
-    async def test_transcript_cues_render_without_authored_html(self):
+    async def test_different_authored_html_is_not_collapsed_to_one_template(self):
         caption = AsyncMock(return_value={"result_url": "https://cdn.example/captioned.mp4"})
+        with patch("app.utils.media_service_client.hyperframes_caption", caption):
+            await self._run({
+                "video_url": "https://cdn.example/v.mp4",
+                "caption_html": "<div id=\"quiet-lyric\">向光奔跑</div>",
+            })
+            await self._run({
+                "video_url": "https://cdn.example/v.mp4",
+                "caption_html": "<h1 class=\"title-card\">念嘟嘟</h1>",
+            })
+        first, second = caption.await_args_list
+        self.assertEqual(first.kwargs["caption_html"], "<div id=\"quiet-lyric\">向光奔跑</div>")
+        self.assertEqual(second.kwargs["caption_html"], "<h1 class=\"title-card\">念嘟嘟</h1>")
+        self.assertNotEqual(first.kwargs["caption_html"], second.kwargs["caption_html"])
+        self.assertNotIn("style", first.kwargs)
+        self.assertNotIn("style", second.kwargs)
+
+    async def test_transcript_without_authored_html_is_rejected(self):
         transcript = MediaArtifactVersion(
             project_id="project-1",
             artifact_id="transcription",
@@ -313,22 +332,17 @@ class HyperframesCaptionExecuteTest(unittest.IsolatedAsyncioTestCase):
         transcript["metadata"].update({
             "segments": [{"start": 1, "end": 2, "text": "字幕"}],
         })
-        with patch("app.utils.media_service_client.hyperframes_caption", caption):
-            result = await self._run(
+        with self.assertRaisesRegex(ValueError, "caption_html"):
+            await self._run(
                 {
                     "video_url": "https://cdn.example/v.mp4",
                     "transcription_step": "transcription",
-                    "style": "caption-editorial-emphasis",
                 },
                 {"transcription": transcript},
             )
-        self.assertEqual(result.uri, "https://cdn.example/captioned.mp4")
-        self.assertEqual(caption.await_args.kwargs["style"], "caption-editorial-emphasis")
-        self.assertEqual(caption.await_args.kwargs["cues"][0]["text"], "字幕")
-        self.assertIsNone(caption.await_args.kwargs["caption_html"])
 
     async def test_missing_transcript_and_html_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "timestamped transcript"):
+        with self.assertRaisesRegex(ValueError, "caption_html"):
             await self._run({"video_url": "https://cdn.example/v.mp4"})
 
     async def test_replacing_static_captions_uses_original_video(self):
