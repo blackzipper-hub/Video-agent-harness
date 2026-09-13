@@ -1,10 +1,32 @@
-# DeepSeek Harness Architecture
+# Cuti Harness Architecture
 
 English | [中文](architecture.zh.md)
 
-Read this before changing anything under `packages/`. It assumes you know Cordis; if you do not, start with the [primer](cordis-primer.md) or the [tutorial](cordis-tutorial/index.md).
+Cuti Harness is a video harness built upon DeepSeek Harness.
 
-We recommend using an agent to explore the codebase and understand its architecture.
+## Cuti Video Harness Architecture
+
+```text
+Video Studio (:3000)
+  |-- /chat-v1 and /api/video
+  v
+Video Runtime + compatibility BFF (:8001)
+  |-- projects, Skills, artifacts, builds, versions
+  |-- media service and sandbox worker
+  v
+Cuti Harness (:3080)
+  |-- LLM conversation and video_* tool selection
+  v
+Provider / Workflow / Validator / Media plugins
+```
+
+The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Cuti Video Harness reference](video-agent-harness.md) for the architecture in detail.
+
+Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
+
+## DeepSeek Harness Architecture
+
+DeepSeek Harness provides the plugin-based agent runtime beneath Cuti Harness. Read this section before changing anything under `packages/`; if you do not know Cordis, start with the [primer](cordis-primer.md) or the [tutorial](cordis-tutorial/index.md).
 
 ## Cordis
 

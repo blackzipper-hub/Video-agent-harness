@@ -2,29 +2,18 @@
 
 [English](README.md) | 中文
 
+[![Cuti Harness](https://img.shields.io/badge/Cuti-Harness-0A66C2)](https://newai.land/cuti-harness)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+一个面向长程视频创作的通用、开源、插件化视频 Harness。
+
 Cuti Video Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源、项目型视频 Agent Harness。Cuti Harness 负责对话、Agent Loop 和高层工具选择；Cuti Video Runtime 负责持久化项目、Skill、Artifact 依赖、增量构建、时间线、校验和导出。
 
-主要产品界面是 Video Studio。它的 `/create/:threadId` 工作区左侧展示 Cuti Harness 对话，右侧展示已经生成的剧本、图片、视频片段、音频、构建进度和最终视频。
+本仓库包含 Cuti Harness 的 Agent 算法与循环、Video Runtime 后端、Video Studio 前端、兼容 BFF、Media Service、Sandbox Worker，以及它们使用的 Provider、Workflow、Validator 和媒体插件。
 
 ## 架构
 
-```text
-Video Studio (:3000)
-  |-- /chat-v1 and /api/video
-  v
-Video Runtime + compatibility BFF (:8001)
-  |-- projects, Skills, artifacts, builds, versions
-  |-- media service and sandbox worker
-  v
-Cuti Harness (:3080)
-  |-- LLM conversation and video_* tool selection
-  v
-Provider / Workflow / Validator / Media plugins
-```
-
-本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Cuti Video Harness 架构说明](docs/video-agent-harness.zh.md)。
-
-规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后， Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
+详见 [Cuti Video Harness 架构](docs/architecture.zh.md#cuti-video-harness-architecture)。
 
 <a id="run"></a><a id="run-from-source"></a>
 
@@ -204,7 +193,7 @@ python -m unittest discover -s services/video-runtime/tests/video_runtime -v
 
 仓库同时保留 DeepSeek Harness 的完整检查。更多说明见[开发文档](docs/development.zh.md)和[贡献指南](CONTRIBUTING.zh.md)。
 
-## 项目状态
+## 使用须知
 
 项目目前处于开发者预览阶段，可能出现不兼容变更。Provider 调用可能产生真实费用，请先使用短视频和低成本 Prompt 测试。
 

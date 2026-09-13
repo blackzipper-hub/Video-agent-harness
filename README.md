@@ -2,29 +2,18 @@
 
 English | [中文](README.zh.md)
 
+[![Cuti Harness](https://img.shields.io/badge/Cuti-Harness-0A66C2)](https://newai.land/cuti-harness)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A general-purpose, open-source, plugin-based video harness for long-horizon video creation.
+
 Cuti Video Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Cuti Harness owns the conversation, agent loop, and high-level tool selection. Cuti's Video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
 
-The primary product UI is Video Studio. Its `/create/:threadId` workspace keeps the Cuti Harness chat on the left and generated scripts, images, clips, audio, build progress, and final video on the right.
+This repository includes the Cuti Harness agent algorithm and loop, the Video Runtime backend, the Video Studio frontend, a compatibility BFF, Media Service, Sandbox Worker, and the provider, workflow, validator, and media plugins they use.
 
 ## Architecture
 
-```text
-Video Studio (:3000)
-  |-- /chat-v1 and /api/video
-  v
-Video Runtime + compatibility BFF (:8001)
-  |-- projects, Skills, artifacts, builds, versions
-  |-- media service and sandbox worker
-  v
-Cuti Harness (:3080)
-  |-- LLM conversation and video_* tool selection
-  v
-Provider / Workflow / Validator / Media plugins
-```
-
-The integration adds `@cuti-ai/video-runtime`, `@cuti-ai/video-runtime-http`, `@cuti-ai/tool-video`, and `@cuti-ai/video-agent-bundle` without adding a second agent loop. See the [Cuti Video Harness reference](docs/video-agent-harness.md) for the architecture in detail.
-
-Planning follows Cuti V2's continuous `PlanPatch` contract. A Workflow limits the allowed capabilities and creative rules, but it does not precompile the complete production DAG. After each executable task frontier finishes, Video Runtime persists the real Artifacts and queues the same DeepSeek Session. DeepSeek then submits the next `add_tasks` patch, cancels still-pending tasks, or marks the goal satisfied.
+See [Cuti Video Harness architecture](docs/architecture.md#cuti-video-harness-architecture).
 
 <a id="run"></a><a id="run-from-source"></a>
 
@@ -204,7 +193,7 @@ python -m unittest discover -s services/video-runtime/tests/video_runtime -v
 
 The repository also retains the broader DeepSeek Harness checks. See [development](docs/development.md) and [contributing](CONTRIBUTING.md).
 
-## Project status
+## Usage notice
 
 This project is in developer preview and can introduce compatibility-breaking changes. Provider calls may incur real costs. Start with short videos and low-cost test prompts.
 
