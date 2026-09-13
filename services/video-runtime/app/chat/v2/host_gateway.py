@@ -460,7 +460,7 @@ class HostGateway:
             ) from exc
 
         transcription = payload.get("transcription")
-        if transcription is None and payload.get("transcribe", True):
+        if transcription is None:
             from app.services.agent.video.smart_clip_flow import (
                 transcribe_audio_for_analysis,
             )
@@ -480,12 +480,6 @@ class HostGateway:
                 ) from exc
             if transcription is None:
                 raise HostGatewayError("media.audio_analyze transcription returned nothing")
-
-        if transcription is None:
-            raise HostGatewayError(
-                "media.audio_analyze needs a transcription "
-                "(omit transcribe=false, or pass transcription)"
-            )
         transcription = as_smart_clip_transcription(transcription)
 
         view = transcription_public_view(

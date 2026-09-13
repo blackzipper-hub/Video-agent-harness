@@ -354,7 +354,6 @@ class MediaCorePlugin(BaseVideoPlugin):
                 ),
                 "filename": parameters.get("filename") or music_meta.get("filename"),
                 "user_input": parameters.get("user_input"),
-                "transcribe": parameters.get("transcribe", True),
                 "transcription": parameters.get("transcription"),
                 "run_id": f"video-build-{payload['build']['id']}-{step['step_id']}",
             })

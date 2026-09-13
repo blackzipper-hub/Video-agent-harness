@@ -35,6 +35,54 @@ def sine_audio_5s(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not on PATH")
+async def test_trim_audio_stays_within_requested_duration(tmp_path):
+    """15s 切窗必须按采样点卡住，不能像 -c copy 那样落到 16s+。"""
+    from app.services import ffmpeg_service
+
+    src = tmp_path / "sine_20s.mp3"
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=20",
+            "-c:a", "libmp3lame", "-q:a", "4",
+            str(src),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    copied = tmp_path / "copy_15s.mp3"
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(src),
+            "-ss", "0", "-t", "15",
+            "-c", "copy",
+            str(copied),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    out = str(tmp_path / "reencoded_15s.mp3")
+    await ffmpeg_service.trim_audio(str(src), out, start=0.0, duration=15.0)
+    decoded = await ffmpeg_service.get_audio_duration(out)
+    copy_dur = await ffmpeg_service.get_audio_duration(str(copied))
+    assert 14.85 <= decoded <= 15.08, (
+        f"re-encode duration {decoded} 超出 14.85~15.08s (copy was {copy_dur})"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not on PATH")
+async def test_trim_audio_rejects_non_positive_duration(sine_audio_5s, tmp_path):
+    from app.services import ffmpeg_service
+
+    with pytest.raises(ValueError):
+        await ffmpeg_service.trim_audio(
+            sine_audio_5s, str(tmp_path / "out.mp3"), start=0.0, duration=0.0,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not on PATH")
 async def test_trim_audio_with_fade_basic(sine_audio_5s, tmp_path):
     """裁切 5s 中段 [1.0..3.0]，淡入 0.3s + 淡出 0.5s。"""
     from app.services import ffmpeg_service

@@ -226,7 +226,6 @@ def platform_capabilities() -> list[CapabilityManifest]:
                     "generated_lyrics": {"type": "string"},
                     "filename": {"type": "string"},
                     "user_input": {"type": "string"},
-                    "transcribe": {"type": "boolean", "default": True},
                     "transcription": {"type": "object", "description": "Reuse an existing v1 transcript."},
                     "run_id": {"type": "string"},
                 },

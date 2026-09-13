@@ -39,6 +39,7 @@ async def audio_trim(req: AudioTrimRequest, request: Request):
         raise HTTPException(400, f"Cannot download audio: {req.audio_url}")
     out_name = f"trimmed_{uuid.uuid4().hex[:8]}.mp3"
     out_path = str(ws_svc.get_output_path(req.run_id, out_name))
+    # Re-encode (not -c copy) so duration stays within the requested window.
     await ffmpeg_service.trim_audio(local, out_path, req.start, req.duration)
     url = await s3.upload(out_path, f"media/{req.run_id}/{out_name}", "audio/mpeg")
     return MediaResult(result_url=url)

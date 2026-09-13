@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import uuid
@@ -972,6 +973,28 @@ async def trim_video(
         raise RuntimeError(f"FFmpeg trim failed: {stderr[:500]}")
 
 
+def _ffmpeg_error_tail(stderr: str, limit: int = 800) -> str:
+    text = stderr or ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _concat_vfilter(
+    index: int,
+    tw: int,
+    th: int,
+    fps_filter: str,
+) -> str:
+    # fps must come *after* settb/setpts. FFmpeg 7.1 xfade treats a stream whose
+    # last timebase rewrite is settb=AVTB as rate 1/0 and refuses to configure.
+    return (
+        f"[{index}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+        f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"settb=AVTB,setpts=PTS-STARTPTS{fps_filter}[v{index}]"
+    )
+
+
 async def concat_videos(
     input_paths: list[str],
     output_path: str,
@@ -1135,11 +1158,7 @@ async def concat_videos(
             raise RuntimeError("Cannot concatenate a clip with unknown video duration")
         filter_parts = []
         for i in range(len(input_paths)):
-            filter_parts.append(
-                f"[{i}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-                f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1{fps_filter},"
-                f"settb=AVTB,setpts=PTS-STARTPTS[v{i}]"
-            )
+            filter_parts.append(_concat_vfilter(i, tw, th, fps_filter))
         if keep_audio:
             for i in range(len(input_paths)):
                 clip_duration = video_durations[i]
@@ -1233,7 +1252,7 @@ async def concat_videos(
     except OSError:
         pass
     if rc != 0:
-        raise RuntimeError(f"FFmpeg concat failed: {stderr[:500]}")
+        raise RuntimeError(f"FFmpeg concat failed: {_ffmpeg_error_tail(stderr)}")
 
     if not normalize and infos and len(input_paths) > 1:
         expected_dur = sum(i["duration"] for i in infos)
@@ -1271,11 +1290,7 @@ async def _concat_normalize_batched(
         filter_parts = []
         batch_durations = (video_durations or [])[batch_idx:batch_idx + len(batch)]
         for i in range(len(batch)):
-            filter_parts.append(
-                f"[{i}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-                f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1{fps_filter},"
-                f"settb=AVTB,setpts=PTS-STARTPTS[v{i}]"
-            )
+            filter_parts.append(_concat_vfilter(i, tw, th, fps_filter))
         if keep_audio:
             if len(batch_durations) != len(batch) or any(d <= 0 for d in batch_durations):
                 raise RuntimeError("Cannot concatenate a clip with unknown video duration")
@@ -1618,13 +1633,21 @@ async def extract_audio(video_path: str, output_path: str, audio_format: str = "
 
 
 async def trim_audio(input_path: str, output_path: str, start: float, duration: float):
-    in_ext = input_path.rsplit(".", 1)[-1].lower() if "." in input_path else ""
-    out_ext = output_path.rsplit(".", 1)[-1].lower() if "." in output_path else ""
-    codec_args = ["-c", "copy"] if in_ext == out_ext else []
+    """裁切 [start, start+duration)，始终重编码。
+
+    ``-c copy`` 按数据包切，15 秒请求常会落到 16 秒以上，踩中 H3 参考音频上限。
+    与 ``trim_audio_with_fade`` 一样走 libmp3lame，按采样点卡在请求时长内。
+    """
+    if start < 0.0:
+        raise ValueError(f"trim_audio: start must be >= 0, got {start}")
+    if duration <= 0.0:
+        raise ValueError(f"trim_audio: duration must be > 0, got {duration}")
     cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-ss", str(start), "-t", str(duration),
-        *codec_args,
+        "ffmpeg", "-y",
+        "-ss", f"{float(start):.3f}",
+        "-t", f"{float(duration):.3f}",
+        "-i", input_path,
+        "-c:a", "libmp3lame", "-q:a", "4",
         output_path,
     ]
     rc, _, stderr = await run_ffmpeg(cmd)
@@ -1766,6 +1789,15 @@ async def create_placeholder(output_path: str, duration: float, width: int, heig
         raise RuntimeError(f"FFmpeg placeholder failed: {stderr[:500]}")
 
 
+def _input_seek_sec(timestamp: float) -> float:
+    """Format ffmpeg ``-ss`` without rounding up past the last frame PTS.
+
+    ``9.916667`` rounded to 3 decimals is ``9.917``, which seeks past EOF.
+    Flooring to milliseconds keeps the last decodable frame.
+    """
+    return math.floor(max(0.0, float(timestamp)) * 1000.0) / 1000.0
+
+
 async def extract_frame(
     input_path: str,
     output_path: str,
@@ -1777,15 +1809,19 @@ async def extract_frame(
     """Grab a single still frame at ``timestamp`` seconds from a video.
 
     Uses input seeking (``-ss`` before ``-i``) for speed; clamps negative
-    timestamps to 0. Returns basic image probe fields when available.
+    timestamps to 0. A timestamp at or past the last decoded frame is
+    floored to that frame (container duration is often one frame later,
+    and millisecond rounding can skip the last PTS).
     """
     normalized_position = (position or "timestamp").strip().lower()
     if normalized_position not in {"timestamp", "last"}:
         raise ValueError("position must be 'timestamp' or 'last'")
+    last_t = await _last_video_frame_timestamp(input_path)
     if normalized_position == "last":
-        t = await _last_video_frame_timestamp(input_path)
+        t = last_t
     else:
-        t = max(0.0, float(timestamp or 0.0))
+        t = max(0.0, min(float(timestamp or 0.0), last_t))
+    t = _input_seek_sec(t)
     fmt = (image_format or "jpeg").strip().lower()
     if fmt in {"jpg", "jpeg"}:
         fmt = "jpeg"

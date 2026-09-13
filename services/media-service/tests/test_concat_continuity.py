@@ -6,7 +6,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ffmpeg_service import concat_videos, extract_frame, get_video_info
+from app.services.ffmpeg_service import (
+    _input_seek_sec,
+    concat_videos,
+    extract_frame,
+    get_video_info,
+)
+
+
+def test_input_seek_sec_floors_to_milliseconds():
+    assert _input_seek_sec(15.041667) == 15.041
+    assert _input_seek_sec(9.916667) == 9.916
+    assert _input_seek_sec(-1.0) == 0.0
 
 
 def _ffmpeg_ok() -> bool:
@@ -58,9 +69,9 @@ async def test_extract_last_frame_uses_final_decoded_video_frame():
         info = await get_video_info(source)
         result = await extract_frame(source, frame, None, position="last", image_format="png")
 
-        expected_pts = (info["nb_frames"] - 1) / info["fps"]
+        expected_pts = _input_seek_sec((info["nb_frames"] - 1) / info["fps"])
         assert result["position"] == "last"
-        assert abs(result["timestamp"] - expected_pts) < 1e-4
+        assert abs(result["timestamp"] - expected_pts) < 1e-9
         assert os.path.getsize(frame) > 0
 
 
@@ -123,6 +134,47 @@ async def test_concat_normalize_uses_copy_for_identical_hevc_main10_streams():
         command = run.await_args.args[0]
         assert command[command.index("-c") + 1] == "copy"
         assert "libx264" not in command
+
+
+@pytest.mark.asyncio
+async def test_concat_xfade_puts_fps_after_settb():
+    """FFmpeg 7.1 xfade rejects streams that rewrite timebase after fps."""
+    info = {
+        "duration": 15.08,
+        "video_duration": 15.08,
+        "width": 1920,
+        "height": 1080,
+        "fps": 24.0,
+        "nb_frames": 362,
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "has_audio": True,
+        "time_base": "1/12288",
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "audio_channels": 2,
+        "audio_channel_layout": "stereo",
+        "audio_time_base": "1/44100",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        output = os.path.join(tmp, "output.mp4")
+        run = AsyncMock(return_value=(0, "", ""))
+        inspect = AsyncMock(return_value=info)
+        with (
+            patch("app.services.ffmpeg_service.run_ffmpeg", run),
+            patch("app.services.ffmpeg_service.get_video_info", inspect),
+        ):
+            await concat_videos(
+                [os.path.join(tmp, "one.mp4"), os.path.join(tmp, "two.mp4")],
+                output,
+                normalize=True,
+                transition_duration=0.125,
+            )
+
+        command = run.await_args.args[0]
+        filt = command[command.index("-filter_complex") + 1]
+        assert "settb=AVTB,setpts=PTS-STARTPTS,fps=24.000000" in filt
+        assert "fps=24.000000,settb=AVTB" not in filt
 
 
 @pytest.mark.asyncio
