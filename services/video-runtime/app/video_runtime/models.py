@@ -503,7 +503,7 @@ class PlanCheckpointDefinition(BaseModel):
 
 
 class PlanCheckpoint(BaseModel):
-    """Durable request for the bound DeepSeek Session to plan a later build phase."""
+    """Durable request for the bound Harness Session to plan a later build phase."""
 
     id: str = Field(default_factory=uid)
     project_id: str

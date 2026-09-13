@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/video-studio/README.md
-README.md: e347b6fe887933aaa4c3af49f4a51f50e656b885
-README.zh.md: ca08fc4961ad7ade1ad30eb2355590ca8dc814ea
+README.md: 0cdb15c7f6d2e2880993e5fff65f0e29167abc34
+README.zh.md: f9bd6fcfc4048552ffddff2e54f9320790767cd3

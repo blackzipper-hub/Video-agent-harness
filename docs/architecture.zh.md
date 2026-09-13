@@ -1,10 +1,34 @@
-# DeepSeek Harness 架构
+# Cuti Harness 架构
 
 [English](architecture.md) | 中文
 
-改动 `packages/` 下的任何内容之前，请先阅读本文。本文假定你已了解 Cordis；如果尚未了解，请先阅读[入门](cordis-primer.zh.md)或[教程](cordis-tutorial/index.zh.md)。
+Cuti Harness 是构建于 DeepSeek Harness 之上的视频 Harness。
 
-建议使用 agent（智能体）探索代码库并理解其架构。
+<a id="cuti-video-harness-architecture"></a>
+
+## Cuti Video Harness 架构
+
+```text
+Video Studio (:3000)
+  |-- /chat-v1 and /api/video
+  v
+Video Runtime + compatibility BFF (:8001)
+  |-- projects, Skills, artifacts, builds, versions
+  |-- media service and sandbox worker
+  v
+Cuti Harness (:3080)
+  |-- LLM conversation and video_* tool selection
+  v
+Provider / Workflow / Validator / Media plugins
+```
+
+本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Cuti Video Harness 架构说明](video-agent-harness.zh.md)。
+
+规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后，Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
+
+## DeepSeek Harness 架构
+
+DeepSeek Harness 为 Cuti Harness 提供基于插件的 Agent Runtime。改动 `packages/` 下的任何内容之前，请先阅读本节；如果尚未了解 Cordis，请先阅读[入门](cordis-primer.zh.md)或[教程](cordis-tutorial/index.zh.md)。
 
 ## Cordis
 

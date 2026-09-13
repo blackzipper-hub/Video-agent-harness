@@ -1,16 +1,16 @@
-# Video Agent Harness
+# Cuti Video Harness
 
 [中文](PRODUCT_QUICKSTART.md) | **English**
 
 > This is the English version of the product introduction and quick-start guide.
 
-Video Agent Harness is an open-source, general-purpose video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+Cuti Video Harness is an open-source, general-purpose video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 It does more than invoke image and video generation tools. It continuously manages scripts, characters, scenes, shots, audio, subtitles, timelines, and final videos. The Agent adapts the production plan to actual generated results, preserves reusable work through Artifact dependencies, and rebuilds only the affected parts.
 
 ## Key Capabilities
 
-- DeepSeek-powered conversation, Workflow selection, and dynamic `PlanPatch`
+- Cuti Harness-powered conversation, Workflow selection, and dynamic `PlanPatch`
 - Installable Workflow, Style, Provider, and supporting Skills
 - Consistent character, scene, and shot references
 - Durable long-running tasks with pause, resume, cancellation, and retry
@@ -23,7 +23,7 @@ It does more than invoke image and video generation tools. It continuously manag
 ```text
 Video Studio
   ↓
-DeepSeek Harness
+Cuti Harness
   ↓
 Video Runtime
   ├─ Project / ProjectVersion
@@ -36,7 +36,7 @@ Video Runtime
 Workflow / Provider / Style / Media Plugins
 ```
 
-DeepSeek Harness owns conversation, intent understanding, Workflow selection, creative decisions, and tool calls. Video Runtime owns project state, Artifact dependencies, task execution, failure recovery, incremental builds, and version commits.
+Cuti Harness owns conversation, intent understanding, Workflow selection, creative decisions, and tool calls. Video Runtime owns project state, Artifact dependencies, task execution, failure recovery, incremental builds, and version commits.
 
 A Workflow defines the available capabilities and creative rules without hard-coding the entire production process in advance. When a real asset completes or a task fails, the Agent can submit another `PlanPatch` to add tasks, revise later parameters, or cancel work that has not started.
 
@@ -136,7 +136,7 @@ Expected response:
 {"status":"healthy"}
 ```
 
-### 4. Install Dependencies and Build DeepSeek Harness
+### 4. Install Dependencies and Build Cuti Harness
 
 ```bash
 corepack enable
@@ -144,7 +144,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-### 5. Start DeepSeek Harness
+### 5. Start Cuti Harness
 
 #### Windows PowerShell
 
@@ -167,7 +167,7 @@ pnpm dsh --profile web \
   --no-open
 ```
 
-DeepSeek Harness listens at:
+Cuti Harness listens at:
 
 [http://127.0.0.1:3080](http://127.0.0.1:3080)
 
@@ -201,7 +201,7 @@ Chinese prompt:
 
 ## Development Mode
 
-Keep the Docker services and DeepSeek Harness running, then create the frontend environment file:
+Keep the Docker services and Cuti Harness running, then create the frontend environment file:
 
 ```bash
 cd apps/video-studio
@@ -239,8 +239,8 @@ Open:
 
 | Symptom | What to check |
 | --- | --- |
-| The UI opens, but sending a prompt produces no response | Confirm DeepSeek Harness is running on port `3080` and its process received `OPENAI_API_KEY`. |
-| `401`, `NO_AUTH`, or model authentication error | Check `.env` and verify that the DeepSeek Harness process loaded the OpenAI key. |
+| The UI opens, but sending a prompt produces no response | Confirm Cuti Harness is running on port `3080` and its process received `OPENAI_API_KEY`. |
+| `401`, `NO_AUTH`, or model authentication error | Check `.env` and verify that the Cuti Harness process loaded the OpenAI key. |
 | Image or video generation fails | Configure the key required by the selected Workflow. The default Seedance path requires WaveSpeed or Ark. |
 | A Build remains queued | Run `docker compose -f deploy/compose.video.yml ps` and inspect the Runtime and Worker status. |
 | A port is already in use | Free or remap ports `3000`, `3080`, `8001`, `8090`, and `18080`. |
@@ -267,7 +267,7 @@ docker compose -f deploy/compose.video.yml down -v
 
 ## Project Status
 
-Video Agent Harness is currently in Developer Preview. Some APIs and data structures may still introduce compatibility-breaking changes.
+Cuti Video Harness is currently in Developer Preview. Some APIs and data structures may still introduce compatibility-breaking changes.
 
 Provider calls may incur real costs. Begin with short videos, fewer shots, and low-cost models.
 

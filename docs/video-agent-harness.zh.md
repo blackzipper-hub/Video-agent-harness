@@ -1,4 +1,4 @@
-# Video Agent Harness 参考
+# Cuti Video Harness 参考
 
 [English](video-agent-harness.md) | 中文
 
@@ -8,13 +8,13 @@
 
 | 组件 | 归属 | 职责 |
 |---|---|---|
-| Session、提示词、模型调用、agent loop、工具选择 | DeepSeek Harness | 理解意图并选择一个面向模型的视频工具。 |
-| `@cuti-ai/tool-video` | DeepSeek 插件 | 暴露 11 个项目级操作，不向模型暴露 Provider 或工作流内部细节。 |
-| Video Runtime HTTP Provider | DeepSeek 插件 | 将取消信号及可信的 Session／用户身份转发到 Python 进程。 |
+| Session、提示词、模型调用、agent loop、工具选择 | Cuti Harness | 理解意图并选择一个面向模型的视频工具。 |
+| `@cuti-ai/tool-video` | Cuti Harness 插件 | 暴露 11 个项目级操作，不向模型暴露 Provider 或工作流内部细节。 |
+| Video Runtime HTTP Provider | Cuti Harness 插件 | 将取消信号及可信的 Session／用户身份转发到 Python 进程。 |
 | Video Runtime | Cuti Python 运行时 | 管理项目、版本、产物、依赖、重建、校验、时间线、导出和有序事件。 |
 | Video Studio | Cuti React 应用 | 展示聊天、可验证的 agent 与 Build 进度、产物、播放、时间线编辑、重建影响、费用、校验和版本历史。 |
 
-Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Session 可以绑定多个项目，一个项目也可以绑定多个 Session。删除或压缩 Session 不会删除项目产物。
+Video Runtime 是视频项目状态的唯一事实来源。一个 Harness Session 可以绑定多个项目，一个项目也可以绑定多个 Session。删除或压缩 Session 不会删除项目产物。
 
 ## 增量构建模型
 
@@ -26,7 +26,7 @@ Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Sessi
 
 ## 首次视频构建
 
-`video_project_create`、`video_project_plan` 与 `video_project_build` 增加首次构建路径，但不会增加第二套 Agent Loop。DeepSeek 生成与 Provider 无关的 `VideoSpec`；Workflow Plugin 把它编译为与增量和导出任务共用的持久化 `BuildPlan`。计划包含稳定步骤身份、Capability、依赖、幂等键、输出产物身份和预计成本。
+`video_project_create`、`video_project_plan` 与 `video_project_build` 增加首次构建路径，但不会增加第二套 Agent Loop。Cuti Harness 生成与 Provider 无关的 `VideoSpec`；Workflow Plugin 把它编译为与增量和导出任务共用的持久化 `BuildPlan`。计划包含稳定步骤身份、Capability、依赖、幂等键、输出产物身份和预计成本。
 
 可选 Workflow Skill（`seedance2`、`mv`、`short-drama-workflow`、`cuti-product-workflow`、`cuti-scenario-product-workflow`）把 `VideoSpec` 编译成这份 `BuildPlan`。每个成功步骤立即保存为 draft，服务重启后可直接复用。只有全部媒体与校验步骤通过后，活动 ProjectVersion 才会切换。
 
@@ -44,7 +44,7 @@ Video Runtime 是视频项目状态的唯一事实来源。一个 DeepSeek Sessi
 
 ## 执行授权
 
-DeepSeek 的工具管线负责授权 11 个面向模型的操作。所有在 Video Runtime 注册的嵌套 Provider、Skill 脚本、沙箱操作和媒体操作都通过 `RuntimeCapabilityRegistry` 与 `CapabilityExecutionGateway` 执行。
+Cuti Harness 的工具管线负责授权 11 个面向模型的操作。所有在 Video Runtime 注册的嵌套 Provider、Skill 脚本、沙箱操作和媒体操作都通过 `RuntimeCapabilityRegistry` 与 `CapabilityExecutionGateway` 执行。
 
 网关校验短期有效的 HMAC 签名 Grant，身份包含项目、Session、用户、插件和 Capability。Grant 还限制网络域名、费用、超时、并发、重试、幂等、审计身份和取消身份。插件不能把 Grant 扩大到自身 manifest 之外，操作在访问网络前还必须显式校验目标域名。
 
@@ -52,18 +52,18 @@ DeepSeek 的工具管线负责授权 11 个面向模型的操作。所有在 Vid
 
 API 根路径是 `/api/video`。它提供项目创建与查看、已安装插件和生效工作流列表、首次构建计划持久化与读取、Build 启动／读取／取消／恢复、逐步骤与校验状态、变更预览、重建提交、产物版本选择、固定作品版本导出、作品版本列表／恢复和项目事件流。修改操作支持幂等。事件使用项目内单调递增序号，并接受 `after` 参数用于重连。
 
-迁移期间，组合式 Cuti 应用继续提供已导入的 `/chat-v1/service/v2` 与 `/chat-v1/service/studio` API。设置 `VIDEO_AGENT_BACKEND=deepseek` 时，兼容 BFF 会保留核心 `/chat-v1/service/v2` Run、消息、事件、取消、产物选择和用量路径，同时把请求转换为 DeepSeek 原生 Session RPC 与 Video Runtime 状态。它会向 Video Studio 进度视图投影回答文本、模型身份与 Token 用量、决策步骤边界、具名工具输入与结果、终止状态和 Runtime Build 步骤，但不会投影私有推理或系统指令。项目没有产物或 Build 时，后续消息会收到自动依次执行 `video_project_plan` 与 `video_project_build` 的指令；已有作品的项目继续使用对话式编辑行为。历史 DeepSeek Session 已删除的项目仍会以空对话历史出现在 Run 列表中，因此一条孤立绑定不会隐藏其他项目。独立 Video Runtime 也会挂载相同的兼容路由，供本地部署使用。
+迁移期间，组合式 Cuti 应用继续提供已导入的 `/chat-v1/service/v2` 与 `/chat-v1/service/studio` API。设置 `VIDEO_AGENT_BACKEND=deepseek` 时，兼容 BFF 会保留核心 `/chat-v1/service/v2` Run、消息、事件、取消、产物选择和用量路径，同时把请求转换为 Harness Session RPC 与 Video Runtime 状态。它会向 Video Studio 进度视图投影回答文本、模型身份与 Token 用量、决策步骤边界、具名工具输入与结果、终止状态和 Runtime Build 步骤，但不会投影私有推理或系统指令。项目没有产物或 Build 时，后续消息会收到自动依次执行 `video_project_plan` 与 `video_project_build` 的指令；已有作品的项目继续使用对话式编辑行为。历史 Harness Session 已删除的项目仍会以空对话历史出现在 Run 列表中，因此一条孤立绑定不会隐藏其他项目。独立 Video Runtime 也会挂载相同的兼容路由，供本地部署使用。
 
 ## 运行时选择
 
-`VIDEO_AGENT_BACKEND` 只接受 `deepseek`。产品启动会挂载 DeepSeek 兼容 BFF、加载已配置 Video Plugin 和 Skill Workflow，并向 `VideoBuildRuntime` 提交结构化 Workflow 或 RebuildPlan。DeepSeek Harness 是唯一的规划循环；Provider 工具不会启动第二个 Planner。`VIDEO_INCREMENTAL_ENGINE_ENABLED` 仍作为规范化项目存储的兼容部署开关且默认开启；新路径不能关闭插件分发。
+`VIDEO_AGENT_BACKEND` 只接受 `deepseek`。产品启动会挂载 Harness 兼容 BFF、加载已配置 Video Plugin 和 Skill Workflow，并向 `VideoBuildRuntime` 提交结构化 Workflow 或 RebuildPlan。Cuti Harness 是唯一的规划循环；Provider 工具不会启动第二个 Planner。`VIDEO_INCREMENTAL_ENGINE_ENABLED` 仍作为规范化项目存储的兼容部署开关且默认开启；新路径不能关闭插件分发。
 
 导入的 Cuti 媒体服务继续提供 Provider 和媒体实现代码，但其中依赖 Skill 的提示词也通过同一个进程级 Catalog 解析，不再直接读取固定 stage 目录。
 
 ## 当前集成状态
 
-仓库包含 DeepSeek 工具组合、项目运行时、真实 Postgres 迁移、增量执行器、插件生命周期、授权网关、兼容 BFF、Cuti 原子 Provider 适配器、隔离 Sandbox Worker 和 Video Studio 项目界面。Create 工作区用同一套通用 Artifact 渲染逻辑处理 Provider 直调和完整视频流水线。Runtime 的 draft 与已选版本会自动分类为文档、故事、图片、视频、音频或其他产物；最新图片或视频会置顶，视频卡片支持取帧。该工作区不包含专用 `VideoResultsPanel`，也不请求旧的 thread 聚合接口。独立服务支持 Bearer Token 身份适配，本地自托管使用 `local-user`；生产部署只需注入真实 Provider 凭据和部署专用密钥，源码不保存这些秘密。
+仓库包含 Cuti Harness 工具组合、项目运行时、真实 Postgres 迁移、增量执行器、插件生命周期、授权网关、兼容 BFF、Cuti 原子 Provider 适配器、隔离 Sandbox Worker 和 Video Studio 项目界面。Create 工作区用同一套通用 Artifact 渲染逻辑处理 Provider 直调和完整视频流水线。Runtime 的 draft 与已选版本会自动分类为文档、故事、图片、视频、音频或其他产物；最新图片或视频会置顶，视频卡片支持取帧。该工作区不包含专用 `VideoResultsPanel`，也不请求旧的 thread 聚合接口。独立服务支持 Bearer Token 身份适配，本地自托管使用 `local-user`；生产部署只需注入真实 Provider 凭据和部署专用密钥，源码不保存这些秘密。
 
-本地自托管使用 `ACCOUNT_BACKEND=env`，直接从 `OPENAI_API_KEY`、`WAVESPEED_API_KEY`、`SUNO_API_KEY` 及其他可选 Provider 环境变量读取账号。`deploy/compose.video.yml` 已启用内置插件目录、导入的 Media Service，以及由 Video Runtime 在 `/files` 提供的共享本地媒体卷；本地配置不要求 S3 凭据。Compose 使用的 Capability Grant 密钥仅供本地开发，生产部署必须替换。可以直接向 Compose 提供仓库外的私有环境文件而不复制秘密，例如 `docker compose --env-file ../cuti-video-agent/.env -f deploy/compose.video.yml up`。Windows 使用本机 HTTP 代理时，还要给 Node 版 DeepSeek 进程传入 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`；否则可能出现 Python Provider 可用、Harness 模型请求却超时的现象。
+本地自托管使用 `ACCOUNT_BACKEND=env`，直接从 `OPENAI_API_KEY`、`WAVESPEED_API_KEY`、`SUNO_API_KEY` 及其他可选 Provider 环境变量读取账号。`deploy/compose.video.yml` 已启用内置插件目录、导入的 Media Service，以及由 Video Runtime 在 `/files` 提供的共享本地媒体卷；本地配置不要求 S3 凭据。Compose 使用的 Capability Grant 密钥仅供本地开发，生产部署必须替换。可以直接向 Compose 提供仓库外的私有环境文件而不复制秘密，例如 `docker compose --env-file ../cuti-video-agent/.env -f deploy/compose.video.yml up`。Windows 使用本机 HTTP 代理时，还要给 Node 版 Cuti Harness 进程传入 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NODE_USE_ENV_PROXY=1`；否则可能出现 Python Provider 可用、Harness 模型请求却超时的现象。
 
-迁移与仓库重启路径已在本地 PostgreSQL 上验证。一次真实的低成本 GPT Image + Seedance 构建已继续完成尾帧提取、时间线组装、FFprobe 校验、原子 `ProjectVersion` 提交、MP4 零复制导出、DeepSeek 工具调用和 Video Studio 可播放预览。导入的 Video Studio 仍保留既有 lint 债务；迁移新增前端文件检查通过，生产构建成功。Skill 列表、项目启用、结构化选择和 ZIP 安装现在均使用 Video Runtime BFF；其他无关的旧管理路由只保留在导入的兼容应用中。
+迁移与仓库重启路径已在本地 PostgreSQL 上验证。一次真实的低成本 GPT Image + Seedance 构建已继续完成尾帧提取、时间线组装、FFprobe 校验、原子 `ProjectVersion` 提交、MP4 零复制导出、Cuti Harness 工具调用和 Video Studio 可播放预览。导入的 Video Studio 仍保留既有 lint 债务；迁移新增前端文件检查通过，生产构建成功。Skill 列表、项目启用、结构化选择和 ZIP 安装现在均使用 Video Runtime BFF；其他无关的旧管理路由只保留在导入的兼容应用中。

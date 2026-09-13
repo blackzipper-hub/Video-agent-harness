@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Video Agent Harness 的本地启动器。它不依赖 Docker 即可启动 DeepSeek Harness、Python Video Runtime、Media Service、本地 Sandbox Worker 和 Video Studio。项目状态与生成媒体保存在同一个用户数据目录中。
+Cuti Video Harness 的本地启动器。它不依赖 Docker 即可启动 DeepSeek Harness、Python Video Runtime、Media Service、本地 Sandbox Worker 和 Video Studio。项目状态与生成媒体保存在同一个用户数据目录中。
 
 ```sh
 npx @cuti-ai/video-agent-harness setup
