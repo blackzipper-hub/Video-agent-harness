@@ -123,7 +123,7 @@ npx hyperframes add caption-highlight         # install a specific one
 | Style                     | Component                    | Best for                     |
 | ------------------------- | ---------------------------- | ---------------------------- |
 | TikTok-style highlight    | `caption-highlight`          | Social, high-energy          |
-| Karaoke pill              | `caption-pill-karaoke`       | Music, lyric videos          |
+| Karaoke pill              | `caption-pill-karaoke`       | Only if the user asks for karaoke |
 | Cinematic editorial       | `caption-editorial-emphasis` | Documentary, storytelling    |
 | Glitch / cyber            | `caption-glitch-rgb`         | Tech, gaming                 |
 | Full-screen slam          | `caption-kinetic-slam`       | Hype, announcements          |

@@ -177,16 +177,16 @@ def test_hyperframes_html_uses_direct_video_audio_and_local_gsap():
     assert "旷野黄金时" in rendered
 
 
-def test_hyperframes_request_defaults_to_cuti_template_renderer():
+def test_hyperframes_request_does_not_default_a_caption_style():
     from app.models.subtitle import HyperframesCaptionRequest
 
     req = HyperframesCaptionRequest(
         video_url="https://example.com/a.mp4",
         run_id="r1",
-        cues=[{"start": 1, "end": 2, "text": "字幕"}],
+        caption_html="<!doctype html><html></html>",
     )
-    assert req.style == "caption-highlight"
-    assert req.caption_html is None
+    assert req.style is None
+    assert req.caption_html.startswith("<!doctype html>")
 
 
 def test_cuti_template_renderer_has_timed_visible_sentence_animation():

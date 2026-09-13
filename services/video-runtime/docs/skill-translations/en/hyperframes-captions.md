@@ -2,25 +2,24 @@
 
 Reference copy for developers. **Documentation only; not a runtime Skill or installable bundle.**
 
-Source: [original SKILL.md](../../../skills/builtin/sound/hyperframes-captions/SKILL.md). Source SHA-256: `b6374b8a60174a698913b2401d32afd9b231b4080dde031a317547e9f55986d4`.
+Source: [original SKILL.md](../../../skills/builtin/sound/hyperframes-captions/SKILL.md). Source SHA-256: `144069ea5847eb7e3aafaac5ccca9b38ebaabf7ff24e6b7b741b725965d3f525`.
 
 See [reading conventions](../README.md#reading-conventions). The runtime Skill remains authoritative.
 
 ## Runtime behavior
 
-HyperFrames captions use the same deterministic flow as Cuti DeepAgent:
+The finished film already exists. Overlay words on it: lyrics, dialogue, titles,
+or decorative type. Write the HyperFrames HTML yourself and pass it as
+`caption_html`.
 
-1. Transcribe the complete selected video and persist sentence or segment timestamps.
-2. Let the Agent choose `style`, `position`, and `accent_color` from the user's request
-   and the video's narrative and visual context.
-3. Pass the selected video and transcript to `media.hyperframes_caption`.
-4. Let Media Service generate the timed HyperFrames HTML, CJK font setup, and subtle
-   sentence-level entrance and exit animation.
+1. Transcribe the complete mixed film. Keep source-language timestamps unless
+   translation is requested.
+2. Look at the picture, the song, and the story. Load `hyperframes-core` if you
+   need the `data-*` contract.
+3. Write `caption_html` with the transcript's words and times. The film sits
+   underneath. Without `caption_html`, this overlay does not run.
+4. Finish the same film and transcript in one pass.
 
-Ordinary caption generation does not require Agent-authored `caption_html`. Explicit
-advanced HTML remains an optional lower-level extension and is rejected when timed
-caption elements are permanently hidden.
-
-Do not report success until a durable captioned video exists. Review a rendered frame
-before reporting completion. Missing Node, Chrome, FFmpeg, GSAP, or HyperFrames CLI
-dependencies must be surfaced rather than silently replaced with static captions.
+Whether words follow the vocal, whether titles appear, and where type sits are
+Agent decisions. User direction wins. Keep the subject readable. Keep Chinese on
+a CJK-capable font. Surface missing Node / Chrome / GSAP / CLI errors.

@@ -2,7 +2,7 @@
 
 Reference translation for developers. **Documentation only; not a runtime Skill or installable bundle.**
 
-Source: [original SKILL.md](../../../skills/external/mv/SKILL.md). Source SHA-256: `755d50185c9a3794305465a403d36b1b26cad79ed5d5a6d571d480d76d034e6d`.
+Source: [original SKILL.md](../../../skills/external/mv/SKILL.md). Source SHA-256: `2e60185ff4dd6b94f2537431013c2014af7ddb8e492373e878824d1c2f0355d5`.
 
 See [reading conventions](../README.md#reading-conventions) for translated examples and escaped runtime tokens. The original instructions remain authoritative; this copy does not alter their behavior or reconcile contradictory source rules.
 

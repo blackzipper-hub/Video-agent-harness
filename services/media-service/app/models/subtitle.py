@@ -88,9 +88,9 @@ class HyperframesCaptionRequest(RunIdMixin):
     video_url: str
     words: list[dict] = Field(default_factory=list)
     cues: list[dict] = Field(default_factory=list)
-    style: HYPERFRAMES_CAPTION_STYLES = "caption-highlight"
-    accent_color: str = Field(default="#ff1745", pattern=r"^#[0-9A-Fa-f]{6}$")
-    position: Literal["bottom-safe", "lower-middle", "center"] = "bottom-safe"
+    style: Optional[HYPERFRAMES_CAPTION_STYLES] = None
+    accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    position: Optional[Literal["bottom-safe", "lower-middle", "center"]] = None
     playbook: Optional[str] = Field(default=None, max_length=80)
     layers: list[OverlayLayer] = Field(default_factory=list, max_length=12)
     caption_html: Optional[str] = Field(default=None, max_length=500_000)

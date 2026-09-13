@@ -86,77 +86,92 @@ class CutiAtomicProviderPlugin(BaseVideoPlugin):
             key: MediaArtifactVersion.model_validate(value)
             for key, value in completed_payload.items()
         }
-        start_step = parameters.pop("start_image_from_step", None)
-        strict_start_step = parameters.pop("strict_start_frame_from_step", None)
-        character_step = parameters.pop("character_reference_from_step", None)
-        character_steps = parameters.pop("character_reference_from_steps", None) or []
-        reference_steps = parameters.pop("reference_from_steps", None) or []
-        video_reference_steps = parameters.pop("video_reference_from_steps", None) or []
-        audio_reference_steps = parameters.pop("audio_reference_from_steps", None) or []
-        audio_reference_step = parameters.pop("audio_reference_from_step", None)
-        audio_segment_index = parameters.pop("audio_segment_index", None)
-        required_steps = [start_step, strict_start_step, character_step, audio_reference_step,
-                          *character_steps, *reference_steps, *video_reference_steps, *audio_reference_steps]
-        for required in required_steps:
-            if required and (str(required) not in completed_by_step or not completed_by_step[str(required)].uri):
-                raise ValueError(f"required media dependency is unavailable: {required}")
-        start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
-        if start_artifact and start_artifact.uri:
-            parameters.setdefault("start_image_url", start_artifact.uri)
-            parameters.setdefault("image_url", start_artifact.uri)
-        character_artifact = completed_by_step.get(str(character_step or ""))
-        if character_artifact and character_artifact.uri:
-            parameters.setdefault("images", [character_artifact.uri])
-            parameters.setdefault("image_urls", [character_artifact.uri])
-        character_urls = [
-            completed_by_step[str(step)].uri
-            for step in character_steps
-            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
-        ]
-        if character_urls:
-            parameters.setdefault("images", character_urls)
-            parameters.setdefault("image_urls", character_urls)
-        reference_urls = [
-            completed_by_step[str(step)].uri
-            for step in reference_steps
-            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
-        ]
-        if reference_urls:
-            parameters.setdefault("images", reference_urls)
-            parameters.setdefault("reference_urls", reference_urls)
-            parameters.setdefault("image_urls", reference_urls)
-        video_reference_urls = [
-            completed_by_step[str(step)].uri
-            for step in video_reference_steps
-            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
-        ]
-        if video_reference_urls:
-            parameters.setdefault("videos", video_reference_urls)
-            parameters.setdefault("reference_videos", video_reference_urls)
-            parameters.setdefault("video_urls", video_reference_urls)
-        audio_reference_urls = [
-            completed_by_step[str(step)].uri
-            for step in audio_reference_steps
-            if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
-        ]
-        if audio_reference_urls:
-            parameters.setdefault("audios", audio_reference_urls)
-            parameters.setdefault("reference_audios", audio_reference_urls)
-            parameters.setdefault("audio_urls", audio_reference_urls)
-        audio_reference = completed_by_step.get(str(audio_reference_step or ""))
-        if audio_reference:
-            audio_url = audio_reference.uri
-            if audio_segment_index is not None:
-                segments = audio_reference.metadata.get("segments") or []
-                index = int(audio_segment_index)
-                if index < 0 or index >= len(segments):
-                    raise ValueError(f"audio cut has no segment {index}")
-                segment = segments[index] if isinstance(segments[index], dict) else {}
-                audio_url = segment.get("audio_url") or audio_url
-            if audio_url:
-                parameters.setdefault("audios", [audio_url])
-                parameters.setdefault("audio_url", audio_url)
-                parameters.setdefault("audio_urls", [audio_url])
+        from app.chat.v2.atomic_executor import _is_mv_workflow
+        if _is_mv_workflow(parameters):
+            for key in (
+                "start_image_from_step",
+                "strict_start_frame_from_step",
+                "character_reference_from_step",
+                "character_reference_from_steps",
+                "reference_from_steps",
+                "video_reference_from_steps",
+                "audio_reference_from_steps",
+                "audio_reference_from_step",
+                "audio_segment_index",
+            ):
+                parameters.pop(key, None)
+        else:
+            start_step = parameters.pop("start_image_from_step", None)
+            strict_start_step = parameters.pop("strict_start_frame_from_step", None)
+            character_step = parameters.pop("character_reference_from_step", None)
+            character_steps = parameters.pop("character_reference_from_steps", None) or []
+            reference_steps = parameters.pop("reference_from_steps", None) or []
+            video_reference_steps = parameters.pop("video_reference_from_steps", None) or []
+            audio_reference_steps = parameters.pop("audio_reference_from_steps", None) or []
+            audio_reference_step = parameters.pop("audio_reference_from_step", None)
+            audio_segment_index = parameters.pop("audio_segment_index", None)
+            required_steps = [start_step, strict_start_step, character_step, audio_reference_step,
+                              *character_steps, *reference_steps, *video_reference_steps, *audio_reference_steps]
+            for required in required_steps:
+                if required and (str(required) not in completed_by_step or not completed_by_step[str(required)].uri):
+                    raise ValueError(f"required media dependency is unavailable: {required}")
+            start_artifact = completed_by_step.get(str(start_step or strict_start_step or ""))
+            if start_artifact and start_artifact.uri:
+                parameters.setdefault("start_image_url", start_artifact.uri)
+                parameters.setdefault("image_url", start_artifact.uri)
+            character_artifact = completed_by_step.get(str(character_step or ""))
+            if character_artifact and character_artifact.uri:
+                parameters.setdefault("images", [character_artifact.uri])
+                parameters.setdefault("image_urls", [character_artifact.uri])
+            character_urls = [
+                completed_by_step[str(step)].uri
+                for step in character_steps
+                if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+            ]
+            if character_urls:
+                parameters.setdefault("images", character_urls)
+                parameters.setdefault("image_urls", character_urls)
+            reference_urls = [
+                completed_by_step[str(step)].uri
+                for step in reference_steps
+                if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+            ]
+            if reference_urls:
+                parameters.setdefault("images", reference_urls)
+                parameters.setdefault("reference_urls", reference_urls)
+                parameters.setdefault("image_urls", reference_urls)
+            video_reference_urls = [
+                completed_by_step[str(step)].uri
+                for step in video_reference_steps
+                if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+            ]
+            if video_reference_urls:
+                parameters.setdefault("videos", video_reference_urls)
+                parameters.setdefault("reference_videos", video_reference_urls)
+                parameters.setdefault("video_urls", video_reference_urls)
+            audio_reference_urls = [
+                completed_by_step[str(step)].uri
+                for step in audio_reference_steps
+                if completed_by_step.get(str(step)) and completed_by_step[str(step)].uri
+            ]
+            if audio_reference_urls:
+                parameters.setdefault("audios", audio_reference_urls)
+                parameters.setdefault("reference_audios", audio_reference_urls)
+                parameters.setdefault("audio_urls", audio_reference_urls)
+            audio_reference = completed_by_step.get(str(audio_reference_step or ""))
+            if audio_reference:
+                audio_url = audio_reference.uri
+                if audio_segment_index is not None:
+                    segments = audio_reference.metadata.get("segments") or []
+                    index = int(audio_segment_index)
+                    if index < 0 or index >= len(segments):
+                        raise ValueError(f"audio cut has no segment {index}")
+                    segment = segments[index] if isinstance(segments[index], dict) else {}
+                    audio_url = segment.get("audio_url") or audio_url
+                if audio_url:
+                    parameters.setdefault("audios", [audio_url])
+                    parameters.setdefault("audio_url", audio_url)
+                    parameters.setdefault("audio_urls", [audio_url])
         explicit_prompt = parameters.get("prompt")
         if not explicit_prompt:
             objective = str(parameters.get("objective") or "").strip()

@@ -316,7 +316,6 @@ def compile_initial_phase(
             parameters={
                 "audio_step": music,
                 "target_duration_sec": intent.target_duration_seconds,
-                "transcribe": True,
             },
             depends_on=[music],
         )

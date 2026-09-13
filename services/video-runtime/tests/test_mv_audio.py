@@ -194,17 +194,31 @@ async def test_media_audio_analyze_requires_url():
 
 
 @pytest.mark.asyncio
-async def test_media_audio_analyze_requires_transcription_when_skipped(monkeypatch):
+async def test_media_audio_analyze_still_transcribes_if_agent_sends_transcribe_false(monkeypatch):
+    calls = []
+
     async def _fake_info(audio_url):
         return {"duration": 180.0}
 
+    async def _fake_transcribe(*args, **kwargs):
+        calls.append(True)
+        return {
+            "duration": 180.0,
+            "text": "ok",
+            "segments": [{"start": 0.0, "end": 2.0, "text": "ok"}],
+        }
+
     monkeypatch.setattr("app.utils.media_service_client.audio_info", _fake_info)
-    with pytest.raises(HostGatewayError, match="transcription"):
-        await HostGateway().media_audio_analyze({
-            "audio_url": "http://localhost/files/song.mp3",
-            "target_duration_sec": 60.0,
-            "transcribe": False,
-        })
+    monkeypatch.setattr(
+        "app.services.agent.video.smart_clip_flow.transcribe_audio_for_analysis",
+        _fake_transcribe,
+    )
+    result = await HostGateway().media_audio_analyze({
+        "audio_url": "http://localhost/files/song.mp3",
+        "transcribe": False,
+    })
+    assert calls == [True]
+    assert result["segments"][0]["text"] == "ok"
 
 
 @pytest.mark.asyncio

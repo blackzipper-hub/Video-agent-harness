@@ -1254,8 +1254,8 @@ async def add_message(
                 "Do not stop after transcription: inspect its real segments, translate each "
                 "segment with translated_texts ONLY if this request explicitly asks for translation. "
                 "Otherwise use the original transcript language, not the UI language or a prior translation. Render using "
-                "media.hyperframes_caption with the video and transcript artifact inputs. "
-                "Never invent dialogue from the screenplay or supply caption_html for dialogue. "
+                "media.hyperframes_caption with the video, transcript, and authored caption_html. "
+                "Never invent dialogue from the screenplay. "
                 "Poll video_build_status until the requested output is complete; a queued "
                 "build or a transcript alone does not satisfy a captioned-video request."
             )

@@ -2,7 +2,8 @@
 import re
 from app.chat.v2.atomic_executor import (
     _AUDIO_ARTIFACT_TYPES, _IMAGE_ARTIFACT_TYPES, _VIDEO_ARTIFACT_TYPES,
-    _merge_urls, _resolve_artifact_media_values, _selected_urls,
+    _explicit_http_media_urls, _is_mv_workflow, _merge_urls,
+    _resolve_artifact_media_values, _selected_urls,
 )
 
 
@@ -33,8 +34,12 @@ def resolve_media_parameters(parameters, selected, *, validate_prompt_slots=True
             raw = parameters.get(alias)
             if raw is not None and (not isinstance(raw, list) or any(not isinstance(v, str) for v in raw)):
                 raise ValueError(f"{alias} must be an array of media URIs or artifact IDs")
-            values = _merge_urls(values, _resolve_artifact_media_values(raw, selected, kinds))
-        values = _merge_urls(values, _selected_urls(selected, kinds))
+            if _is_mv_workflow(parameters):
+                values = _merge_urls(values, _explicit_http_media_urls(raw, field=field))
+            else:
+                values = _merge_urls(values, _resolve_artifact_media_values(raw, selected, kinds))
+        if not _is_mv_workflow(parameters):
+            values = _merge_urls(values, _selected_urls(selected, kinds))
         if values:
             parameters[field] = values
             for alias in aliases:
