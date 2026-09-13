@@ -1,7 +1,6 @@
 # AGENTS.md
 
-Cuti Harness is a plugin-based agent harness based on DeepSeek Harness (dsh): **everything is a plugin**.
-Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+Cuti Harness is a plugin-based agent harness based on DeepSeek Harness (dsh): **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
 ## Pre-release stance: foundation over blast radius
 
@@ -59,8 +58,6 @@ website/     VitePress projection of selected bilingual docs/ sources
 Package groups: [packages/README.md](packages/README.md).
 
 ## Commands
-
-Command scripts and supported Node.js versions are defined in [package.json](package.json).
 
 ```sh
 pnpm install            # pnpm workspaces, node ^22.19 || >=24
@@ -155,7 +152,7 @@ Docs accompany every code change: update affected README and JSDoc contracts tog
 
 ## Editing these instructions
 
-[CLAUDE.md](CLAUDE.md) symlinks this file; the `packages/` and `examples/` variants symlink [packages/AGENTS.md](packages/AGENTS.md) and [examples/AGENTS.md](examples/AGENTS.md). Edit the corresponding `AGENTS.md` file. Keep each rule self-contained while linking high-level docs. Condense when clarity survives; raise a `verify-doc-budgets` ceiling when the required content genuinely needs more space.
+[CLAUDE.md](CLAUDE.md) symlinks this file; the `packages/` and `examples/` variants symlink their `AGENTS.md` files. Edit `AGENTS.md`, not the symlinks. Keep rules self-contained and link high-level docs. Raise a `verify-doc-budgets` ceiling only when content needs space.
 
 ## Vendoring policy
 
