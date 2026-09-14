@@ -11,6 +11,42 @@ Cuti Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/d
 
 本仓库包含 Cuti Harness 的 Agent 算法与循环、Video Runtime 后端、Video Studio 前端、兼容 BFF、Media Service、Sandbox Worker，以及它们使用的 Provider、Workflow、Validator 和媒体插件。
 
+## 演示
+
+五轮对话把一段电影感镜头从 15 秒扩展到 3 分钟。后续轮次在同一时间线上继续生成，而不是从头开始。每张 GIF 循环该轮结果中的一小段；第 5 轮是 3 分钟成片的加速预览。
+
+### 第 1 轮：15 秒
+
+> 玻璃潮汐参考：《起源》——折叠城市 + 《奇异博士》——万花筒。在暮色中，一座由液态玻璃构成的十层高楼沿街道缓缓倾泻而下，映照出天际线，随后在扭曲中凝固成半透明结构。镜头：缓慢推入，35 毫米非变焦镜头，湿沥青路面，玻璃内嵌霓虹灯。无人物特写，无文字，无标志。IMAX 胶片，颗粒感，16:9 比例。
+
+![15 秒玻璃潮汐液态玻璃城市镜头](docs/assets/demo/glass-tide-turn-1.gif)
+
+### 第 2 轮：30 秒
+
+> 做一段 30 秒的视频，镜头连续。节奏要更动态、更抓眼球、更快。
+
+![30 秒更快的连续玻璃潮汐镜头](docs/assets/demo/glass-tide-turn-2.gif)
+
+### 第 3 轮：45 秒
+
+> 继续往后生成 15 秒，加一个美女天使飞过来。
+
+![天使飞入玻璃潮汐时间线](docs/assets/demo/glass-tide-turn-3.gif)
+
+### 第 4 轮：60 秒
+
+> 再生成 15 秒的视频，首帧用前面视频的尾帧。内容为相机跟上这个天使，然后往前面飞出现了一个天堂。
+
+![相机跟上天使飞向天堂](docs/assets/demo/glass-tide-turn-4.gif)
+
+### 第 5 轮：3 分钟
+
+> 继续生成，这个天使穿过远古、古代、近代和现代。最终生成 3 分钟版本。
+
+为了方便播放，这里的预览 GIF 对完整 3 分钟成片进行了加速。
+
+![加速预览天使穿越历史年代的 3 分钟成片](docs/assets/demo/glass-tide-turn-5.gif)
+
 ## 架构
 
 详见 [Cuti Harness 架构](docs/architecture.zh.md#cuti-harness-architecture)。

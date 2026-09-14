@@ -7,6 +7,7 @@
 * text=auto eol=lf
 
 *.pdf binary
+*.gif binary
 
 # Pairing records are generated from the three confirmed owner-blob pairs.
 # The worktree-local installer registers the fail-closed driver command.

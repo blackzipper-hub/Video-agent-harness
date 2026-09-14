@@ -11,6 +11,42 @@ Cuti Harness is a general-purpose, open-source, plugin-based video harness for l
 
 This repository includes the Cuti Harness agent algorithm and loop, the Video Runtime backend, the Video Studio frontend, a compatibility BFF, Media Service, Sandbox Worker, and the provider, workflow, validator, and media plugins they use.
 
+## Demo
+
+Five conversation turns grow one cinematic clip from 15 seconds to 3 minutes. Later turns extend the same timeline instead of starting over. Each GIF loops a short clip from that turn; turn 5 is a sped-up view of the 3-minute export.
+
+### Turn 1 — 15 seconds
+
+> Glass Tide Reference: Inception - Folded City + Doctor Strange - Kaleidoscope Photoreal city avenue at blue hour. A ten-story wave of liquid glass rolls down the street towards the camera, reflecting the skyline, then freezes mid-twist into a translucent structure. Camera: slow push-in, 35mm anamorphic, wet asphalt, neon in the glass. No close-ups of people, no text, no logos. IMAX, film grain, 16:9.
+
+![15-second Glass Tide liquid-glass city shot](docs/assets/demo/glass-tide-turn-1.gif)
+
+### Turn 2 — 30 seconds
+
+> Make a 30-second video with continuous shots. It should be dynamic, more eye-catching and faster.
+
+![30-second faster continuous Glass Tide shot](docs/assets/demo/glass-tide-turn-2.gif)
+
+### Turn 3 — 45 seconds
+
+> Continue for another 15 seconds, and add a beautiful angel flying in.
+
+![Angel flying into the Glass Tide timeline](docs/assets/demo/glass-tide-turn-3.gif)
+
+### Turn 4 — 60 seconds
+
+> Generate another 15 seconds of video. Use the last frame of the previous video as the first frame. The camera follows this angel, then flies forward, and a heaven appears.
+
+![Camera follows the angel into heaven](docs/assets/demo/glass-tide-turn-4.gif)
+
+### Turn 5 — 3 minutes
+
+> Continue generating. This angel flies through prehistoric, ancient, early-modern, and contemporary eras. Export a 3-minute version.
+
+For easier playback, the preview GIF is sped up from the full 3-minute export.
+
+![Sped-up 3-minute flight through historical eras](docs/assets/demo/glass-tide-turn-5.gif)
+
 ## Architecture
 
 See [Cuti Harness architecture](docs/architecture.md#cuti-harness-architecture).
