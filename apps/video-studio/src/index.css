@@ -697,7 +697,7 @@
 }
 
 .home-logo {
-  font-size: calc(20.6 * var(--u));
+  font-size: max(16px, calc(20.6 * var(--u)));
   font-weight: 500;
   letter-spacing: -0.02em;
   line-height: calc(34 * var(--u));
@@ -712,15 +712,20 @@
 }
 
 .home-nav-item {
-  height: calc(29 * var(--u));
-  padding: 0 calc(20.5 * var(--u));
+  height: max(28px, calc(29 * var(--u)));
+  padding: 0 max(10px, calc(16 * var(--u)));
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: calc(10.2 * var(--u));
-  font-weight: 450;
-  letter-spacing: 0.02em;
+  /* ~14–15px on desktop (Tesla/Wellfound nav). Floor 13px so narrow windows
+     cannot collapse to 6px. Clarity comes from weight 500, not a bigger size. */
+  font-size: max(13px, calc(11 * var(--u)));
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: rgba(255, 255, 255, 0.82);
   transition: color 0.2s ease, background 0.2s ease;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: auto;
 }
 
 .home-nav-item:hover {
@@ -759,8 +764,8 @@
 }
 
 .home-lang {
-  font-size: calc(11 * var(--u));
-  font-weight: 450;
+  font-size: max(12px, calc(12 * var(--u)));
+  font-weight: 500;
   letter-spacing: 0.12em;
   line-height: calc(34 * var(--u));
   color: rgba(255, 255, 255, 0.42);

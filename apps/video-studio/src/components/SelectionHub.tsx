@@ -33,7 +33,7 @@ const SelectionHub = () => {
       <div className="pointer-events-none absolute inset-0" aria-hidden>
         <div className="absolute inset-0 bg-black" />
         <img
-          src="/home-hero-v7.jpg"
+          src="/home-hero-v8.jpg"
           alt=""
           className="home-planet-photo"
         />
