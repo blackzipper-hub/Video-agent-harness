@@ -20,7 +20,7 @@ description: >-
   Use short-drama-workflow for dialogue dramas; cuti-product-workflow for product advertisements.
 metadata:
   kind: workflow
-  version: "2.7.4"
+  version: "2.7.7"
   workflow:
     title: Music Video
     mode: mv
@@ -65,6 +65,8 @@ metadata:
 # MV Workflow
 
 You are an **MV director and video creative director**. Given a song, image, or request (even just one image), create a **creative, memorable, beat-synchronized** final video.
+
+**You are not a template filler.** Look, setting, and genre come from this brief / source / song; the lexicon is a menu, and judgment is the process.
 
 See [reference.md](../../../skills/external/mv/reference.md) for vocabulary and phrasing. Music determines the timeline; do not invent timing.
 
@@ -128,12 +130,12 @@ Vocal and instrumental passages can differ; choose per segment.
 
 When choices conflict, prioritize: explicit user requests > the requested genre ("tell a story" means narrative) > literal lyrics > arrangement. Briefly explain any tradeoff in the plan; do not change it silently.
 
-## Source Media with Little Copy
+## Thin Briefs
 
-The user supplied only source media (or song + source)? Start by inspecting it, then explore creative possibilities.
+The user supplied only a source, only a song, or only a duration and genre? Start by inspecting what exists, then explore.
 
 1. **Listen to establish direction**: when audio exists, listen first and use each section's **emotion** to choose a route, then select its Lyrics and Images mode. A full lyrics sheet is not a storyboard outline.
-2. **Explore directions**: devise 2-3 distinct angles from the brief, then develop the most interesting. Direction changes mood and structure.
+2. **Explore directions**: devise 2-3 looks that feel unlike each other, then lock the most memorable one into `ProjectIntent.brief`. Tables and examples in [reference.md](../../../skills/external/mv/reference.md) are phrasing, not a menu to pick from; a look may borrow words from the lexicon without taking a whole row.
 3. Still pass **creative review**: being executable is not enough; it must be interesting.
 
 ## Working Method
@@ -141,7 +143,7 @@ The user supplied only source media (or song + source)? Start by inspecting it, 
 Choose creative work and research independently after receiving assets; **derive timing from the song, not invented seconds**:
 
 - Inspect the source first? Is the copy specific enough?
-- Source without copy? Enter creative exploration mode.
+- Thin copy (duration/genre only, or source only)? Enter creative exploration mode.
 - Research more references? Skip if the user explicitly declines.
 - Search popular prompts? How many?
 - Does the image composition create camera-movement risks?
@@ -176,8 +178,8 @@ Use `web_search` directly when you only need one or two prompt phrases:
 |------|--------|
 | General | Viral AI video prompts; music-video copy examples; AI MV storyboards |
 | Category | Product advertisement video copy; short-drama video prompts; fantasy cultivation video copy |
-| Style | Cinematic prompts; camera-movement examples |
-| MV | MV beat synchronization; music-video prompts; AI MV storyboards |
+| Style | Cinematic prompts; film-look lighting; camera-movement examples |
+| MV | Music-video storyboards; MV beat synchronization; film-look MV lighting |
 
 **Incorporate** discovered phrasing rather than copying it. Incorporate researched camera movement, lighting, and structure too; do not paste whole research summaries into prompts.
 
@@ -186,7 +188,7 @@ Use `web_search` directly when you only need one or two prompt phrases:
 1. **Inspect sources before deciding whether to research.** Record observations in the brief, then optionally search directly in the current Harness loop. Choose the best of three directions and use it in subsequent design images and every segment's prompt.
 2. **Get the song first.** If the user provided audio, listen to it directly.
 
-   Otherwise, generate a song through `suno.generate`. First `video_skill_load("suno-song")` and follow its lyrics and Style Box process. Decide vocals, lyrics, and description versus custom lyrics yourself. Follow the cast commitments for the singer, reflected at the start of `tags` and in `vocal_gender`. Consult this capability for fields. If research exists, derive musical style and emotion from the selected direction's `mood_direction`.
+   Otherwise, generate a song through `suno.generate`. First `video_skill_load("suno-song")` and follow its lyrics and Style Box process. Decide vocals, lyrics, and description versus custom lyrics yourself. Follow the cast commitments for the singer, reflected at the start of `tags` and in `vocal_gender`. Consult this capability for fields. Let the Style Box follow the look locked into the brief. If research exists, derive musical style and emotion from the selected direction's `mood_direction`.
 
    With the desired final length in mind, optionally pass `duration` (10-360 seconds). This is approximate, not second-exact.
 
