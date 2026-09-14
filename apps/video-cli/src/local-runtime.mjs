@@ -462,7 +462,7 @@ export async function runLocalWeb(options, packageRoot) {
     throw error
   }
   const url = `http://127.0.0.1:${options.studioPort}/#/zh/create`
-  console.log(`\nCuti Video Harness is ready: ${url}`)
+  console.log(`\nCuti Harness is ready: ${url}`)
   console.log(`Local data: ${dataDirectory}\n`)
   if (!options.noOpen) openBrowser(url)
 

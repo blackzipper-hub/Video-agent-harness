@@ -4,9 +4,9 @@
 
 Cuti Harness 是构建于 DeepSeek Harness 之上的视频 Harness。
 
-<a id="cuti-video-harness-architecture"></a>
+<a id="cuti-harness-architecture"></a>
 
-## Cuti Video Harness 架构
+## Cuti Harness 架构
 
 ```text
 Video Studio (:3000)
@@ -22,7 +22,7 @@ Cuti Harness (:3080)
 Provider / Workflow / Validator / Media plugins
 ```
 
-本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Cuti Video Harness 架构说明](video-agent-harness.zh.md)。
+本项目增加了 `@cuti-ai/video-runtime`、`@cuti-ai/video-runtime-http`、`@cuti-ai/tool-video` 和 `@cuti-ai/video-agent-bundle`，没有增加第二套 Agent Loop。详细设计见 [Cuti Harness 架构说明](video-agent-harness.zh.md)。
 
 规划逻辑复刻 Cuti V2 的持续 `PlanPatch` 契约。Workflow 只限定允许使用的 Capability 和创作规则，不再预编译完整制作 DAG。每一批当前可执行任务完成后，Video Runtime 持久化真实 Artifact，并自动唤醒同一个 DeepSeek Session；DeepSeek 再提交下一批 `add_tasks`、取消仍未开始的任务，或在最终视频完成后宣布目标完成。
 

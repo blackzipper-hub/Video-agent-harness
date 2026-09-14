@@ -1,19 +1,19 @@
-# Cuti Video Harness
+# Cuti Harness
 
 [English](README.md) | 中文
 
-[![Cuti Harness](https://img.shields.io/badge/Cuti-Harness-0A66C2)](https://newai.land/cuti-harness)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Cuti Harness](docs/assets/cuti-harness-hero.jpg)
 
-一个面向长程视频创作的通用、开源、插件化视频 Harness。
+[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness)
+[![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
 
-Cuti Video Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源、项目型视频 Agent Harness。Cuti Harness 负责对话、Agent Loop 和高层工具选择；Cuti Video Runtime 负责持久化项目、Skill、Artifact 依赖、增量构建、时间线、校验和导出。
+Cuti Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的通用、开源、插件化视频 harness，面向长程视频创作。该 harness 负责对话、agent loop（智能体循环）和高层工具选择。视频 Runtime 负责持久化项目、Skill（技能）、产物依赖、增量构建、时间线、校验和导出。
 
 本仓库包含 Cuti Harness 的 Agent 算法与循环、Video Runtime 后端、Video Studio 前端、兼容 BFF、Media Service、Sandbox Worker，以及它们使用的 Provider、Workflow、Validator 和媒体插件。
 
 ## 架构
 
-详见 [Cuti Video Harness 架构](docs/architecture.zh.md#cuti-video-harness-architecture)。
+详见 [Cuti Harness 架构](docs/architecture.zh.md#cuti-harness-architecture)。
 
 <a id="run"></a><a id="run-from-source"></a>
 
@@ -121,7 +121,7 @@ pnpm video:local -- --data-dir .video-agent-harness-data
 pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-当终端输出 `Cuti Video Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
+当终端输出 `Cuti Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
 
 ### 6. 验证服务栈
 
@@ -199,4 +199,4 @@ python -m unittest discover -s services/video-runtime/tests/video_runtime -v
 
 ## 许可证
 
-[MIT](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录在[源码来源说明](docs/source-provenance.zh.md)中；第三方依赖及许可证见 [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md)。
+本项目使用 [MIT License](LICENSE)。DeepSeek 与 Cuti 导入代码的来源记录在[源码来源说明](docs/source-provenance.zh.md)；第三方依赖及许可证见 [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md)。

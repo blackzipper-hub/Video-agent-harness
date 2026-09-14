@@ -1,19 +1,19 @@
-# Cuti Video Harness
+# Cuti Harness
 
 English | [中文](README.zh.md)
 
-[![Cuti Harness](https://img.shields.io/badge/Cuti-Harness-0A66C2)](https://newai.land/cuti-harness)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Cuti Harness](docs/assets/cuti-harness-hero.jpg)
 
-A general-purpose, open-source, plugin-based video harness for long-horizon video creation.
+[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness)
+[![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
 
-Cuti Video Harness is an open-source, project-oriented video agent harness built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Cuti Harness owns the conversation, agent loop, and high-level tool selection. Cuti's Video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
+Cuti Harness is a general-purpose, open-source, plugin-based video harness for long-horizon video creation built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The harness owns the conversation, agent loop, and high-level tool selection. The video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
 
 This repository includes the Cuti Harness agent algorithm and loop, the Video Runtime backend, the Video Studio frontend, a compatibility BFF, Media Service, Sandbox Worker, and the provider, workflow, validator, and media plugins they use.
 
 ## Architecture
 
-See [Cuti Video Harness architecture](docs/architecture.md#cuti-video-harness-architecture).
+See [Cuti Harness architecture](docs/architecture.md#cuti-harness-architecture).
 
 <a id="run"></a><a id="run-from-source"></a>
 
@@ -121,7 +121,7 @@ When using the optional portable environment, pass the same option to start:
 pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-When the terminal prints `Cuti Video Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
+When the terminal prints `Cuti Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
 
 ### 6. Verify the running stack
 
@@ -199,4 +199,4 @@ This project is in developer preview and can introduce compatibility-breaking ch
 
 ## License
 
-[MIT](LICENSE). DeepSeek and imported Cuti provenance is documented in [source provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md).
+This project is licensed under the [MIT License](LICENSE). DeepSeek and imported Cuti provenance is documented in [Source Provenance](docs/source-provenance.md). Third-party dependencies and licenses are listed in [THIRD_PARTY_NOTICES.md](guides/THIRD_PARTY_NOTICES.md).
