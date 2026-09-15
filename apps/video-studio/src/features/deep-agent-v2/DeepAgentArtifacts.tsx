@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArtifactDocument } from './ArtifactDocument'
 import {
-  AlertTriangle, BookOpen, Check, CheckCircle2, Circle, FileText, Film, Image, Loader2, Music, RefreshCw, Scissors,
+  AlertTriangle, BookOpen, Check, CheckCircle2, ChevronDown, Circle, FileText, Film,
+  Image, Images, ListChecks, Loader2, Music, RefreshCw, Scissors,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLanguage } from '@/i18n/LanguageContext'
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   videoRuntimeClient,
   type RuntimeWorkspace,
@@ -383,6 +385,26 @@ const isVideoArtifact = (artifact: DeepAgentArtifact) => {
   return Boolean(uri && isMediaUrl(uri, 'video'))
 }
 
+type WorkspaceTab = 'process' | 'final' | 'assets' | 'script'
+type AssetKind = 'all' | 'image' | 'video' | 'audio' | 'text' | 'other'
+
+const isExplicitFinalVideoArtifact = (artifact: DeepAgentArtifact): boolean => {
+  if (!isVideoArtifact(artifact)) return false
+  const metadata = asRecord(artifact.metadata)
+  const values = [
+    artifact.type,
+    artifact.title,
+    metadata.plan_step_id,
+    metadata.output_role,
+    metadata.artifact_role,
+    metadata.capability,
+  ].filter((value): value is string => typeof value === 'string')
+  return values.some(value => (
+    /(?:^|[\s._-])(?:final|master|assembled?|concat(?:enated)?|export)(?:$|[\s._-])/i.test(value)
+    || /最终|成片|总片|合成/.test(value)
+  ))
+}
+
 const containsInternalModelPayload = (artifact: DeepAgentArtifact): boolean => {
   const values = [artifact.summary, ...Object.values(artifact.metadata)]
     .filter((value): value is string => typeof value === 'string')
@@ -655,20 +677,27 @@ const artifactGenerationPrompt = (artifact: DeepAgentArtifact): string | undefin
     || promptFromRecord(metadata.raw)
 }
 
-function GenerationPrompt({ artifact }: { artifact: DeepAgentArtifact }) {
+function GenerationPrompt({
+  artifact,
+  prompt: providedPrompt,
+}: {
+  artifact?: DeepAgentArtifact
+  prompt?: string
+}) {
   const { t } = useLanguage()
-  const prompt = artifactGenerationPrompt(artifact)
-  if (!prompt || artifact.summary.trim() === prompt) return null
+  const prompt = providedPrompt?.trim() || (artifact ? artifactGenerationPrompt(artifact) : undefined)
   return (
-    <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-foreground">{t('da.workspace.generationPrompt')}</p>
-        <Badge variant="outline" className="shrink-0 text-[10px]">{t('da.workspace.generationResult')}</Badge>
+    <details className="group min-w-0 rounded-lg border border-border/60 bg-muted/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+        <span>{t('da.workspace.generationPrompt')}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-border/50 px-3 py-3">
+        <p className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+          {prompt || t('da.workspace.generationPromptUnavailable')}
+        </p>
       </div>
-      <p className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
-        {prompt}
-      </p>
-    </div>
+    </details>
   )
 }
 
@@ -740,6 +769,8 @@ export function DeepAgentArtifacts({
   const [runtimeWorkspace, setRuntimeWorkspace] = useState<RuntimeWorkspace | null>(null)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('process')
+  const [assetKind, setAssetKind] = useState<AssetKind>('all')
   const [selectingArtifactId, setSelectingArtifactId] = useState<string | null>(null)
   const [extractingKey, setExtractingKey] = useState<string | null>(null)
   const latestResultRef = useRef<HTMLElement | null>(null)
@@ -929,11 +960,22 @@ export function DeepAgentArtifacts({
     !isInternalExecutionArtifact(artifact)
     && !containsInternalModelPayload(artifact)
   ))
-  const latestMediaArtifact = [...visibleArtifacts]
-    .filter(artifact => isImageArtifact(artifact) || isVideoArtifact(artifact))
+  const videoCandidates = [...visibleArtifacts]
+    .filter(artifact => isVideoArtifact(artifact) && Boolean(artifactMediaUri(artifact)))
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))
+  const latestVideoArtifact = videoCandidates[0]
+  const selectedVideoArtifact = videoCandidates.find(artifact => selectedIds.has(artifact.id))
+  const explicitFinalVideo = [...visibleArtifacts]
+    .filter(artifact => isExplicitFinalVideoArtifact(artifact) && Boolean(artifactMediaUri(artifact)))
     .sort((left, right) => right.created_at.localeCompare(left.created_at))[0]
-  const latestMediaUri = latestMediaArtifact
-    ? artifactMediaUri(latestMediaArtifact)
+  const productionComplete = runtimeWorkspace
+    ? latestRuntimeBuild?.status === 'completed'
+    : snapshot.run.status === 'completed'
+  const finalVideoArtifact = selectedVideoArtifact
+    || explicitFinalVideo
+    || (productionComplete ? latestVideoArtifact : undefined)
+  const finalVideoUri = finalVideoArtifact
+    ? artifactMediaUri(finalVideoArtifact)
     : undefined
   const storyArtifacts = visibleArtifacts.filter(isStoryArtifact)
   const researchArtifacts = visibleArtifacts.filter(isResearchArtifact)
@@ -943,13 +985,12 @@ export function DeepAgentArtifacts({
     && isReadableTextArtifact(artifact),
   )
   const imageArtifacts = visibleArtifacts.filter(artifact =>
-    artifact.id !== latestMediaArtifact?.id
-    && !isStoryArtifact(artifact)
+    !isStoryArtifact(artifact)
     && !isResearchArtifact(artifact)
     && isImageArtifact(artifact),
   )
   const videoArtifacts = visibleArtifacts.filter(artifact =>
-    artifact.id !== latestMediaArtifact?.id
+    artifact.id !== finalVideoArtifact?.id
     && !isStoryArtifact(artifact)
     && !isResearchArtifact(artifact)
     && isVideoArtifact(artifact),
@@ -989,6 +1030,25 @@ export function DeepAgentArtifacts({
       task.status !== 'succeeded' ||
         !snapshot.artifacts.some(artifact => artifact.produced_by_task_id === task.id),
     )
+  const processCount = runtimeWorkspace
+    ? latestRuntimeBuild?.steps.length || 0
+    : visibleTasks.length
+  const assetCounts: Record<Exclude<AssetKind, 'all'>, number> = {
+    image: uploadedImages.length + imageArtifacts.length,
+    video: uploadedVideos.length + videoArtifacts.length,
+    audio: audioArtifacts.length + analysisArtifacts.length,
+    text: textArtifacts.length + researchArtifacts.length,
+    other: otherArtifacts.length,
+  }
+  const assetsCount = Object.values(assetCounts).reduce((total, count) => total + count, 0)
+  const visibleAssetCount = assetKind === 'all' ? assetsCount : assetCounts[assetKind]
+  const showImageAssets = assetKind === 'all' || assetKind === 'image'
+  const showVideoAssets = assetKind === 'all' || assetKind === 'video'
+  const showAudioAssets = assetKind === 'all' || assetKind === 'audio'
+  const showTextAssets = assetKind === 'all' || assetKind === 'text'
+  const showOtherAssets = assetKind === 'all' || assetKind === 'other'
+  const scriptCount = storyArtifacts.length + textArtifacts.length
+    + researchArtifacts.length + segmentScripts.length
   const handleSelectArtifact = async (artifact: DeepAgentArtifact) => {
     const runtimeArtifact = runtimeWorkspace?.artifacts.find(item => item.id === artifact.id)
     if (!runtimeArtifact || !runtimeWorkspace) {
@@ -1028,20 +1088,38 @@ export function DeepAgentArtifacts({
   }
 
   useEffect(() => {
-    if (!latestMediaArtifact?.id) return
+    if (activeTab !== 'final' || !finalVideoArtifact?.id) return
     latestResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [latestMediaArtifact?.id])
+  }, [activeTab, finalVideoArtifact?.id])
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-black">
-      <div className="flex items-center justify-between border-b border-border/50 px-5 py-4">
-        <div>
-          <h2 className="text-lg font-semibold">{t('da.workspace.title')}</h2>
-          <p className="text-xs text-muted-foreground">{t('da.workspace.subtitle')}</p>
-        </div>
+    <Tabs value={activeTab} onValueChange={value => setActiveTab(value as WorkspaceTab)} className="flex h-full min-h-0 flex-col bg-white dark:bg-black">
+      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
+        <TabsList className="h-10 min-w-0 justify-start gap-1 overflow-x-auto bg-transparent p-0">
+          <TabsTrigger value="process" className="gap-2 rounded-lg px-3 data-[state=active]:bg-muted">
+            <ListChecks className="h-4 w-4" />
+            {t('da.workspace.tabProcess')}
+            {processCount > 0 && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{processCount}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="final" className="gap-2 rounded-lg px-3 data-[state=active]:bg-muted">
+            <Film className="h-4 w-4" />
+            {t('da.workspace.tabFinalVideo')}
+            {finalVideoArtifact && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+          </TabsTrigger>
+          <TabsTrigger value="assets" className="gap-2 rounded-lg px-3 data-[state=active]:bg-muted">
+            <Images className="h-4 w-4" />
+            {t('da.workspace.tabAssets')}
+            {assetsCount > 0 && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{assetsCount}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="script" className="gap-2 rounded-lg px-3 data-[state=active]:bg-muted">
+            <FileText className="h-4 w-4" />
+            {t('da.workspace.tabScript')}
+            {scriptCount > 0 && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{scriptCount}</Badge>}
+          </TabsTrigger>
+        </TabsList>
         <Button variant="ghost" size="sm" disabled={workspaceLoading} onClick={() => void refresh()}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${workspaceLoading ? 'animate-spin' : ''}`} />
-          {t('da.workspace.refresh')}
+          <RefreshCw className={`h-4 w-4 ${workspaceLoading ? 'animate-spin' : ''}`} />
+          <span className="sr-only">{t('da.workspace.refresh')}</span>
         </Button>
       </div>
       <ScrollArea
@@ -1049,6 +1127,31 @@ export function DeepAgentArtifacts({
         viewportClassName="overflow-x-hidden [&>div]:!block [&>div]:min-w-0 [&>div]:max-w-full"
       >
         <div className="w-full min-w-0 max-w-full space-y-5 overflow-x-hidden p-5">
+          {activeTab === 'assets' && (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('da.workspace.assetFilters')}>
+              {([
+                ['all', t('da.workspace.assetAll'), assetsCount],
+                ['image', t('da.workspace.assetImages'), assetCounts.image],
+                ['video', t('da.workspace.assetVideos'), assetCounts.video],
+                ['audio', t('da.workspace.assetAudio'), assetCounts.audio],
+                ['text', t('da.workspace.assetText'), assetCounts.text],
+                ['other', t('da.workspace.assetOther'), assetCounts.other],
+              ] as const).map(([kind, label, count]) => (
+                <Button
+                  key={kind}
+                  type="button"
+                  size="sm"
+                  variant={assetKind === kind ? 'secondary' : 'ghost'}
+                  className="h-8 gap-1.5 rounded-full px-3 text-xs"
+                  aria-pressed={assetKind === kind}
+                  onClick={() => setAssetKind(kind)}
+                >
+                  {label}
+                  <span className="text-[10px] text-muted-foreground">{count}</span>
+                </Button>
+              ))}
+            </div>
+          )}
           {workspaceError && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
               {interpolate(t('da.workspace.runtimeUnavailable'), {
@@ -1057,7 +1160,7 @@ export function DeepAgentArtifacts({
             </div>
           )}
 
-          {runtimeWorkspace && (
+          {activeTab === 'process' && runtimeWorkspace && (
             <section className="space-y-4" data-testid="video-runtime-workspace">
               <Card className="border-accent-purple/30 bg-card/60">
                 <CardHeader className="pb-3">
@@ -1097,7 +1200,7 @@ export function DeepAgentArtifacts({
               </Card>
             </section>
           )}
-          {uploadedImages.length > 0 && (
+          {activeTab === 'assets' && showImageAssets && uploadedImages.length > 0 && (
             <section className="space-y-3" data-testid="uploaded-image-references">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Image className="h-4 w-4" />
@@ -1116,7 +1219,7 @@ export function DeepAgentArtifacts({
                         <Badge variant="outline">{t('da.workspace.uploadBadge')}</Badge>
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="min-w-0 max-w-full overflow-hidden">
+                    <CardContent className="min-w-0 max-w-full space-y-3 overflow-hidden">
                       <img
                         src={file.url}
                         alt={file.filename || t('da.workspace.productReference')}
@@ -1124,6 +1227,7 @@ export function DeepAgentArtifacts({
                         decoding="async"
                         className="mx-auto block h-auto max-h-[min(420px,calc(100dvh-14rem))] max-w-full rounded-lg object-contain"
                       />
+                      <GenerationPrompt />
                     </CardContent>
                   </Card>
                 ))}
@@ -1131,30 +1235,28 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {latestMediaArtifact && latestMediaUri && (
+          {activeTab === 'final' && finalVideoArtifact && finalVideoUri && (
             <section ref={latestResultRef} className="scroll-mt-4 space-y-3" data-testid="latest-media-result">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {isVideoArtifact(latestMediaArtifact)
-                  ? <Film className="h-4 w-4" />
-                  : <Image className="h-4 w-4" />}
-                {t('da.workspace.latestResult')}
+                <Film className="h-4 w-4" />
+                {t('da.workspace.tabFinalVideo')}
               </h3>
               <Card className="min-w-0 max-w-full overflow-hidden border-accent-purple/40 bg-card/60">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between gap-3">
                     <CardTitle className="truncate text-base">
-                      {artifactTitle(latestMediaArtifact.title, latestMediaArtifact.type, t)}
+                      {artifactTitle(finalVideoArtifact.title, finalVideoArtifact.type, t)}
                     </CardTitle>
                     <div className="flex shrink-0 items-center gap-2">
                       <Badge variant="secondary">{t('da.workspace.ready')}</Badge>
-                      {!selectedIds.has(latestMediaArtifact.id) && (
+                      {!selectedIds.has(finalVideoArtifact.id) && (
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={selectingArtifactId === latestMediaArtifact.id}
-                          onClick={() => void handleSelectArtifact(latestMediaArtifact)}
+                          disabled={selectingArtifactId === finalVideoArtifact.id}
+                          onClick={() => void handleSelectArtifact(finalVideoArtifact)}
                         >
-                          {selectingArtifactId === latestMediaArtifact.id && (
+                          {selectingArtifactId === finalVideoArtifact.id && (
                             <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                           )}
                           {t('da.workspace.useVersion')}
@@ -1164,37 +1266,28 @@ export function DeepAgentArtifacts({
                   </div>
                 </CardHeader>
                 <CardContent className="min-w-0 max-w-full space-y-3 overflow-hidden">
-                  {isVideoArtifact(latestMediaArtifact) ? (
-                    <VideoFramePicker
-                      mediaUri={latestMediaUri}
-                      title={latestMediaArtifact.title || latestMediaArtifact.type}
-                      eager
-                      extracting={extractingKey === `latest-${latestMediaArtifact.id}`}
-                      onExtract={timestamp => handleExtractFrame({
-                        key: `latest-${latestMediaArtifact.id}`,
-                        timestamp,
-                        versionId: latestMediaArtifact.id,
-                        videoUrl: latestMediaUri,
-                      })}
-                    />
-                  ) : (
-                    <img
-                      src={latestMediaUri}
-                      alt={artifactTitle(latestMediaArtifact.title, latestMediaArtifact.type, t) || t('da.workspace.latestGeneratedImage')}
-                      decoding="async"
-                      className="mx-auto block h-auto max-h-[calc(100dvh-14rem)] max-w-full rounded-lg object-contain"
-                    />
+                  <VideoFramePicker
+                    mediaUri={finalVideoUri}
+                    title={finalVideoArtifact.title || finalVideoArtifact.type}
+                    eager
+                    extracting={extractingKey === `latest-${finalVideoArtifact.id}`}
+                    onExtract={timestamp => handleExtractFrame({
+                      key: `latest-${finalVideoArtifact.id}`,
+                      timestamp,
+                      versionId: finalVideoArtifact.id,
+                      videoUrl: finalVideoUri,
+                    })}
+                  />
+                  {finalVideoArtifact.summary && (
+                    <p className="text-xs text-muted-foreground">{finalVideoArtifact.summary}</p>
                   )}
-                  {latestMediaArtifact.summary && (
-                    <p className="text-xs text-muted-foreground">{latestMediaArtifact.summary}</p>
-                  )}
-                  <GenerationPrompt artifact={latestMediaArtifact} />
+                  <GenerationPrompt artifact={finalVideoArtifact} />
                 </CardContent>
               </Card>
             </section>
           )}
 
-          {visibleTasks.length > 0 && (
+          {activeTab === 'process' && visibleTasks.length > 0 && (
             <Card className="border-border/60 bg-card/60">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">{t('da.workspace.planProgress')}</CardTitle>
@@ -1268,12 +1361,12 @@ export function DeepAgentArtifacts({
             </Card>
           )}
 
-          {textArtifacts.length > 0 && (
+          {(activeTab === 'script' || (activeTab === 'assets' && showTextAssets)) && textArtifacts.length > 0 && (
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <FileText className="h-4 w-4" />
-                  {t('da.workspace.generatedDocuments')}
+                  {activeTab === 'assets' ? t('da.workspace.assetText') : t('da.workspace.generatedDocuments')}
                 </h3>
                 <span className="text-xs text-muted-foreground">
                   {resultCountLabel(textArtifacts.length, t)}
@@ -1309,7 +1402,7 @@ export function DeepAgentArtifacts({
                         </Button>
                       </div>
                     </CardHeader>
-                    <CardContent className="px-5 py-5 sm:px-6">
+                    <CardContent className="space-y-4 px-5 py-5 sm:px-6">
                       {body ? (
                         <article className="prose prose-sm max-w-none break-words text-foreground prose-headings:scroll-mt-4 prose-headings:font-semibold prose-h1:text-xl prose-h2:mt-7 prose-h2:text-lg prose-h3:text-base prose-p:leading-7 prose-li:my-1 prose-li:leading-7 prose-table:block prose-table:max-w-full prose-table:overflow-x-auto dark:prose-invert">
                           <ArtifactDocument>{body}</ArtifactDocument>
@@ -1319,6 +1412,7 @@ export function DeepAgentArtifacts({
                           {t('da.workspace.documentPreparing')}
                         </p>
                       )}
+                      <GenerationPrompt artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
@@ -1326,7 +1420,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {researchArtifacts.length > 0 && (
+          {(activeTab === 'script' || (activeTab === 'assets' && showTextAssets)) && researchArtifacts.length > 0 && (
             <section className="space-y-3" data-testid="research-artifacts">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <BookOpen className="h-4 w-4" />
@@ -1356,8 +1450,9 @@ export function DeepAgentArtifacts({
                         </Button>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-4">
                       <ResearchDetails artifact={artifact} />
+                      <GenerationPrompt artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
@@ -1365,7 +1460,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {(storyArtifacts.length > 0 || segmentScripts.length > 0) && (
+          {activeTab === 'script' && (storyArtifacts.length > 0 || segmentScripts.length > 0) && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <FileText className="h-4 w-4" />
@@ -1395,7 +1490,7 @@ export function DeepAgentArtifacts({
                         </Button>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-4">
                       {body ? (
                         <div className="prose prose-sm max-w-none whitespace-pre-wrap text-foreground dark:prose-invert">
                           <ArtifactDocument>{body}</ArtifactDocument>
@@ -1403,6 +1498,7 @@ export function DeepAgentArtifacts({
                       ) : (
                         <p className="text-xs text-muted-foreground">{t('da.workspace.scriptUnavailable')}</p>
                       )}
+                      <GenerationPrompt artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
@@ -1439,10 +1535,11 @@ export function DeepAgentArtifacts({
                         </Badge>
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-4">
                       <div className="prose prose-sm max-w-none whitespace-pre-wrap text-foreground dark:prose-invert">
                         <ArtifactDocument>{task.objective}</ArtifactDocument>
                       </div>
+                      <GenerationPrompt prompt={task.objective} />
                     </CardContent>
                   </Card>
                 )
@@ -1450,7 +1547,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {imageArtifacts.length > 0 && (
+          {activeTab === 'assets' && showImageAssets && imageArtifacts.length > 0 && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Image className="h-4 w-4" />
@@ -1496,6 +1593,7 @@ export function DeepAgentArtifacts({
                             </ArtifactDocument>
                           </div>
                         )}
+                        <GenerationPrompt artifact={artifact} />
                       </CardContent>
                     </Card>
                   )
@@ -1504,7 +1602,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {uploadedVideos.length > 0 && (
+          {activeTab === 'assets' && showVideoAssets && uploadedVideos.length > 0 && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Film className="h-4 w-4" />
@@ -1521,7 +1619,7 @@ export function DeepAgentArtifacts({
                         <Badge variant="outline">{t('da.workspace.uploadBadge')}</Badge>
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-3">
                       <VideoFramePicker
                         mediaUri={file.url}
                         title={file.filename || t('da.workspace.uploadedVideo')}
@@ -1532,6 +1630,7 @@ export function DeepAgentArtifacts({
                           videoUrl: file.url,
                         })}
                       />
+                      <GenerationPrompt />
                     </CardContent>
                   </Card>
                 )
@@ -1539,7 +1638,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {videoArtifacts.length > 0 && (
+          {activeTab === 'assets' && showVideoAssets && videoArtifacts.length > 0 && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Film className="h-4 w-4" />
@@ -1600,7 +1699,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {audioArtifacts.length > 0 && (
+          {activeTab === 'assets' && showAudioAssets && audioArtifacts.length > 0 && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Music className="h-4 w-4" />
@@ -1638,6 +1737,7 @@ export function DeepAgentArtifacts({
                         <p className="text-xs text-muted-foreground">{t('da.workspace.audioMissing')}</p>
                       )}
                       <MusicArtifactDetails artifact={artifact} />
+                      <GenerationPrompt artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
@@ -1645,7 +1745,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {analysisArtifacts.length > 0 && (
+          {activeTab === 'assets' && showAudioAssets && analysisArtifacts.length > 0 && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Scissors className="h-4 w-4" />
@@ -1681,6 +1781,7 @@ export function DeepAgentArtifacts({
                         <audio src={mediaUri} controls preload="none" className="w-full" />
                       ) : null}
                       <AudioAnalysisDetails artifact={artifact} />
+                      <GenerationPrompt artifact={artifact} />
                     </CardContent>
                   </Card>
                 )
@@ -1688,7 +1789,7 @@ export function DeepAgentArtifacts({
             </section>
           )}
 
-          {otherArtifacts.map((artifact) => {
+          {activeTab === 'assets' && showOtherAssets && otherArtifacts.map((artifact) => {
             const selected = selectedIds.has(artifact.id)
             const mediaUri = artifactMediaUri(artifact)
             const body = storyBody(artifact)
@@ -1730,14 +1831,32 @@ export function DeepAgentArtifacts({
             )
           })}
 
-          {visibleTasks.length === 0 && visibleArtifacts.length === 0 && uploadedVideos.length === 0 && (
+          {activeTab === 'process' && !runtimeWorkspace && visibleTasks.length === 0 && (
+            <div className="flex min-h-[360px] flex-col items-center justify-center text-center text-muted-foreground">
+              <ListChecks className="mb-4 h-12 w-12 opacity-30" />
+              <p className="text-sm">{t('da.workspace.emptyProcess')}</p>
+            </div>
+          )}
+          {activeTab === 'final' && !finalVideoArtifact && (
             <div className="flex min-h-[360px] flex-col items-center justify-center text-center text-muted-foreground">
               <Film className="mb-4 h-12 w-12 opacity-30" />
-              <p className="text-sm">{t('da.workspace.empty')}</p>
+              <p className="text-sm">{t('da.workspace.emptyFinalVideo')}</p>
+            </div>
+          )}
+          {activeTab === 'assets' && visibleAssetCount === 0 && (
+            <div className="flex min-h-[360px] flex-col items-center justify-center text-center text-muted-foreground">
+              <Images className="mb-4 h-12 w-12 opacity-30" />
+              <p className="text-sm">{assetKind === 'all' ? t('da.workspace.emptyAssets') : t('da.workspace.emptyAssetCategory')}</p>
+            </div>
+          )}
+          {activeTab === 'script' && scriptCount === 0 && (
+            <div className="flex min-h-[360px] flex-col items-center justify-center text-center text-muted-foreground">
+              <FileText className="mb-4 h-12 w-12 opacity-30" />
+              <p className="text-sm">{t('da.workspace.emptyScript')}</p>
             </div>
           )}
         </div>
       </ScrollArea>
-    </div>
+    </Tabs>
   )
 }

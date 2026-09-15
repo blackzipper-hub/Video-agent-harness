@@ -1,5 +1,7 @@
 # Video Runtime
 
+Harness 回合失败时，Studio 事件 API 会提供模型服务的错误消息及错误码。现有错误提示区会显示 API 额度耗尽等模型错误，回放会话历史时也适用。
+
 启用分阶段和持续规划后，产物重生成、结构化编辑和后期编辑预览会创建续作目标，保留当前选中产物及原始编辑要求。DeepSeek 在绑定的同一个 Session 中编写可执行 PlanPatch；编辑预览不重建固定 Workflow DAG，也不自动把待编辑视频当作 Provider 参考视频。任务终态失败先反馈给 Agent，再决定下一次生成提交。编辑完成需要产生新产物，不能仅凭已有视频声明完成。关闭持续规划时保留确定性兼容路径。
 
 `cinematic` Workflow 复用 Seedance2 的自主规划，使用 `reference_mode: multi_reference`：续拍保留原始身份／场景图，并把上一段真实尾帧追加为普通参考图，不锁定首帧。选择 Cinematic 或输入 `$cinematic` 使用；已有 Seedance2 项目不会自动切换。
@@ -35,6 +37,8 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 
 ## Runtime API
 
+失败任务修复同步重写明确的任务引用字段和调度依赖，包括有序视频输入、音频及字幕来源、生成参考素材引用。提示词、URL 和产物版本 id 不会被重写。PlanPatch 提交时检查引用是否指向未被替换的任务，并在执行前补齐调度依赖；不存在或已被替换的目标会被拒绝。修复不会修改已经持久化的历史计划。
+
 `/api/video` 下的版本化 API 提供项目创建与查看、统一编辑工作区、结构化编辑与确定性依赖影响预览、Build 提交与取消、产物版本选择、作品版本恢复、固定作品版本导出、已配置插件管理和项目事件流。修改操作可能因重放产生重复工作时，必须携带幂等键。Build、选择、恢复和导出会在修改权威状态前比较基础作品版本。
 
 ## 插件执行
@@ -60,6 +64,8 @@ python -m uvicorn app.video_runtime.standalone:app --host 127.0.0.1 --port 8001
 场景参考图会同时检查 Provider 输入边界和最终渲染像素。场景参考图校验失败时，会在任何依赖它的视频片段执行前进入分阶段构建唯一一次语义修复。`VIDEO_SCENE_REFERENCE_VISUAL_VALIDATION_ENABLED` 可显式启停像素检查；未设置时，只要配置了 `OPENAI_API_KEY` 就会自动启用。`VIDEO_SCENE_REFERENCE_VALIDATOR_MODEL` 用于指定支持视觉输入的校验模型。
 
 ## 兼容 API
+
+已绑定项目的 `thread_id` 就是持久化 Harness Session id。后续消息拒绝冲突的线程 id，并追加到该 Session，保留对话、工具结果及 Harness 压缩摘要。每条后续消息记录当前项目版本、最新 Build 和检查点引用；顺序规划通过 Runtime 工具读取真实的前序产物，以其版本 id 建立依赖。Runtime 检查点持久化执行进度，并将续跑消息排入同一 Session；它们不是 LangGraph 检查点，也不是独立的 agent loop（智能体循环）。重启必须同时保留 Harness 数据目录和 Runtime 存储。
 
 Studio 对接 `app.video_runtime.standalone:app`。`/chat-v1/service` 挂载 DeepSeek BFF，它是唯一的规划循环。
 

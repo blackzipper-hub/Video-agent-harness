@@ -3,9 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from app.video_runtime.local_repository import LocalJsonVideoProjectRepository
-from app.video_runtime.models import MediaArtifactVersion, RebuildPlan, RebuildPlanItem
+from app.video_runtime.models import MediaArtifactVersion, PlanCheckpoint, RebuildPlan, RebuildPlanItem
+from app.video_runtime.checkpoint_coordinator import CheckpointCoordinator
+from app.video_runtime.deepseek_client import DeepSeekHarnessClient
 from app.video_runtime.runtime import VideoBuildRuntime
 
 
@@ -72,6 +75,13 @@ class LocalJsonRepositoryTest(unittest.IsolatedAsyncioTestCase):
                 uri="https://provider.test/video.mp4",
                 metadata={"build_id": build.id},
             ))
+            checkpoint = await first_repo.create_checkpoint(PlanCheckpoint(
+                project_id=project.id, build_id=build.id, plan_id=plan.id,
+                workflow_id=plan.workflow_id, session_id="deepseek-session-1", user_id="user-1",
+                phase="reference", next_phase="video", base_plan_revision=1, base_spec_revision=1,
+                artifact_version_ids=[draft.id],
+                artifact_summaries=[{"id": draft.id, "status": "draft"}],
+            ))
             await first_repo.close()
 
             second_repo = LocalJsonVideoProjectRepository(state_path)
@@ -91,7 +101,17 @@ class LocalJsonRepositoryTest(unittest.IsolatedAsyncioTestCase):
                 "source-version-1",
             )
             restored_build = await second_repo.get_build(project.id, build.id)
-            self.assertEqual(restored_build.status, "queued")
+            self.assertEqual(restored_build.status, "waiting_agent")
+            restored_checkpoint = await second_repo.get_checkpoint(project.id, build.id, checkpoint.id)
+            self.assertEqual(restored_checkpoint.session_id, binding.session_id)
+            self.assertEqual(restored_checkpoint.artifact_version_ids, [draft.id])
+            transport = AsyncMock(spec=DeepSeekHarnessClient)
+            coordinator = CheckpointCoordinator(VideoBuildRuntime(repository=second_repo), transport)
+            self.assertTrue(await coordinator.run_once())
+            args = transport.prompt.call_args
+            self.assertEqual(args.args[0], "deepseek-session-1")
+            self.assertIn(draft.id, args.args[1])
+            self.assertEqual(args.kwargs["mode"], "queue")
             [restored_step] = await second_repo.list_build_steps(project.id, build.id)
             self.assertEqual(restored_step.status, "waiting_external")
             self.assertEqual(restored_step.remote_operation_id, "provider-job-1")

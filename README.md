@@ -4,8 +4,7 @@ English | [中文](README.zh.md)
 
 ![Cuti Harness](docs/assets/cuti-harness-hero.jpg)
 
-[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness)
-[![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
+[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness) [![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
 
 Cuti Harness is a general-purpose, open-source, plugin-based video harness for long-horizon video creation built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The harness owns the conversation, agent loop, and high-level tool selection. The video Runtime owns durable projects, Skills, artifact dependencies, incremental builds, timelines, validation, and exports.
 
@@ -81,30 +80,25 @@ cd cuti-video-agent
 
 The shallow, blob-filtered clone still checks out every file needed to build and run while avoiding unnecessary history transfer. Contributors who later need the complete history can run `git fetch --unshallow`.
 
-### 2. Configure provider keys
+### 2. Create and activate the Conda environment
 
-macOS or Linux:
+Run from the repository root:
 
 ```sh
-cp config/.env.example .env
+conda env create --file environment.yml
+conda activate cuti-video-agent
 ```
 
-Windows PowerShell:
+If the environment already exists, run:
 
-```powershell
-Copy-Item config/.env.example .env
+```sh
+conda env update --file environment.yml --prune
+conda activate cuti-video-agent
 ```
 
-Open `.env` and fill in the keys for the capabilities you intend to use. Never commit this file. The useful minimum for chat plus the default video workflow is:
+Run every subsequent command with the `cuti-video-agent` environment activated.
 
-```dotenv
-OPENAI_API_KEY=your-openai-key
-WAVESPEED_API_KEY=your-wavespeed-key
-```
-
-`OPENAI_API_KEY` powers the Cuti Harness conversation and planning model. For the default video workflow, use `WAVESPEED_API_KEY` or `ARK_API_KEY`. `SUNO_API_KEY` is needed only by music-generating workflows. The UI and health endpoints can start without keys, but the corresponding model or media call will fail when invoked.
-
-### 3. Install and build
+### 3. Install and build the Node.js dependencies
 
 Run from the repository root:
 
@@ -115,21 +109,34 @@ pnpm run build
 
 The root build also produces the Video Studio bundle required by the local launcher.
 
-### 4. Prepare the local environment
+### 4. Configure the OpenAI and WaveSpeed API keys
 
-Create the repository's named Conda environment from the committed environment definition, then activate it. The same commands apply on Windows, macOS, and Linux:
+Copy the configuration template from the repository root. On macOS or Linux:
 
 ```sh
-conda env create --file environment.yml
-conda activate cuti-video-agent
-pnpm video:setup -- --data-dir .video-agent-harness-data
+cp config/.env.example .env
 ```
 
-If the environment already exists, synchronize its base Python and pip constraints before rerunning setup:
+On Windows PowerShell:
+
+```powershell
+Copy-Item config/.env.example .env
+```
+
+Open the new repository-root `.env` in a text editor and replace the values after each equals sign with your real keys:
+
+```dotenv
+OPENAI_API_KEY=sk-your-real-openai-key
+WAVESPEED_API_KEY=your-real-wavespeed-key
+```
+
+Do not add quotes or spaces around the equals sign, and never commit `.env`; Git already ignores it. `OPENAI_API_KEY` powers the Harness conversation and planning model, while `WAVESPEED_API_KEY` powers the default Seedance video path. To use Volcengine Ark instead, leave `WAVESPEED_API_KEY` empty and set `ARK_API_KEY`. `SUNO_API_KEY` is needed only for music generation. Restart the local stack after changing a key so it is reloaded.
+
+### 5. Prepare the local dependencies
+
+Keep the `cuti-video-agent` Conda environment activated, then run:
 
 ```sh
-conda env update --file environment.yml --prune
-conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
@@ -141,7 +148,7 @@ To let setup download a checksum-verified portable Python instead of using an ex
 pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-### 5. Start the complete local stack
+### 6. Start the complete local stack
 
 Keep the `cuti-video-agent` Conda environment activated, then run:
 
@@ -159,7 +166,7 @@ pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 
 When the terminal prints `Cuti Harness is ready`, open [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create). Video Studio has no login flow; local project identity is `local-user`.
 
-### 6. Verify the running stack
+### 7. Verify the running stack
 
 In a second terminal, run `conda activate cuti-video-agent`, then run from the repository root:
 

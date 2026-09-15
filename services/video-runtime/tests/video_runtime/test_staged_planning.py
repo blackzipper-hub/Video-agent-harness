@@ -229,6 +229,8 @@ class CheckpointCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("video_plan_patch_capability_list", prompt)
         self.assertIn("parameters_schema", prompt)
         self.assertIn('"duration": 58', prompt)
+        self.assertIn('"thread_id": "session-1"', prompt)
+        self.assertIn("Session's prior user instructions, tool results, and compaction summary", prompt)
         self.assertNotIn("chain-of-thought", checkpoint_prompt(checkpoint).lower())
 
     def test_continuous_patch_rejects_accidental_prompt_detail_regression(self) -> None:

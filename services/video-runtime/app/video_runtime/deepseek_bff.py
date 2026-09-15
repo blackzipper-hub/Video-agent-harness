@@ -75,16 +75,19 @@ class CreateRunBody(BaseModel):
     input_files: list[dict[str, Any]] = Field(default_factory=list)
     workflow_id: str | None = None
     activated_skill_ids: list[str] = Field(default_factory=list)
+    automatic_video: bool = False
 
 
 class MessageBody(BaseModel):
     content: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
+    thread_id: str | None = None
     resume_builds: bool = False
     user_option: dict[str, Any] | None = None
     input_files: list[dict[str, Any]] = Field(default_factory=list)
     workflow_id: str | None = None
     activated_skill_ids: list[str] = Field(default_factory=list)
+    automatic_video: bool = False
 
 
 class StudioProjectBody(BaseModel):
@@ -374,6 +377,7 @@ def _usage_payload(data: dict[str, Any]) -> dict[str, Any] | None:
 
 
 _CREATE_PROMPT_MARKER = "CUTI_VIDEO_CREATE_V1"
+_AGENT_PROMPT_MARKER = "CUTI_AGENT_CHAT_V1"
 _CHECKPOINT_PROMPT_MARKER = "CUTI_VIDEO_CHECKPOINT_V1"
 _RUN_CONTEXT_OPERATION = "compat-run-context"
 _RUN_CONTEXT_KEY = "initial"
@@ -476,7 +480,7 @@ def _visible_user_text(value: str) -> str:
             break
     if _SKILL_SELECTION_SEPARATOR in value:
         value = value.split(_SKILL_SELECTION_SEPARATOR, 1)[0]
-    if not value.startswith(f"{_CREATE_PROMPT_MARKER}\n"):
+    if not value.startswith((f"{_CREATE_PROMPT_MARKER}\n", f"{_AGENT_PROMPT_MARKER}\n")):
         return value
     first_line = value.splitlines()[1] if len(value.splitlines()) > 1 else ""
     prefix = "VISIBLE_USER_REQUEST_JSON: "
@@ -487,6 +491,64 @@ def _visible_user_text(value: str) -> str:
     except json.JSONDecodeError:
         return value
     return parsed if isinstance(parsed, str) else value
+
+
+def _initial_agent_prompt(
+    *,
+    objective: str,
+    project_id: str,
+    base_project_version_id: str,
+    idempotency_key: str,
+    user_option: dict[str, Any] | None,
+    input_files: list[dict[str, Any]],
+    workflow_id: str | None = None,
+    activated_skill_ids: list[str] | None = None,
+    language_contract: dict[str, str] | None = None,
+) -> str:
+    """Give the agent project context without assuming that every message requests a video."""
+    options = user_option or {}
+    activated = list(dict.fromkeys(activated_skill_ids or []))
+    safe_inputs = _prompt_input_files(input_files)
+    lines = [
+        _AGENT_PROMPT_MARKER,
+        f"VISIBLE_USER_REQUEST_JSON: {json.dumps(objective, ensure_ascii=False)}",
+        (
+            "First interpret the visible user request in the prior conversation context and "
+            "decide whether the user is asking for video "
+            "project work. Greetings, general conversation, explanations, and questions that do "
+            "not request video creation, editing, inspection, or export must receive a normal "
+            "direct answer without calling any video_* tool. Do not invent a video task."
+        ),
+        (
+            "The Video Runtime BFF has created an empty draft project only as conversation "
+            f"storage and bound project {project_id} to this Session. Its current "
+            f"base_project_version_id is {base_project_version_id}. Do not call "
+            "video_project_create for this draft."
+        ),
+        (
+            "If and only if the request in conversation context asks for video project work, use the "
+            "available video_* tools to satisfy it. Load the explicitly selected Workflow when "
+            "present; otherwise list and choose an available Workflow. Load its required Skills, "
+            "inspect the PlanPatch capabilities, plan against the existing project and base "
+            f"version with idempotency_key plan:{idempotency_key}, then start the build with "
+            f"idempotency_key build:{idempotency_key}."
+        ),
+        (
+            "UI creation controls are optional defaults and apply only if video work is requested: "
+            f"{json.dumps(options, ensure_ascii=False, sort_keys=True)}"
+        ),
+        f"Uploaded project Source Artifacts: {json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True)}",
+        video_language_instruction(language_contract or resolve_video_language_contract(objective)),
+        f"Activated helper Skill ids: {json.dumps(activated, ensure_ascii=False)}.",
+    ]
+    if workflow_id:
+        lines.append(
+            f"The project has selected Workflow {json.dumps(workflow_id)}. For requested video "
+            "work, load that Workflow and use its exact id. A saved selection alone is not "
+            "a new instruction to generate a video."
+        )
+    lines.append(f"Visible user request: {objective}")
+    return "\n".join(lines)
 
 
 def _initial_video_build_prompt(
@@ -731,6 +793,7 @@ def _decode_run_context(encoded: str | None) -> dict[str, Any]:
 
 def _list_preview(result: dict[str, Any]) -> dict[str, str]:
     return {
+        "updated_at": str(result.get("updated_at") or ""),
         "last_response": str(result.get("last_response") or "")[:_LIST_PREVIEW_MAX],
         "status": str(result.get("status") or "planning"),
         "objective": str(result.get("objective") or "")[:_LIST_PREVIEW_MAX],
@@ -778,9 +841,10 @@ def _run_from_sidebar(row: SidebarRun) -> dict[str, Any]:
         "input_files": context.get("input_files", []),
         "workflow_id": context.get("workflow_id"),
         "activated_skill_ids": context.get("activated_skill_ids", []),
+        "automatic_video": bool(context.get("automatic_video", False)),
         "skill_locks": [],
         "created_at": row.project.created_at.isoformat(),
-        "updated_at": row.project.updated_at.isoformat(),
+        "updated_at": str(preview.get("updated_at") or row.project.updated_at.isoformat()),
     }
 
 
@@ -844,9 +908,15 @@ def _run(
         "input_files": (context or {}).get("input_files", []),
         "workflow_id": (context or {}).get("workflow_id"),
         "activated_skill_ids": (context or {}).get("activated_skill_ids", []),
+        "automatic_video": bool((context or {}).get("automatic_video", False)),
         "skill_locks": [],
         "created_at": project.created_at.isoformat(),
-        "updated_at": project.updated_at.isoformat(),
+        "updated_at": max(
+            [project.updated_at, *[
+                datetime.fromtimestamp(item["time"] / 1000, timezone.utc)
+                for item in events if isinstance(item.get("time"), (int, float))
+            ]]
+        ).isoformat(),
     }
 
 
@@ -1118,6 +1188,7 @@ async def create_run(
             "activated_skill_ids": activated_skill_ids,
             "language_contract": language_values,
             "language_contract_version": 1,
+            "automatic_video": body.automatic_video or workflow_id is not None,
         }
         await runtime.repo.remember_operation_result(
             project.id,
@@ -1125,9 +1196,8 @@ async def create_run(
             _RUN_CONTEXT_KEY,
             json.dumps(run_context, ensure_ascii=False, sort_keys=True),
         )
-        await _prompt_with_source_images(
-            dsh,
-            session_id,
+        automatic_video = body.automatic_video or workflow_id is not None
+        initial_prompt = (
             _initial_video_build_prompt(
                 objective=body.objective,
                 project_id=project.id,
@@ -1138,7 +1208,24 @@ async def create_run(
                 workflow_id=workflow_id,
                 activated_skill_ids=activated_skill_ids,
                 language_contract=language_values,
-            ),
+            )
+            if automatic_video
+            else _initial_agent_prompt(
+                objective=body.objective,
+                project_id=project.id,
+                base_project_version_id=initial_version.id,
+                idempotency_key=body.idempotency_key,
+                user_option=body.user_option,
+                input_files=imported_input_files,
+                workflow_id=workflow_id,
+                activated_skill_ids=activated_skill_ids,
+                language_contract=language_values,
+            )
+        )
+        await _prompt_with_source_images(
+            dsh,
+            session_id,
+            initial_prompt,
             imported_input_files,
         )
         return success(_run(project, session_id, [], run_context))
@@ -1169,6 +1256,39 @@ async def get_run(
     return success(await _snapshot(runtime, dsh, project, binding.session_id))
 
 
+async def _continuation_context(runtime: VideoBuildRuntime, project, session_id: str) -> str:
+    """Log durable execution references alongside a follow-up in its existing Session."""
+    builds = await runtime.repo.list_builds(project.id)
+    latest = max(builds, key=lambda item: item.created_at) if builds else None
+    checkpoints = (
+        await runtime.repo.list_build_checkpoints(project.id, latest.id) if latest else []
+    )
+    payload = {
+        "thread_id": session_id,
+        "project_id": project.id,
+        "base_project_version_id": project.current_version_id,
+        "latest_build": {"id": latest.id, "status": latest.status} if latest else None,
+        "checkpoints": [
+            {"id": item.id, "status": item.status, "phase": item.phase,
+             "next_phase": item.next_phase, "artifact_version_ids": item.artifact_version_ids}
+            for item in checkpoints
+        ],
+    }
+    return (
+        "\n\nDurable continuation context:\n"
+        "Continue the same Harness Session using its conversation history, tool results, and "
+        "compaction summary. Interpret short follow-ups against that history, not in isolation. "
+        "For video work, inspect the bound project's current state and the relevant build or "
+        "checkpoint before planning the next step. Read actual prior artifact contents and "
+        "generation parameters when needed; reuse their exact version ids as dependencies. "
+        "A checkpoint is execution state, not a replacement conversation or a new agent. "
+        "Current Runtime state supersedes older progress notifications. Do not repeat completed "
+        "work or create a replacement project. For ordinary chat, answer from Session history "
+        "without starting video work.\n"
+        + json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    )
+
+
 @router.post("/runs/{project_id}/messages")
 async def add_message(
     project_id: str,
@@ -1179,6 +1299,8 @@ async def add_message(
     app_language: Annotated[str | None, Header(alias="X-App-Language")] = None,
 ) -> dict[str, Any]:
     project, binding = await _project_and_binding(runtime, project_id, user_id)
+    if body.thread_id and body.thread_id != binding.session_id:
+        raise HTTPException(status_code=409, detail="thread_id does not match the project's bound Harness Session")
     if await runtime.repo.get_operation_result(
         project_id, "compat-message", body.idempotency_key,
     ) is not None:
@@ -1191,11 +1313,11 @@ async def add_message(
         )
         if imported_input_files:
             project = await runtime.repo.get_project(project_id)
-        # A draft `/create` project may reuse an existing Harness Session whose
-        # earlier conversation was only an inspection or acceptance test.  A raw
-        # follow-up can then inherit that stale instruction and stop before plan
-        # and build.  Re-apply the product-flow contract only while the project is
-        # genuinely empty; established projects keep normal conversational edits.
+        # An empty draft may reuse a Session whose earlier turn was only an
+        # inspection or acceptance test, and it has no Artifact or Build through
+        # which the agent can recover project context. Re-apply the product-flow
+        # contract only for automatic requests; conversation turns receive the
+        # routing contract and remain free of unintended build side effects.
         is_empty_creation = (
             not [
                 item for item in await runtime.repo.current_artifacts(project_id)
@@ -1219,6 +1341,7 @@ async def add_message(
             activated_skill_ids=activated_skill_ids,
             current=current_language,
         )
+        automatic_video = body.automatic_video or requested_workflow is not None
         prompt = (
             _initial_video_build_prompt(
                 objective=body.content,
@@ -1231,8 +1354,18 @@ async def add_message(
                 activated_skill_ids=activated_skill_ids,
                 language_contract=language_values,
             )
-            if is_empty_creation
-            else body.content
+            if is_empty_creation and automatic_video
+            else _initial_agent_prompt(
+                objective=body.content,
+                project_id=project_id,
+                base_project_version_id=project.current_version_id,
+                idempotency_key=body.idempotency_key,
+                user_option=body.user_option,
+                input_files=imported_input_files,
+                workflow_id=workflow_id,
+                activated_skill_ids=activated_skill_ids,
+                language_contract=language_values,
+            ) if is_empty_creation else body.content
         )
         if not is_empty_creation and (body.user_option or imported_input_files):
             prompt += (
@@ -1247,9 +1380,16 @@ async def add_message(
                 )
             )
         if not is_empty_creation:
+            prompt = (
+                f"{_AGENT_PROMPT_MARKER}\n"
+                f"VISIBLE_USER_REQUEST_JSON: {json.dumps(body.content, ensure_ascii=False)}\n"
+                + prompt
+            )
             prompt += (
-                "\nExecution policy: the user's edit request authorizes preview and apply; "
-                "do not ask for another confirmation. For an additional clip, use "
+                "\nProject continuation policy: first decide whether the visible user message "
+                "requests video project work. If it does not, answer directly without calling "
+                "video_* tools. If it does, the request authorizes preview and apply without "
+                "another confirmation. For an additional clip, use "
                 "video_plan_patch_preview with api.provider.generate and chain media.concat. "
                 "Do not stop after transcription: inspect its real segments, translate each "
                 "segment with translated_texts ONLY if this request explicitly asks for translation. "
@@ -1284,6 +1424,9 @@ async def add_message(
                     "artifacts and resume the pending checkpoint using the user's message. "
                     f"Active checkpoints: {json.dumps(active)}."
                 )
+        # This context enters the durable Harness log with the user message;
+        # model replay and compaction therefore see the same project references.
+        prompt += await _continuation_context(runtime, project, binding.session_id)
         await _prompt_with_source_images(
             dsh, binding.session_id, prompt, imported_input_files,
         )
@@ -1292,6 +1435,7 @@ async def add_message(
             "activated_skill_ids": activated_skill_ids,
             "language_contract": language_values,
             "language_contract_version": 1,
+            "automatic_video": automatic_video,
         })
         if body.user_option is not None:
             run_context["user_option"] = body.user_option
@@ -1300,7 +1444,7 @@ async def add_message(
                 *list(run_context.get("input_files") or []),
                 *imported_input_files,
             ]
-        await runtime.repo.remember_operation_result(
+        await runtime.repo.replace_operation_result(
             project_id,
             _RUN_CONTEXT_OPERATION,
             _RUN_CONTEXT_KEY,
@@ -1417,6 +1561,18 @@ def _compat_event(project_id: str, event: dict[str, Any]) -> dict[str, Any] | No
             "cancelled": "run.cancelled",
         }.get(status, "run.completed")
         payload = {**data, "status": status}
+        if status == "failed":
+            # The studio notice consumes a top-level string, not Harness's
+            # nested turn/end reason. Keep the provider's actionable message.
+            reason = data.get("reason") or {}
+            error = reason.get("error")
+            if isinstance(error, dict):
+                payload["error"] = error.get("message") or "Model request failed"
+                payload["error_code"] = error.get("code")
+            elif isinstance(error, str) and error:
+                payload["error"] = error
+            else:
+                payload["error"] = "Model request failed"
     elif event_type == "request/header":
         header = data.get("header") if isinstance(data.get("header"), dict) else {}
         config = header.get("config") if isinstance(header.get("config"), dict) else {}

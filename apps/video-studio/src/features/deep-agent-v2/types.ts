@@ -62,6 +62,7 @@ export interface DeepAgentRun {
   } | null
   user_option?: Record<string, unknown> | null
   input_files?: DeepAgentInputFile[]
+  automatic_video?: boolean
   skill_locks?: DeepAgentSkillLock[]
   created_at: string
   updated_at: string
@@ -151,6 +152,7 @@ export interface DeepAgentMessageOptions {
   input_files?: DeepAgentInputFile[]
   workflow_id?: string
   activated_skill_ids?: string[]
+  automatic_video?: boolean
 }
 
 export interface DeepAgentEvent {

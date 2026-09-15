@@ -33,6 +33,10 @@ export function parseArguments(argv) {
   while (values.length) {
     const key = values.shift()
     if (key === '--') continue
+    if (key === '--version') {
+      result.command = 'version'
+      continue
+    }
     if (key === '--no-open') result.noOpen = true
     else if (key === '--portable-python') result.portablePython = true
     else if (key === '--source-root') result.sourceRoot = resolve(requiredValue(key, values))
@@ -44,7 +48,7 @@ export function parseArguments(argv) {
     else if (key === '--sandbox-port') result.sandboxPort = portValue(key, values)
     else throw new Error(`unknown option: ${key}`)
   }
-  if (!['web', 'setup', 'doctor'].includes(result.command)) throw new Error(`unknown command: ${result.command}`)
+  if (!['web', 'setup', 'doctor', 'version'].includes(result.command)) throw new Error(`unknown command: ${result.command}`)
   return result
 }
 

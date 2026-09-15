@@ -1,5 +1,5 @@
 import { arrayItem } from '../../utils/arrayItem'
-import { translations, type TranslationKey } from '@/i18n/translations'
+import { translations, type TranslationKey } from '../../i18n/translations'
 
 export type Translate = (key: TranslationKey) => string
 

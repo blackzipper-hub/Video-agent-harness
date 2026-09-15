@@ -4,8 +4,7 @@
 
 ![Cuti Harness](docs/assets/cuti-harness-hero.jpg)
 
-[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness)
-[![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
+[![Webpage](https://img.shields.io/badge/Webpage-111827?style=for-the-badge&labelColor=38BDF8)](https://newai.land/cuti-harness) [![MIT License](https://img.shields.io/badge/MIT%20License-8B7CF7?style=for-the-badge)](LICENSE)
 
 Cuti Harness 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的通用、开源、插件化视频 harness，面向长程视频创作。该 harness 负责对话、agent loop（智能体循环）和高层工具选择。视频 Runtime 负责持久化项目、Skill（技能）、产物依赖、增量构建、时间线、校验和导出。
 
@@ -81,9 +80,38 @@ cd cuti-video-agent
 
 浅克隆结合 Blob 过滤仍会检出构建和运行所需的全部文件，同时避免传输无关历史；后续确实需要完整历史时，可以执行 `git fetch --unshallow`。
 
-### 2. 配置 Provider Key
+### 2. 创建并激活 Conda 环境
 
-macOS 或 Linux：
+在仓库根目录执行：
+
+```sh
+conda env create --file environment.yml
+conda activate cuti-video-agent
+```
+
+如果环境已经存在，改为执行：
+
+```sh
+conda env update --file environment.yml --prune
+conda activate cuti-video-agent
+```
+
+后续命令都应在已激活的 `cuti-video-agent` 环境中执行。
+
+### 3. 安装并构建 Node.js 依赖
+
+在仓库根目录执行：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+根目录构建会同时生成本地启动器需要的 Video Studio 产物。
+
+### 4. 配置 OpenAI 和 WaveSpeed API Key
+
+在仓库根目录复制配置模板。macOS 或 Linux：
 
 ```sh
 cp config/.env.example .env
@@ -95,41 +123,20 @@ Windows PowerShell：
 Copy-Item config/.env.example .env
 ```
 
-打开 `.env`，填写计划使用的能力所需的 Key，且不要提交该文件。对话加默认视频 Workflow 的常用最小配置是：
+用文本编辑器打开仓库根目录中新建的 `.env`，将等号右侧替换成自己的真实 Key：
 
 ```dotenv
-OPENAI_API_KEY=your-openai-key
-WAVESPEED_API_KEY=your-wavespeed-key
+OPENAI_API_KEY=sk-your-real-openai-key
+WAVESPEED_API_KEY=your-real-wavespeed-key
 ```
 
-`OPENAI_API_KEY` 用于 Cuti Harness 的对话和规划模型。默认视频 Workflow 需要 `WAVESPEED_API_KEY` 或 `ARK_API_KEY`；只有生成音乐的 Workflow 才需要 `SUNO_API_KEY`。没有 Key 时界面和健康检查仍可启动，但调用对应模型或媒体能力时会失败。
+不要添加引号或在等号两侧添加空格，也不要提交 `.env`；该文件已被 Git 忽略。`OPENAI_API_KEY` 用于 Harness 的对话和规划模型，`WAVESPEED_API_KEY` 用于默认 Seedance 视频生成路径。若改用火山 Ark，可保留 `WAVESPEED_API_KEY` 为空并填写 `ARK_API_KEY`。只有使用音乐生成能力时才需要 `SUNO_API_KEY`。修改 Key 后需重启本地服务栈才能重新加载。
 
-### 3. 安装并构建
+### 5. 准备本地依赖
 
-在仓库根目录执行：
-
-```sh
-pnpm install --frozen-lockfile
-pnpm run build
-```
-
-根目录构建会同时生成本地启动器需要的 Video Studio 产物。
-
-### 4. 准备本地环境
-
-根据仓库提交的环境定义创建具名 Conda 环境，然后激活它。Windows、macOS 和 Linux 使用相同命令：
+保持 `cuti-video-agent` Conda 环境处于激活状态，然后执行：
 
 ```sh
-conda env create --file environment.yml
-conda activate cuti-video-agent
-pnpm video:setup -- --data-dir .video-agent-harness-data
-```
-
-如果环境已经存在，先同步其中的基础 Python 和 pip 约束，再重新执行准备命令：
-
-```sh
-conda env update --file environment.yml --prune
-conda activate cuti-video-agent
 pnpm video:setup -- --data-dir .video-agent-harness-data
 ```
 
@@ -141,7 +148,7 @@ Conda 定义负责环境名称、Python 3.11 和 pip。环境准备命令会验�
 pnpm video:setup -- --portable-python --data-dir .video-agent-harness-data
 ```
 
-### 5. 启动完整本地服务栈
+### 6. 启动完整本地服务栈
 
 保持 `cuti-video-agent` Conda 环境处于激活状态，然后运行：
 
@@ -159,7 +166,7 @@ pnpm video:local -- --portable-python --data-dir .video-agent-harness-data
 
 当终端输出 `Cuti Harness is ready` 后，访问 [http://127.0.0.1:3000/#/zh/create](http://127.0.0.1:3000/#/zh/create)。Video Studio 没有登录流程，本地项目身份固定为 `local-user`。
 
-### 6. 验证服务栈
+### 7. 验证服务栈
 
 在第二个终端中执行 `conda activate cuti-video-agent`，然后进入仓库根目录运行：
 

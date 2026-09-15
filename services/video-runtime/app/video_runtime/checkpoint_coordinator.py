@@ -72,6 +72,7 @@ def checkpoint_prompt(
 ) -> str:
     """Build an auditable continuation request without exposing hidden reasoning."""
     payload = {
+        "thread_id": checkpoint.session_id,
         "project_id": checkpoint.project_id,
         "build_id": checkpoint.build_id,
         "checkpoint_id": checkpoint.id,
@@ -151,6 +152,10 @@ def checkpoint_prompt(
         "CUTI_VIDEO_CHECKPOINT_V1",
         "A durable video build reached a semantic planning checkpoint.",
         "This is an automatic continuation of the same user request and Session.",
+        "Use this Session's prior user instructions, tool results, and compaction summary. "
+        "Read the actual preceding artifacts needed by the next step and retain their version "
+        "ids in task dependencies. Current checkpoint state supersedes historical progress; "
+        "do not reconstruct missing facts by guessing or start another conversation.",
         language_instruction,
         "Do not create a project, switch Workflow, or repeat completed media steps.",
         "Call video_workflow_load for the exact workflow_id below, then call "

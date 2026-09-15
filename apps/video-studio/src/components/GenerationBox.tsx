@@ -455,6 +455,7 @@ const GenerationBox = ({
           full_auto: isFullAuto,
         },
         shouldAutoSend: true,
+        automatic_video: true,
       }
       if (selectedWorkflowId) createState.workflow_id = selectedWorkflowId
       // 与 create 页一致：video 传 auto 由后端路由分析决定类型，image/music 传具体类型

@@ -49,6 +49,10 @@ test('portable Python is an explicit setup option', () => {
   assert.equal(parseArguments(['setup', '--portable-python']).portablePython, true)
 })
 
+test('accepts the installed executable version flag', () => {
+  assert.equal(parseArguments(['--version']).command, 'version')
+})
+
 test('start rejects an unprepared portable environment without downloading it', async () => {
   const dataDirectory = mkdtempSync(join(tmpdir(), 'video-agent-unprepared-'))
   const options = parseArguments([

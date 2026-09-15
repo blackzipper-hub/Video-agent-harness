@@ -1,7 +1,6 @@
 /**
- * The three independent publish sequences this repository releases from
- * (`packages/` + `apps/`, `vendor/`, and `native/`) and the two this module
- * owns: `dsh` and `vendor`. Each family carries its own version baseline, tag
+ * The independent publish sequences this repository releases from and the
+ * three this module owns: `dsh`, `cuti`, and `vendor`. Each family carries its own version baseline, tag
  * naming, and publish set, so releasing one never republishes another
  * ([rationale](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/.agents/notes/implemented/process/2026-08-10-npm-release-sequences.md)).
  *
@@ -9,7 +8,7 @@
  * `releaseFamilies()` entry; nothing else in the release scripts branches on it.
  */
 
-import { globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   officialClientBuildEnvironment,
@@ -115,6 +114,9 @@ export abstract class ReleaseFamily {
   /** Git tag prefix this family publishes from. */
   abstract readonly tagPrefix: string
 
+  /** npm scope owned by this release family. */
+  readonly packageNamePrefix: string = '@deepseek-ai/'
+
   /**
    * Assert that built artifacts match this release family's required profile.
    * Families without environment-selected artifacts accept every build tree.
@@ -139,7 +141,7 @@ export abstract class ReleaseFamily {
       const name = requireString(manifest, 'name', normalized)
       const version = requireString(manifest, 'version', normalized)
       if (name === WORKSPACE_ROOT_PACKAGE) throw new Error(`${normalized} selected the workspace root`)
-      if (!name.startsWith('@deepseek-ai/')) throw new Error(`${normalized} must name an @deepseek-ai package`)
+      if (!name.startsWith(this.packageNamePrefix)) continue
       if (seen.has(name)) throw new Error(`${name} appears twice in release family ${this.id}`)
       seen.add(name)
       members.push({
@@ -359,6 +361,69 @@ class DshFamily extends ReleaseFamily {
   readonly installedEntry = { packageName: '@deepseek-ai/dsh', binPath: 'lib/bin.js' }
 }
 
+/** Cuti's independently published runtime extension and npx launcher. */
+class CutiFamily extends ReleaseFamily {
+  readonly id = 'cuti'
+  override readonly packageNamePrefix = '@cuti-ai/'
+  readonly patterns = [
+    'packages/video/*/package.json',
+    'packages/bundle/video-agent/package.json',
+    'apps/video-cli/package.json',
+  ] as const
+  readonly tagPrefix = 'cuti-v'
+
+  /** Require every generated package and embedded application entry used by the tarballs. */
+  override verifyBuildArtifacts(root: string): void {
+    const required = [
+      'packages/video/tool-video/lib/index.js',
+      'packages/video/video-runtime/lib/index.js',
+      'packages/video/video-runtime-http/lib/index.js',
+      'packages/bundle/video-agent/lib/index.js',
+      'apps/video-studio/dist/index.html',
+      'apps/video-cli/runtime/requirements-local.txt',
+    ]
+    const missing = required.filter(path => !existsSync(resolve(root, path)))
+    if (missing.length > 0) {
+      throw new Error(`cuti release build artifacts are missing:\n${missing.join('\n')}\nRun pnpm run build first.`)
+    }
+  }
+
+  /** Require one version so one tag identifies the complete installable closure. */
+  verifyVersions(members: readonly ReleaseMember[]): void {
+    const versions = new Set(members.map(member => member.version))
+    if (versions.size !== 1) {
+      const detail = members.map(member => `${member.directory}: ${member.version}`).join('\n')
+      throw new Error(`cuti release members must share one version:\n${detail}`)
+    }
+  }
+
+  tagPrefixFor(): string {
+    return this.tagPrefix
+  }
+
+  /** Reject development sources while allowing the CLI's executable `.mjs` module. */
+  validatePayload(member: ReleaseMember, files: readonly string[]): void {
+    const checked = member.name === '@cuti-ai/video-agent-harness'
+      ? files.filter(file => file !== 'package/src/local-runtime.mjs')
+      : files
+    validateTarballPayload(checked, member.name)
+    if (member.name !== '@cuti-ai/video-agent-harness') return
+    for (const required of [
+      'package/bin/video-agent-harness.mjs',
+      'package/src/local-runtime.mjs',
+      'package/runtime/requirements-local.txt',
+      'package/runtime/studio/index.html',
+    ]) {
+      if (!files.includes(required)) throw new Error(`${member.name} tarball is missing ${required}`)
+    }
+  }
+
+  readonly installedEntry = {
+    packageName: '@cuti-ai/video-agent-harness',
+    binPath: 'bin/video-agent-harness.mjs',
+  }
+}
+
 /** `vendor/*`: every package keeps its own version line, so every package has its own tag. */
 class VendorFamily extends ReleaseFamily {
   readonly id = 'vendor'
@@ -408,7 +473,7 @@ class VendorFamily extends ReleaseFamily {
 
 /** Every release family this module owns, in workflow order. */
 function releaseFamilies(): readonly ReleaseFamily[] {
-  return [new DshFamily(), new VendorFamily()]
+  return [new DshFamily(), new CutiFamily(), new VendorFamily()]
 }
 
 /**

@@ -56,6 +56,7 @@ export type DeepAgentAction =
   | { type: 'STREAMING'; streaming: boolean }
   | { type: 'SENDING'; sending: boolean }
   | { type: 'NOTICE'; notice: DeepAgentNotice | null }
+  | { type: 'STREAM_NOTICE'; notice: DeepAgentNotice | null }
 
 const replaceById = <T extends { id: string }>(items: T[], next: T): T[] => {
   const index = items.findIndex(item => item.id === next.id)
@@ -280,6 +281,12 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
   if (status) snapshot.run.status = status
   if (typeof payload.response === 'string') snapshot.run.last_response = payload.response
   snapshot.run.updated_at = event.created_at
+  // Replayed messages may predate a hydrated snapshot. Their content can still
+  // be needed, but their turn status must not overwrite the newer projection.
+  if (event.sequence <= (state.snapshot.last_event_sequence || 0)) {
+    snapshot.run = state.snapshot.run
+  }
+  snapshot.last_event_sequence = Math.max(state.snapshot.last_event_sequence || 0, event.sequence)
 
   if (event.type === 'run.failed' || event.type === 'agent.failed') {
     notice = {
@@ -302,7 +309,7 @@ function applyEvent(state: DeepAgentWorkspaceState, event: DeepAgentEvent): Deep
 
   const runs = state.runs.map(run =>
     run.id === event.run_id
-      ? { ...run, status: snapshot.run.status, last_response: snapshot.run.last_response, updated_at: event.created_at }
+      ? { ...run, status: snapshot.run.status, last_response: snapshot.run.last_response, updated_at: snapshot.run.updated_at }
       : run,
   ).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   return { ...state, snapshot, messages, suggestions, runs, notice }
@@ -360,9 +367,12 @@ export function deepAgentReducer(
         const snapshot: DeepAgentSnapshot = liveSnapshot
           ? {
             ...action.snapshot,
-            run: liveSnapshot.run.updated_at > action.snapshot.run.updated_at
+            run: (liveSnapshot.last_event_sequence || 0) > (action.snapshot.last_event_sequence || 0)
               ? liveSnapshot.run
               : action.snapshot.run,
+            last_event_sequence: Math.max(
+              liveSnapshot.last_event_sequence || 0, action.snapshot.last_event_sequence || 0,
+            ),
             tasks: mergeEntityById(action.snapshot.tasks, liveSnapshot.tasks),
             artifacts: mergeEntityById(action.snapshot.artifacts, liveSnapshot.artifacts),
             selections: mergeSelections(action.snapshot.selections, liveSnapshot.selections),
@@ -380,6 +390,11 @@ export function deepAgentReducer(
           ...snapshot.messages,
           ...action.messages,
         ])
+        const failureEvent = snapshot.run.status === 'failed'
+          ? [...action.events].reverse().find(event =>
+            event.run_id === action.runId &&
+            (event.type === 'run.failed' || event.type === 'agent.failed'))
+          : undefined
         return {
           ...state,
           snapshot,
@@ -390,13 +405,6 @@ export function deepAgentReducer(
           ]),
           suggestions: suggestionsFromSnapshot(snapshot),
           isHydrating: false,
-          // A terminal server snapshot is authoritative. A message request can
-          // still be unwinding locally after the user presses Stop; keeping its
-          // optimistic sending flag would make the composer silently reject the
-          // very message that is meant to resume the task.
-          isSending: ['completed', 'failed', 'cancelled'].includes(snapshot.run.status)
-            ? false
-            : state.isSending,
           notice: snapshot.run.status === 'waiting_input'
             ? (
               waitingInputNoticeFromEvents(
@@ -409,9 +417,11 @@ export function deepAgentReducer(
                   zh: uiIsZh(),
                 })
             )
-            : state.notice?.severity === 'error'
-              ? state.notice
-              : null,
+            : failureEvent
+              ? { severity: 'error', message: displayValue(failureEvent.payload.error || failureEvent.payload.message || 'Run failed') }
+              : state.notice?.severity === 'error'
+                ? state.notice
+                : null,
         }
       }
     case 'OPTIMISTIC_MESSAGE':
@@ -435,9 +445,6 @@ export function deepAgentReducer(
       const next = applyEvent(state, action.event)
       return {
         ...next,
-        isSending: next.snapshot && ['completed', 'failed', 'cancelled'].includes(next.snapshot.run.status)
-          ? false
-          : next.isSending,
         traceEvents: mergeTraceEvents([...state.traceEvents, action.event]),
         lastSequence: Math.max(state.lastSequence, action.event.sequence),
         seenEventIds: [...state.seenEventIds, action.event.id].slice(-1000),
@@ -456,6 +463,9 @@ export function deepAgentReducer(
       return { ...state, isStreaming: action.streaming }
     case 'SENDING':
       return { ...state, isSending: action.sending }
+    case 'STREAM_NOTICE':
+      if (state.notice && state.notice.interruptCategory !== 'event-stream') return state
+      return { ...state, notice: action.notice }
     case 'NOTICE':
       return action.notice === null
         ? { ...state, notice: null }

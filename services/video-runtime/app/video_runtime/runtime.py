@@ -43,6 +43,7 @@ from .capabilities import RuntimeCapabilityRegistry
 from .execution import CapabilityExecutionGateway
 from .security import CapabilityGrant, CapabilityGrantSigner
 from .skills import VideoSkillRuntime, default_video_skill_runtime
+from .step_references import STEP_REFERENCE_PARAMETER_KEYS as _STEP_REFERENCE_PARAMETER_KEYS
 from app.orchestration.skills import (
     ResolvedSkillRef,
     SkillContext,
@@ -77,14 +78,6 @@ _MEDIA_REFERENCE_PARAMETER_KEYS = frozenset({
     "continuity_frame_url", "end_image_url", "end_image", "last_image_url",
     "last_image", "audio_url", "video_url",
 })
-
-_STEP_REFERENCE_PARAMETER_KEYS = (
-    "start_image_from_step", "strict_start_frame_from_step",
-    "character_reference_from_step", "character_reference_from_steps",
-    "scene_reference_from_steps", "product_identity_reference_steps",
-    "reference_from_steps", "video_reference_from_steps",
-    "audio_reference_from_step", "audio_reference_from_steps",
-)
 
 _SHARED_IMAGE_REFERENCE_TYPES = frozenset({
     "character_reference", "character_setting_reference",
@@ -2219,6 +2212,14 @@ class VideoBuildRuntime:
                     if capability.id == "media.concat" and not proposed.parameters.get("video_urls"):
                         proposed.parameters.pop("video_urls", None)
                         proposed.parameters.setdefault("video_steps", list(proposed.depends_on))
+                    live_step_ids = {
+                        item.step_id for item in [*base_plan.items, *normalized_steps]
+                        if not item.superseded_by
+                    }
+                    proposed.depends_on = list(dict.fromkeys([
+                        *proposed.depends_on,
+                        *_parameter_step_references(proposed.parameters, live_step_ids),
+                    ]))
                     if workflow is not None and capability_requires_workflow(capability.id):
                         proposed.parameters = inject_workflow_parameters(
                             proposed.parameters, workflow,

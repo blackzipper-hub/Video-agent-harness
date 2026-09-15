@@ -1,6 +1,7 @@
 """Expand failed-task replacement into append-only tasks and pending cancellations."""
 from .plan_utils import topological_steps
 from .models import CheckpointResolution, RebuildPlan, BuildStep
+from .step_references import remap_step_parameters
 
 
 def expand_repair(plan: RebuildPlan, states: dict[str, BuildStep], resolution: CheckpointResolution) -> CheckpointResolution:
@@ -38,5 +39,6 @@ def expand_repair(plan: RebuildPlan, states: dict[str, BuildStep], resolution: C
         result.cancel_step_ids.append(item.step_id)
     for item in result.proposed_steps:
         item.depends_on = [mapping.get(dependency, dependency) for dependency in item.depends_on]
+        item.parameters = remap_step_parameters(item.parameters, mapping)
     result.cancel_step_ids = list(dict.fromkeys(result.cancel_step_ids))
     return result

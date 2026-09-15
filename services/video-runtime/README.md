@@ -6,6 +6,8 @@ The Python Video Runtime owns long-lived video projects independently of an agen
 
 ## Run
 
+Failed Harness turns expose the provider error message and code through the Studio event API. The existing error notice displays API credit exhaustion and other model failures, including when replaying session history.
+
 The `cinematic` Workflow reuses Seedance2's agentic planning with `reference_mode: multi_reference`: continuation clips retain the original identity/scene images and add the previous decoded tail as another reference. It does not lock the first frame. Select Cinematic or mention `$cinematic`; existing Seedance2 projects are not switched automatically.
 
 Seedance continuation planning keeps the preceding tail in `start_image_from_step` and the original identity/scene references in `reference_from_steps`. WaveSpeed's documented I2V request has no ordinary-reference field, so a new request combining a strict start frame and reference images is rejected before submission instead of silently dropping identity constraints. Already-submitted jobs remain pollable. A supported combined-input endpoint or explicit user approval for non-strict multi-reference generation is required; the Runtime does not silently change providers or modes.
@@ -32,6 +34,8 @@ Set `VIDEO_RUNTIME_DATABASE_URL` for Postgres durability. Without it, the standa
 For local storage the standalone entrypoint defaults `PUBLIC_BASE_URL` to `http://127.0.0.1:8001`, matching its documented port and `/files/*` mount. Set it explicitly when the Runtime is exposed on another origin. Provider-bound media is still uploaded through the media-egress adapter, so loopback URLs are never sent to remote generation services.
 
 ## Runtime APIs
+
+Failed-task repair rewrites declared task selectors together with scheduling dependencies, including ordered video inputs, audio/subtitle sources, and generated reference selectors. Prompt text, URLs, and artifact-version ids are not rewritten. PlanPatch admission checks selectors against non-superseded tasks and adds their scheduling dependencies before execution; missing or superseded targets are rejected. Repair does not mutate already-persisted historical plans.
 
 The versioned API under `/api/video` creates and inspects projects, returns one aggregate editing workspace, previews structured edits and deterministic dependency impact, submits or cancels builds, selects artifact versions, restores project versions, exports a fixed project version, manages configured plugins, and streams project events. Every modifying call has an idempotency key where replay can cause duplicate work. Build, selection, restore, and export operations compare their base project version before changing authoritative state.
 
@@ -60,6 +64,8 @@ All registered capabilities execute through `RuntimeCapabilityRegistry` and `Cap
 Scene-reference isolation is checked both at the provider boundary and against rendered pixels. A failed scene-reference check enters the staged build's single semantic-repair pass before any dependent video segment runs. `VIDEO_SCENE_REFERENCE_VISUAL_VALIDATION_ENABLED` explicitly enables or disables the pixel check; when omitted it is enabled whenever `OPENAI_API_KEY` is configured. `VIDEO_SCENE_REFERENCE_VALIDATOR_MODEL` selects the vision-capable validation model.
 
 ## Compatibility API
+
+A bound project's `thread_id` is its durable Harness Session id. Follow-ups reject a conflicting thread id and append to that Session, retaining conversation, tool results, and Harness compaction summaries. Each follow-up logs current project-version, latest-build, and checkpoint references; sequential planning reads actual preceding artifacts through Runtime tools and uses their version ids as dependencies. Runtime checkpoints persist execution progress and queue continuations into the same Session; they are not LangGraph checkpoints or a separate agent loop. Both the Harness data directory and Runtime repository must be preserved across restarts.
 
 Studio talks to `app.video_runtime.standalone:app`. The `/chat-v1/service` mount is the DeepSeek BFF and the only planning loop.
 

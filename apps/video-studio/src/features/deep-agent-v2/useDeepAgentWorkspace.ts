@@ -191,24 +191,12 @@ export function useDeepAgentWorkspace({
     sendControllerRef.current?.abort()
   }, [])
 
-  // Stop/failure/completion is authoritative over a still-unwinding POST.
-  // Abort the browser request and release the synchronous guard so a cancelled
-  // task can immediately accept a new instruction through the resume endpoint.
-  useEffect(() => {
-    const status = state.snapshot?.run.status
-    if (!status || !['completed', 'failed', 'cancelled'].includes(status)) return
-    sendControllerRef.current?.abort()
-    sendControllerRef.current = null
-    sendingRef.current = false
-    dispatch({ type: 'SENDING', sending: false })
-  }, [state.snapshot?.run.status])
-
   const streamReady = Boolean(
     state.selectedRunId && state.snapshot?.run.id === state.selectedRunId,
   )
-  const streamStatus = state.snapshot?.run.status
-  // Keep streaming while waiting_input so auto-resume / resume events update the UI.
-  const shouldStream = streamReady && !['completed', 'failed', 'cancelled'].includes(streamStatus || '')
+  // A turn ending does not close the Session: user follow-ups and Runtime
+  // checkpoints can start another turn without a browser POST.
+  const shouldStream = streamReady
 
   useEffect(() => {
     const runId = state.selectedRunId
@@ -221,32 +209,25 @@ export function useDeepAgentWorkspace({
     const connect = async () => {
       dispatch({ type: 'STREAMING', streaming: true })
       while (!stopped && !controller.signal.aborted) {
-        let terminal = false
-        const isTerminal = () => terminal
         try {
           const response = await fetch(deepAgentV2Client.eventsUrl(runId, cursorRef.current), {
             credentials: 'include',
             headers: { 'X-App-Language': languageRef.current },
             signal: controller.signal,
           })
-          if (response.ok) dispatch({ type: 'NOTICE', notice: null })
+          if (response.ok) dispatch({ type: 'STREAM_NOTICE', notice: null })
           await replayDeepAgentEvents(response, (event: DeepAgentEvent) => {
             cursorRef.current = Math.max(cursorRef.current, event.sequence)
             localStorage.setItem(sequenceKey(runId), String(cursorRef.current))
             dispatch({ type: 'EVENT', event })
-            terminal = terminal || [
-              'run.completed',
-              'run.failed',
-              'run.cancelled',
-            ].includes(event.type)
           })
-          if (isTerminal()) break
         } catch (_error) {
           if (isAborted()) break
           dispatch({
-            type: 'NOTICE',
+            type: 'STREAM_NOTICE',
             notice: {
               severity: 'warning',
+              interruptCategory: 'event-stream',
               message: languageRef.current === 'zh'
                 ? '事件连接中断，正在重新连接……'
                 : 'Event stream interrupted, reconnecting…',

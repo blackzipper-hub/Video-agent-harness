@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.video_runtime.builtin_plugins.media_core import MediaCorePlugin
-from app.video_runtime.models import MediaArtifactVersion
+from app.video_runtime.models import MediaArtifactVersion, BuildStep, CheckpointResolution, RebuildPlan, RebuildPlanItem
+from app.video_runtime.plan_repair import expand_repair
+from app.video_runtime.step_references import STEP_REFERENCE_PARAMETER_KEYS, remap_step_parameters
 from app.video_runtime.security import CapabilityExecutionEnvelope, CapabilityGrant
 from app.capabilities.manifests.platform import platform_capabilities
 from app.chat.v2.skill_catalog import SkillCatalog
@@ -47,6 +49,50 @@ def _clip(step_id: str, uri: str) -> dict:
 
 
 class MediaCoreDualInputTest(unittest.IsolatedAsyncioTestCase):
+    def test_repair_remaps_only_declared_selectors(self):
+        for key in STEP_REFERENCE_PARAMETER_KEYS:
+            for value, expected in [("old", "new"), (["keep", "old", "old"], ["keep", "new", "new"])]:
+                with self.subTest(key=key, value=value):
+                    original = {key: value, "prompt": "old", "video_urls": ["old"],
+                                "metadata": {"video_step": "old"}}
+                    rewritten = remap_step_parameters(original, {"old": "new"})
+                    self.assertEqual(rewritten[key], expected)
+                    self.assertEqual(rewritten["prompt"], "old")
+                    self.assertEqual(rewritten["video_urls"], ["old"])
+                    self.assertEqual(rewritten["metadata"], original["metadata"])
+                    self.assertEqual(original[key], value)
+
+    async def test_failed_clip_replacement_reaches_real_concat_input_resolver(self):
+        clip = RebuildPlanItem(step_id="old", action="create")
+        concat = RebuildPlanItem(step_id="concat", action="create", capability="media.concat",
+            depends_on=["existing", "old"], parameters={"video_steps": ["existing", "old"]})
+        downstream = RebuildPlanItem(step_id="audio", action="create", depends_on=["concat"],
+            parameters={"video_step": "concat", "audio_step": "existing"})
+        plan = RebuildPlan(project_id="project-1", base_project_version_id="version-1",
+            items=[RebuildPlanItem(step_id="existing", action="reuse"), clip, concat, downstream])
+        states = {item.step_id: BuildStep(build_id="build-1", project_id="project-1",
+            plan_step_id=item.step_id, action=item.action,
+            status="failed" if item.step_id == "old" else "completed" if item.step_id == "existing" else "pending")
+            for item in plan.items}
+        resolution = CheckpointResolution(base_plan_revision=1, base_spec_revision=1,
+            idempotency_key="repair", video_spec_patch={}, replace_failed_step_ids={"old": "new"},
+            proposed_steps=[RebuildPlanItem(step_id="new", action="create")])
+        repaired = expand_repair(plan, states, resolution)
+        cloned = next(item for item in repaired.proposed_steps if item.capability == "media.concat")
+        self.assertEqual(cloned.parameters["video_steps"], ["existing", "new"])
+        audio = next(item for item in repaired.proposed_steps if item.step_id.startswith("audio:"))
+        self.assertEqual(audio.parameters["video_step"], cloned.step_id)
+        self.assertEqual(concat.parameters["video_steps"], ["existing", "old"])
+        completed = {"existing": _clip("existing", "https://cdn.example/original.mp4"),
+                     "new": _clip("new", "https://cdn.example/retry.mp4")}
+        with self.assertRaisesRegex(ValueError, "required media output is unavailable: old"):
+            await self._run("media.concat", concat.parameters, completed)
+        gateway = AsyncMock(return_value={"uri": "https://cdn.example/combined.mp4"})
+        with patch("app.chat.v2.host_gateway.HostGateway.media_concat", gateway):
+            await self._run("media.concat", cloned.parameters, completed)
+        self.assertEqual(gateway.await_args.args[0]["video_urls"],
+                         ["https://cdn.example/original.mp4", "https://cdn.example/retry.mp4"])
+
     async def test_transcription_does_not_prime_audio_with_script(self):
         transcribe = AsyncMock(return_value={"text": "Actual speech", "segments": [{"start": 1, "end": 2, "text": "Actual speech"}]})
         with patch("app.services.subtitle_transcription_service.transcribe_video", transcribe):

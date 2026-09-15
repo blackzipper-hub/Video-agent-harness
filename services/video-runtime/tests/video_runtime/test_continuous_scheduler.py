@@ -36,6 +36,16 @@ class ControlledExecutor(FakePlanExecutor):
 
 
 class ContinuousSchedulerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_concat_rejects_missing_parameter_reference_before_execution(self):
+        checkpoint = await self.checkpoint()
+        with self.assertRaisesRegex(ValueError, "unknown tasks: missing-clip"):
+            await self.resolve(checkpoint, proposed_steps=[RebuildPlanItem(
+                step_id="bad-concat", action="create", capability="media.concat",
+                output_artifact_type="video", parameters={"video_steps": ["missing-clip"]},
+            )])
+        stored = await self.runtime.repo.get_plan(self.plan.id)
+        self.assertFalse(any(item.step_id == "bad-concat" for item in stored.items))
+
     def test_legacy_repair_step_with_null_idempotency_key_loads_as_unassigned(self):
         item = RebuildPlanItem.model_validate({
             "step_id": "legacy-repair", "action": "create", "idempotency_key": None,

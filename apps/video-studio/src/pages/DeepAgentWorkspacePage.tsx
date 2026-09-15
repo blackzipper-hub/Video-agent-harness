@@ -69,6 +69,7 @@ export default function DeepAgentWorkspacePage() {
     userOption?: Record<string, unknown>
     shouldAutoSend?: boolean
     workflow_id?: string
+    automatic_video?: boolean
   } | null
   const shouldStartFromHome = Boolean(initialRequest?.shouldAutoSend && initialRequest.initialPrompt?.trim())
   const isMobile = useIsMobile()
@@ -354,6 +355,7 @@ export default function DeepAgentWorkspacePage() {
       await sendWorkspaceMessage(initialPrompt, {
         user_option: initialRequest.userOption,
         input_files: inputFiles,
+        automatic_video: initialRequest.automatic_video ?? true,
         ...(initialRequest.workflow_id ? { workflow_id: initialRequest.workflow_id } : {}),
       })
     }

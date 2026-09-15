@@ -4,6 +4,7 @@ import asyncio
 import base64
 import sys
 import io
+import json
 import tempfile
 import unittest
 import zipfile
@@ -27,7 +28,7 @@ from app.video_runtime.deepseek_bff import (
 )
 from app.video_runtime.deepseek_client import DeepSeekHarnessError
 from app.video_runtime.runtime import VideoBuildRuntime
-from app.video_runtime.models import Build, ProjectIntent, RebuildPlan
+from app.video_runtime.models import Build, PlanCheckpoint, ProjectIntent, RebuildPlan
 from app.video_runtime.skills import VideoSkillRuntime
 
 
@@ -52,7 +53,8 @@ class FakeDeepSeekClient:
     async def prompt(self, session_id: str, text: str, **options) -> None:
         self.prompts.append((session_id, text))
         self.prompt_images.append(list(options.get("images") or []))
-        self.events[session_id] = [
+        previous = self.events[session_id]
+        additions = [
             {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
             {"type": "user/message", "seq": 1, "time": 1001, "data": {
                 "content": [{"type": "text", "text": text}],
@@ -68,6 +70,11 @@ class FakeDeepSeekClient:
             {"type": "turn/end", "seq": 4, "time": 1004, "data": {
                 "turn": 1, "reason": {"kind": "complete"},
             }},
+        ]
+        offset = len(previous)
+        self.events[session_id] = previous + [
+            {**item, "seq": item["seq"] + offset, "time": item["time"] + offset}
+            for item in additions
         ]
 
     async def history(self, session_id: str, **_options) -> dict:
@@ -149,6 +156,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             json={
                 "objective": "Make a trailer",
                 "idempotency_key": "request-1",
+                "automatic_video": True,
                 "user_option": {
                     "duration": 15,
                     "aspect_ratio": "9:16",
@@ -227,6 +235,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
                     json={
                         "objective": "生成mv",
                         "idempotency_key": "attach-image-1",
+                        "automatic_video": True,
                         "input_files": [{
                             "type": "image",
                             "url": uploaded_path,
@@ -423,7 +432,11 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
 
         self.client.post(
             f"/chat-v1/service/v2/runs/{created['id']}/messages",
-            json={"content": "Make the hero warmer", "idempotency_key": "skill-edit-1"},
+            json={
+                "content": "Make the hero warmer",
+                "idempotency_key": "skill-edit-1",
+                "automatic_video": True,
+            },
         )
         self.assertIn(
             'VideoSpec.activated_skill_ids exactly to ["product-voiceover-narration"]',
@@ -496,6 +509,7 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
             json={
                 "content": "Make a 15 second product video",
                 "idempotency_key": "follow-up-1",
+                "automatic_video": True,
                 "user_option": {"duration": 15},
             },
         )
@@ -506,6 +520,139 @@ class DeepSeekCompatibilityBffTest(unittest.TestCase):
         self.assertIn("video_project_plan", prompt)
         self.assertIn("video_project_build", prompt)
         self.assertIn("Make a 15 second product video", prompt)
+
+    def test_plain_greeting_uses_agent_routing_without_forcing_video(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "你好", "idempotency_key": "greeting-1"},
+        )
+
+        self.assertEqual(created.status_code, 200, created.text)
+        run = created.json()["data"]
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertTrue(prompt.startswith("CUTI_AGENT_CHAT_V1\n"))
+        self.assertIn("must receive a normal direct answer", prompt)
+        self.assertIn("without calling any video_* tool", prompt)
+        self.assertNotIn("Start the build in this turn", prompt)
+        self.assertEqual(asyncio.run(self.runtime.repo.list_builds(run["project_id"])), [])
+
+        snapshot = self.client.get(
+            f"/chat-v1/service/v2/runs/{run['id']}",
+        ).json()["data"]
+        self.assertEqual(snapshot["messages"][0]["content"], "你好")
+        self.assertFalse(snapshot["run"]["automatic_video"])
+
+    def test_plain_follow_up_in_empty_draft_stays_agent_routed(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={"objective": "你好", "idempotency_key": "greeting-draft-1"},
+        ).json()["data"]
+
+        response = self.client.post(
+            f"/chat-v1/service/v2/runs/{created['id']}/messages",
+            json={"content": "你能做什么？", "idempotency_key": "greeting-follow-up-1"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertTrue(prompt.startswith("CUTI_AGENT_CHAT_V1\n"))
+        self.assertNotIn("Start the build in this turn", prompt)
+
+    def test_plain_message_in_existing_project_keeps_tool_choice_conditional(self) -> None:
+        created = self.client.post(
+            "/chat-v1/service/v2/runs",
+            json={
+                "objective": "Make a video",
+                "idempotency_key": "existing-chat-1",
+                "automatic_video": True,
+            },
+        ).json()["data"]
+        project = asyncio.run(self.runtime.repo.get_project(created["project_id"]))
+        build = Build(
+            project_id=created["project_id"],
+            plan_id="existing-plan",
+            base_project_version_id=project.current_version_id,
+            idempotency_key="existing-build",
+            status="completed",
+        )
+        self.runtime.repo.builds[build.id] = build
+
+        response = self.client.post(
+            f"/chat-v1/service/v2/runs/{created['id']}/messages",
+            json={"content": "你好", "idempotency_key": "existing-chat-2"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        prompt = self.deepseek.prompts[-1][1]
+        self.assertTrue(prompt.startswith('CUTI_AGENT_CHAT_V1\nVISIBLE_USER_REQUEST_JSON: "你好"'))
+        self.assertIn("If it does not, answer directly", prompt)
+        self.assertNotIn("the user's edit request authorizes", prompt)
+
+    def test_saved_workflow_does_not_force_a_greeting_into_production(self) -> None:
+        run = self.client.post('/chat-v1/service/v2/runs', json={
+            'objective': 'A fox film', 'workflow_id': 'seedance2', 'idempotency_key': 'saved-workflow',
+        }).json()['data']
+        response = self.client.post(f"/chat-v1/service/v2/runs/{run['id']}/messages", json={
+            'content': 'Hello', 'idempotency_key': 'saved-workflow-chat',
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(self.deepseek.prompts[-1][1].startswith('CUTI_AGENT_CHAT_V1\n'))
+        self.assertFalse(response.json()['data']['automatic_video'])
+
+    def test_followups_keep_session_history_and_persist_changed_options(self) -> None:
+        run = self.client.post('/chat-v1/service/v2/runs', json={
+            'objective': 'Remember the blue fox', 'thread_id': 'fixed-thread',
+            'idempotency_key': 'multi-1',
+        }).json()['data']
+        url = f"/chat-v1/service/v2/runs/{run['id']}"
+        for index, content in enumerate(['What character did I name?', 'Continue with that character']):
+            response = self.client.post(url + '/messages', json={
+                'content': content, 'thread_id': 'fixed-thread',
+                'idempotency_key': f'multi-{index + 2}', 'user_option': {'duration': 24},
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+        snapshot = self.client.get(url).json()['data']
+        self.assertEqual(self.deepseek.session_count, 1)
+        self.assertEqual({item[0] for item in self.deepseek.prompts}, {'fixed-thread'})
+        self.assertEqual([item['content'] for item in snapshot['messages'] if item['role'] == 'user'], [
+            'Remember the blue fox', 'What character did I name?', 'Continue with that character',
+        ])
+        self.assertEqual(snapshot['last_event_sequence'], 15)
+        self.assertEqual(snapshot['run']['user_option']['duration'], 24)
+        mismatch = self.client.post(url + '/messages', json={
+            'content': 'continue', 'thread_id': 'wrong-thread', 'idempotency_key': 'wrong',
+        })
+        self.assertEqual(mismatch.status_code, 409)
+        self.assertEqual(len(self.deepseek.prompts), 3)
+
+    def test_followup_logs_existing_checkpoint_and_artifact_references(self) -> None:
+        run = self.client.post('/chat-v1/service/v2/runs', json={
+            'objective': 'A blue fox film', 'idempotency_key': 'checkpoint-context',
+        }).json()['data']
+        project = asyncio.run(self.runtime.repo.get_project(run['id']))
+        build = Build(project_id=project.id, plan_id='plan-1',
+                      base_project_version_id=project.current_version_id,
+                      idempotency_key='build-1', status='waiting_agent')
+        self.runtime.repo.builds[build.id] = build
+        checkpoint = PlanCheckpoint(
+            project_id=project.id, build_id=build.id, plan_id=build.plan_id,
+            workflow_id='seedance2', session_id=run['thread_id'], user_id='local-user',
+            phase='reference', next_phase='video', base_plan_revision=1, base_spec_revision=1,
+            artifact_version_ids=['blue-fox-reference-v1'],
+        )
+        self.runtime.repo.checkpoints[checkpoint.id] = checkpoint
+        self.runtime.repo.build_checkpoints[build.id].append(checkpoint.id)
+        response = self.client.post(f"/chat-v1/service/v2/runs/{run['id']}/messages", json={
+            'content': 'Continue with that character', 'idempotency_key': 'checkpoint-followup',
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        session_id, prompt = self.deepseek.prompts[-1]
+        payload = json.loads(prompt.splitlines()[-1])
+        self.assertEqual(session_id, run['thread_id'])
+        self.assertEqual(payload['thread_id'], session_id)
+        self.assertEqual(payload['latest_build']['id'], build.id)
+        self.assertEqual(payload['checkpoints'][0]['artifact_version_ids'], ['blue-fox-reference-v1'])
+        self.assertIn('conversation history, tool results', prompt)
 
     def test_zip_install_reloads_the_runtime_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -534,6 +681,23 @@ Keep the requested visual tone consistent.
             installed = next(item for item in catalog if item["name"] == "test-helper")
             self.assertEqual(installed["description"], "Test helper guidance")
             self.assertTrue(installed["installed_at"])
+
+    def test_failed_turn_exposes_provider_error_to_studio_notice(self) -> None:
+        message = "You have no credits remaining. Add credits to continue using the API."
+        for error, expected in [
+            ({"message": message, "code": "PI_AI_ERROR"}, message),
+            ("Connection timed out", "Connection timed out"),
+            ({}, "Model request failed"),
+        ]:
+            with self.subTest(error=error):
+                event = _compat_event("project-1", {
+                    "type": "turn/end", "seq": 14, "time": 1004,
+                    "data": {"turn": 1, "reason": {"kind": "error", "error": error}},
+                })
+                self.assertEqual(event["type"], "run.failed")
+                self.assertEqual(event["payload"]["error"], expected)
+                if isinstance(error, dict):
+                    self.assertEqual(event["payload"]["error_code"], error.get("code"))
 
     def test_compat_events_match_reducer_contract_and_stream_text(self) -> None:
         message = _compat_event("project-1", {
